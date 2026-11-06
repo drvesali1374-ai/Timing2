@@ -36,7 +36,7 @@ export default function ChartsView({ projectId }: { projectId: string }) {
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <Tabs value={chartType} onValueChange={(v) => setChartType(v as ChartTypeValue)}>
+          <Tabs value={chartType} onValueChange={(v) => setChartType(v as ChartTypeValue)} dir="rtl">
             <TabsList className="grid w-full max-w-md grid-cols-2">
               <TabsTrigger value="OPC">OPC — عملیات و بازرسی</TabsTrigger>
               <TabsTrigger value="FPC">FPC — جریان کامل</TabsTrigger>

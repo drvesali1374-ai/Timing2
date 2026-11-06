@@ -230,7 +230,7 @@ export default function WestinghouseView({ projectId }: { projectId: string }) {
         </div>
       </div>
 
-      <Tabs value={tab} onValueChange={(v) => setTab(v as 'assess' | 'tables')}>
+      <Tabs value={tab} onValueChange={(v) => setTab(v as 'assess' | 'tables')} dir="rtl">
         <TabsList>
           <TabsTrigger value="assess">ارزیابی عناصر</TabsTrigger>
           <TabsTrigger value="tables">جدول‌های مرجع</TabsTrigger>

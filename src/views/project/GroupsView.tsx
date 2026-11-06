@@ -281,7 +281,7 @@ export default function GroupsView({ projectId }: { projectId: string }) {
         </div>
       </div>
 
-      <Tabs value={tab} onValueChange={(v) => setTab(v as 'groups' | 'categories')}>
+      <Tabs value={tab} onValueChange={(v) => setTab(v as 'groups' | 'categories')} dir="rtl">
         <TabsList>
           <TabsTrigger value="groups">گروه‌های فعالیت</TabsTrigger>
           <TabsTrigger value="categories">دسته‌های مجاز</TabsTrigger>

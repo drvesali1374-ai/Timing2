@@ -396,7 +396,7 @@ function ActivityScreen({ projectId, activityId }: { projectId: string; activity
       </header>
 
       {/* زبانه‌های چهارگانه — FR-03 */}
-      <Tabs value={tab} onValueChange={(v) => setTab(v as TabKey)} className="gap-4">
+      <Tabs value={tab} onValueChange={(v) => setTab(v as TabKey)} dir="rtl" className="gap-4">
         <TabsList className="scroll-slim sticky top-14 z-30 flex h-auto w-full justify-start gap-1 overflow-x-auto rounded-xl border border-border/60 bg-background/95 p-1 shadow-sm backdrop-blur">
           <TabsTrigger value="info" className="shrink-0 gap-1.5 px-3 text-xs sm:px-4 sm:text-sm">
             <Info aria-hidden />
