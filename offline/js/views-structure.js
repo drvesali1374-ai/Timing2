@@ -74,13 +74,12 @@
   };
 
   // ═══════════ استایل‌های اختصاصی این نما (تزریق یک‌باره) ═══════════
+  // اندازه پایه آیکون‌ها اکنون در app.css (قرارداد سراسری svg.icon) است.
   function ensureStyle() {
     if (document.getElementById('t2-structure-v2-style')) return;
     var style = document.createElement('style');
     style.id = 't2-structure-v2-style';
     style.textContent = [
-      // پایه: آیکون‌های SVG خارج از دکمه/بج اندازه پیش‌فرض می‌گیرند
-      'svg.icon { width: 16px; height: 16px; flex-shrink: 0; }',
       // چیدمان دوستونه دسکتاپ (مکمل کلاس lg:flex-row که در app.css تعریف نشده)
       '@media (min-width: 1024px) {',
       '  .t2-two-col { flex-direction: row; }',
@@ -126,17 +125,17 @@
     }, U.icon('gripVertical'));
   }
 
-  /** دکمه‌های جابه‌جایی بالا/پایین (غیرفعال در ابتدا و انتهای فهرست) */
+  /** دکمه‌های جابه‌جایی بالا/پایین — فقط دسکتاپ (در موبایل درگ فعال است؛ هم‌ارز نسخه اصلی که فقط DnD دارد) */
   function upDownButtons(canUp, canDown, onUp, onDown) {
     return [
       U.h('button', {
-        class: 'icon-btn sm shrink-0', type: 'button',
+        class: 'icon-btn sm shrink-0 hidden sm:inline-flex', type: 'button',
         disabled: canUp ? null : true,
         'aria-label': 'جابه‌جایی بالا', title: 'جابه‌جایی بالا',
         onclick: function (e) { e.stopPropagation(); onUp(); },
       }, U.icon('chevronUp')),
       U.h('button', {
-        class: 'icon-btn sm shrink-0', type: 'button',
+        class: 'icon-btn sm shrink-0 hidden sm:inline-flex', type: 'button',
         disabled: canDown ? null : true,
         'aria-label': 'جابه‌جایی پایین', title: 'جابه‌جایی پایین',
         onclick: function (e) { e.stopPropagation(); onDown(); },
@@ -380,12 +379,23 @@
     }
 
     var row = U.h('div', { class: 'list-row' + (isSelected ? ' t2-row-selected' : ''), style: { position: 'relative' } },
-      numBadge(U.formatInt(index + 1), 'muted'),
-      U.icon('warehouse'),
-      U.h('span', { class: 'font-semibold text-sm flex-1 truncate', 'data-station-name': st.id, text: st.name }),
+      dragHandleEl(),
+      U.h('button', {
+        class: 'icon-btn sm shrink-0', type: 'button',
+        'aria-label': (isOpen ? 'بستن فعالیت‌های ' : 'باز کردن فعالیت‌های ') + st.name, title: isOpen ? 'بستن فعالیت‌ها' : 'باز کردن فعالیت‌ها',
+        onclick: function (e) { e.stopPropagation(); _stationOpen[st.id] = !isOpen; appRefresh(); },
+      }, U.icon('chevronDown', isOpen ? '' : 'rot-n90')),
+      U.h('button', {
+        type: 'button',
+        class: 'flex min-w-0 flex-1 items-center gap-2 text-right',
+        style: { padding: '8px 6px', border: 'none', background: 'transparent', cursor: 'pointer', color: 'inherit', fontFamily: 'inherit' },
+        'aria-current': isSelected ? 'true' : null,
+        onclick: function (e) { e.stopPropagation(); _selectedStation[ctx.projectId] = st.id; appRefresh(); },
+      },
+        U.h('span', { class: 'num text-xs text-faint shrink-0', style: { width: '16px', textAlign: 'center' }, text: U.formatInt(index + 1) }),
+        U.h('span', { class: 'shrink-0 text-brand' }, U.icon('warehouse')),
+        U.h('span', { class: 'font-bold text-sm truncate', 'data-station-name': st.id, text: st.name })),
       numBadge(U.formatInt(acts.length) + ' فعالیت', 'muted'),
-      spacer(),
-      upDownButtons(index > 0, index < stations.length - 1, function () { move(-1); }, function () { move(1); }),
       U.h('button', {
         class: 'icon-btn sm shrink-0', type: 'button',
         'aria-label': 'ویرایش ایستگاه ' + st.name, title: 'ویرایش ایستگاه',
@@ -395,8 +405,7 @@
         class: 'icon-btn sm danger shrink-0', type: 'button',
         'aria-label': 'حذف ایستگاه ' + st.name, title: 'حذف ایستگاه',
         onclick: function (e) { e.stopPropagation(); confirmDeleteStation(st, ctx); },
-      }, U.icon('trash')),
-      dragHandleEl());
+      }, U.icon('trash')));
 
     // کلیک روی ردیف (نه دکمه‌ها) → انتخاب ایستگاه + باز/بسته شدن فهرست فعالیت‌ها
     row.addEventListener('click', function (e) {
@@ -450,17 +459,19 @@
     }
 
     var row = U.h('div', { class: 'list-row', style: { position: 'relative', padding: '6px 8px' } },
-      symbolTile(a.processType, 'نوع رویداد فرایندی: ' + label),
-      U.h('span', { class: 'text-sm font-medium flex-1 truncate', text: a.name }),
-      group ? U.h('span', { class: 'badge cyan shrink-0 truncate', title: 'گروه مجازها: ' + group.name, style: { maxWidth: '96px' }, text: group.name }) : null,
-      U.h('span', { class: 'text-xs text-faint num shrink-0', text: U.formatInt(elsCount) + ' عنصر' }),
-      spacer(),
-      upDownButtons(index > 0, index < acts.length - 1, function () { move(-1); }, function () { move(1); }),
+      dragHandleEl(),
       U.h('button', {
-        class: 'icon-btn sm brand shrink-0', type: 'button',
-        'aria-label': 'باز کردن صفحه فعالیت ' + a.name, title: 'باز کردن صفحه فعالیت',
+        type: 'button',
+        class: 'flex min-w-0 flex-1 items-center gap-2 text-right',
+        style: { padding: '6px 8px', border: 'none', background: 'transparent', cursor: 'pointer', color: 'inherit', fontFamily: 'inherit' },
+        'aria-label': 'باز کردن صفحه فعالیت ' + a.name,
         onclick: function (e) { e.stopPropagation(); appNavigate('/p/' + ctx.projectId + '/activity/' + a.id); },
-      }, U.icon('arrowLeft')),
+      },
+        U.h('span', { class: 'num text-xs text-faint shrink-0', style: { width: '14px', textAlign: 'center' }, text: U.formatInt(index + 1) }),
+        symbolTile(a.processType, 'نوع رویداد فرایندی: ' + label),
+        U.h('span', { class: 'text-sm font-medium flex-1 truncate', text: a.name }),
+        group ? U.h('span', { class: 'badge cyan shrink-0 truncate', title: 'گروه مجازها: ' + group.name, style: { maxWidth: '96px' }, text: group.name }) : null,
+        U.h('span', { class: 'text-xs text-faint num shrink-0', text: U.formatInt(elsCount) + ' عنصر' })),
       U.h('button', {
         class: 'icon-btn sm shrink-0', type: 'button',
         'aria-label': 'ویرایش فعالیت ' + a.name, title: 'ویرایش فعالیت',
@@ -470,8 +481,7 @@
         class: 'icon-btn sm danger shrink-0', type: 'button',
         'aria-label': 'حذف فعالیت ' + a.name, title: 'حذف فعالیت',
         onclick: function (e) { e.stopPropagation(); confirmDeleteActivity(a, ctx, false); },
-      }, U.icon('trash')),
-      dragHandleEl());
+      }, U.icon('trash')));
 
     makeSortable(row, 'activity', a.id, station.id, function (fromId, toId) {
       var ids = acts.map(function (x) { return x.id; });

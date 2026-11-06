@@ -1,8 +1,11 @@
-/* تست headless کامل هسته آفلاین — اجرا با bun */
+/* تست headless کامل هسته آفلاین — اجرا با bun
+   مسیرها نسبی و قابل حمل‌اند (مستقل از محل کلون مخزن) */
+// متغیر محیطی تست: بدون ذخیره‌سازی مرورگر
 globalThis.localStorage = undefined;
-await import('/home/z/my-project/offline/js/utils.js');
-await import('/home/z/my-project/offline/js/formulas.js');
-await import('/home/z/my-project/offline/js/db.js');
+await import(new URL('../offline/js/utils.js', import.meta.url).href);
+await import(new URL('../offline/js/formulas.js', import.meta.url).href);
+await import(new URL('../offline/js/db.js', import.meta.url).href);
+await import(new URL('../offline/js/datepicker.js', import.meta.url).href);
 
 const U = globalThis.T2U, F = globalThis.T2F, DB = globalThis.T2DB;
 let pass = 0, fail = 0;
@@ -44,6 +47,23 @@ for (let jy = 1300; jy <= 1500; jy += 1) {
 }
 ok(jFail === 0, 'jalali roundtrip (900+ cases)');
 ok(U.jalaliToISO(1404, 8, 13) === '2025-11-04', 'jalaliToISO(1404,8,13) = 2025-11-04');
+
+// ═══ ۲ب) روز هفتهٔ جلالی — مبنای شبکهٔ تقویم DatePicker (۰=شنبه) ═══
+const WD = globalThis.T2DATE.weekDay;
+ok(typeof WD === 'function', 'datepicker module exports weekDay');
+ok(WD(1404, 8, 13) === 3, 'weekday(1404,8,13) = سه‌شنبه (2025-11-04)');
+ok(WD(1404, 1, 1) === 6, 'weekday(1404,1,1) = جمعه (نوروز ۲۰۲۵)');
+ok(WD(1403, 12, 29) === 4, 'weekday(1403,12,29) = پنج‌شنبه (2025-03-20)');
+let wdFail = 0;
+for (let jy = 1390; jy <= 1410; jy += 1) {
+  for (let jm = 1; jm <= 12; jm += 1) {
+    const len = U.jalCalMonthLength(jy, jm);
+    if (WD(jy, jm, 1) < 0 || WD(jy, jm, 1) > 6) wdFail++;
+    if ((WD(jy, jm, 1) + len - 1) % 7 !== WD(jy, jm, len)) wdFail++;
+    if (WD(jy, jm, 2) !== (WD(jy, jm, 1) + 1) % 7) wdFail++;
+  }
+}
+ok(wdFail === 0, 'weekday grid consistency (21 years × 12 months)');
 
 // ═══ ۳) لایه داده — seed دمو ═══
 const p = DB.seedDemo();

@@ -24,15 +24,6 @@
     example: 'P-1042',
   };
 
-  // ── استایل پایه آیکون‌ها (تزریق یک‌باره) ──
-  function ensureStyle() {
-    if (document.getElementById('t2-operators-v2-style')) return;
-    var style = document.createElement('style');
-    style.id = 't2-operators-v2-style';
-    style.textContent = 'svg.icon { width: 16px; height: 16px; flex-shrink: 0; }';
-    document.head.appendChild(style);
-  }
-
   // ── کمکی‌ها ──
   function sessionsCount(operatorId) {
     return DB.getState().studySessions.filter(function (s) { return s.operatorId === operatorId; }).length;
@@ -55,7 +46,6 @@
 
   // ═══════════ نمای اصلی ═══════════
   g.T2VIEWS.operators = function (container, projectId) {
-    ensureStyle();
     U.clear(container);
     var project = DB.getProject(projectId);
     if (!project) {

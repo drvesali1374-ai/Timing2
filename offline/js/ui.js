@@ -187,9 +187,9 @@
   function emptyState(opts) {
     return U.h('div', { class: 'empty-state' },
       U.h('div', { class: 'icon-wrap' }, U.icon(opts.icon || 'package')),
-      U.h('h3', { class: 'font-bold text-base mb-1', text: opts.title }),
-      opts.desc ? U.h('p', { class: 'text-sm text-muted max-w-xl mx-auto leading-relaxed', text: opts.desc }) : null,
-      opts.actionLabel ? U.h('button', { class: 'btn btn-brand mt-4', onclick: opts.onAction }, U.icon('plus'), opts.actionLabel) : null);
+      U.h('h3', { class: 'font-bold', text: opts.title }),
+      opts.desc ? U.h('p', { class: 'text-sm text-muted leading-relaxed', style: { maxWidth: '384px' }, text: opts.desc }) : null,
+      opts.actionLabel ? U.h('button', { class: 'btn btn-brand', onclick: opts.onAction }, U.icon('plus'), opts.actionLabel) : null);
   }
 
   // ── Tabs ──
@@ -350,25 +350,28 @@
     return card;
   }
 
-  // ── ProjectStatusBadge ──
+  // ── ProjectStatusBadge — رنگ/آیکون عیناً از StatusBadge.tsx ──
   function projectStatusBadge(status) {
     var map = {
-      DRAFT: { label: 'پیش‌نویس', variant: 'muted' },
-      IN_PROGRESS: { label: 'در حال انجام', variant: 'brand' },
-      FINALIZED: { label: 'نهایی‌شده', variant: 'green' },
+      DRAFT: { label: 'پیش‌نویس', variant: 'muted', icon: 'circleDashed' },
+      IN_PROGRESS: { label: 'در حال انجام', variant: 'cyan', icon: 'hourglass' },
+      FINALIZED: { label: 'نهایی‌شده', variant: 'green', icon: 'checkCircle' },
     };
-    var m = map[status] || map.DRAFT;
-    return badge(m.label, m.variant, status === 'FINALIZED' ? 'checkCircle' : null);
+    var m = map[status] || map.IN_PROGRESS;
+    return badge(m.label, m.variant, m.icon);
   }
+  // ── StageStatusBadge — رنگ/آیکون عیناً از StatusBadge.tsx ──
   function stageStatusBadge(status, label) {
     var map = {
-      PENDING: { variant: 'muted', icon: null },
-      IN_PROGRESS: { variant: 'amber', icon: null },
-      DONE: { variant: 'green', icon: 'check' },
-      NEEDS_REVIEW: { variant: 'red', icon: 'alertTriangle' },
+      PENDING: { variant: 'muted', icon: 'circle' },
+      IN_PROGRESS: { variant: 'cyan', icon: 'hourglass' },
+      DONE: { variant: 'green', icon: 'checkCircle' },
+      NEEDS_REVIEW: { variant: 'amber', icon: 'alertTriangle' },
+      FUTURE_PHASE: { variant: 'muted', icon: 'lock' },
     };
     var m = map[status] || map.PENDING;
-    return badge(label || '', m.variant, m.icon);
+    var text = status === 'FUTURE_PHASE' ? 'فاز بعدی' : (label || '');
+    return badge(text, m.variant, m.icon);
   }
 
   // ═══════════ چارت‌های SVG ═══════════

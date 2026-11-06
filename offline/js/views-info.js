@@ -36,7 +36,7 @@
     },
     studyDate: {
       what: 'تاریخ رسمی انجام مطالعه؛ در سربرگ گزارش‌های رسمی درج می‌شود.',
-      input: 'قالب ۱۴۰۴/۰۸/۱۳ را وارد کنید یا از دکمه «امروز» استفاده کنید.',
+      input: 'از تقویم شمسی انتخاب کنید یا قالب ۱۴۰۴/۰۸/۱۳ را دستی وارد کنید.',
       note: 'در پایگاه داده ISO میلادی ذخیره می‌شود؛ نمایش شمسی فقط لایه نمایش است.',
     },
     description: {
@@ -64,14 +64,6 @@
         U.h('div', { text: 'ماژول مشترک عملیات پروژه (views-home.js) بارگذاری نشده است.' })));
       return;
     }
-    // دور زدن باگ ui.js (پاپ‌اور helpDot هنگام ساخت visible است) — در views-home.js مستند شده
-    if (!document.getElementById('t2-helpdot-fix')) {
-      var style = document.createElement('style');
-      style.id = 't2-helpdot-fix';
-      style.textContent = '.helpdot-pop{display:none}';
-      document.head.appendChild(style);
-    }
-
     var project = DB.getProject(projectId);
     if (!project) {
       container.appendChild(UI.emptyState({
@@ -101,7 +93,9 @@
     var savedClearTimer = null;
 
     var indicatorEl = U.h('div', { class: 'flex items-center gap-2' });
-    var footerEl = U.h('div', { class: 'num', text: '' });
+    var footerEl = U.h('div', { class: 'num mt-4 flex flex-wrap items-center justify-between gap-2 border-t pt-3' });
+    footerEl.style.fontSize = '11px';
+    footerEl.style.color = 'var(--faint)';
 
     function setIndicator() {
       U.clear(indicatorEl);
@@ -116,7 +110,9 @@
     }
 
     function updateMetaFooter() {
-      footerEl.textContent = 'ایجاد: ' + U.formatDateTime(project.createdAt) + ' · آخرین تغییر: ' + U.formatDateTime(project.updatedAt);
+      footerEl.textContent = '';
+      footerEl.appendChild(U.h('span', { text: 'ایجاد: ' + U.formatDateTime(project.createdAt) }));
+      footerEl.appendChild(U.h('span', { text: 'آخرین تغییر: ' + U.formatDateTime(project.updatedAt) }));
     }
 
     function doSave() {
@@ -198,7 +194,7 @@
         U.h('div', { class: 'flex items-center gap-3' },
           U.h('span', { class: 'chip-icon' }, U.icon('fileText')),
           U.h('div', null,
-            U.h('h2', { class: 'font-bold', text: 'مشخصات مطالعه' }),
+            U.h('h2', { class: 'font-extrabold', text: 'مشخصات مطالعه' }),
             U.h('p', { class: 'text-xs text-muted', text: 'تغییرات به‌صورت خودکار ذخیره می‌شوند.' }))),
         indicatorEl),
       U.h('div', { class: 'grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4' },
@@ -265,9 +261,9 @@
 
     page.appendChild(U.h('section', { class: 'card p-5', 'aria-label': 'تنظیمات محاسبات' },
       U.h('div', { class: 'flex items-center gap-3' },
-        U.h('span', { class: 'chip-icon cyan' }, U.icon('percent')),
+        U.h('span', { class: 'chip-icon cyan' }, U.icon('calculator')),
         U.h('div', null,
-          U.h('h2', { class: 'font-bold', text: 'تنظیمات محاسبات' }),
+          U.h('h2', { class: 'font-extrabold', text: 'تنظیمات محاسبات' }),
           U.h('p', { class: 'text-xs text-muted', text: 'روش اعمال مجازها و تجمیع چند اپراتور' }))),
       calcBodyEl));
 
@@ -328,11 +324,14 @@
       SH.requestDeleteProject(project, function () { APP.navigate('/'); });
     });
 
-    page.appendChild(U.h('section', { class: 'card p-5', 'aria-label': 'عملیات پروژه' },
+    page.appendChild(U.h('section', {
+      class: 'card p-5', 'aria-label': 'عملیات پروژه',
+      style: { borderColor: 'color-mix(in srgb, var(--red) 40%, var(--border))' },
+    },
       U.h('div', { class: 'flex items-center gap-3' },
-        U.h('span', { class: 'chip-icon red' }, U.icon('databaseBackup')),
+        U.h('span', { class: 'chip-icon red' }, U.icon('database')),
         U.h('div', null,
-          U.h('h2', { class: 'font-bold', text: 'عملیات پروژه' }),
+          U.h('h2', { class: 'font-extrabold', text: 'عملیات پروژه' }),
           U.h('p', { class: 'text-xs text-muted', text: 'کپی، خروجی بسته کامل و حذف دائمی' }))),
       U.h('div', { class: 'flex flex-col gap-2 mt-4' },
         operationRow('کپی پروژه', 'ساخت پروژه جدید از بخش‌های انتخابی این مطالعه؛ پیش‌فرض فقط ساختار و تنظیمات.', dupBtn),

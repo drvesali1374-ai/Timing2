@@ -1,5 +1,8 @@
 /* ═══════════════════════════════════════════════════════════
    برنامه اصلی — روتر و شل — نسخه آفلاین
+   هم‌ارز AppShell/TopBar/StageSidebar/HelpPanel/AppFooter
+   حالت اولیه: helpOpen = false و sidebarCollapsed = false
+   (مطابق src/store/app-store.ts)
    ═══════════════════════════════════════════════════════════ */
 (function (g) {
   'use strict';
@@ -29,32 +32,55 @@
   function toggleTheme() {
     var dark = document.documentElement.classList.contains('dark');
     applyTheme(dark ? 'light' : 'dark');
-    renderChrome();
+    renderChrome({ keepView: true });
   }
 
+  /* محتوای راهنمای مراحل — عیناً از HelpPanel.tsx (بدون مدخل data —
+     نسخه اصلی برای «داده و پشتیبان» متن جایگزین نشان می‌دهد) */
   var STAGE_GUIDES = {
     info: { steps: ['نام پروژه، خط تولید، محصول و تاریخ مطالعه را کامل کنید.', 'روش اعمال مجاز را انتخاب کنید: درصدی از زمان نرمال یا سهم از زمان استاندارد.', 'روش تجمیع چند اپراتور را در تنظیمات محاسبات مشخص کنید.'], next: 'سپس به «ساختار تولید» بروید و ایستگاه‌ها را ثبت کنید.' },
-    structure: { steps: ['ایستگاه‌های خط تولید را اضافه و با کشیدن‌ورها کردن مرتب کنید.', 'برای هر ایستگاه، فعالیت‌ها را با نوع فرایندی (عملیات/بازرسی/حمل‌ونقل/تأخیر/انبارش) ثبت کنید.', 'برای هر فعالیت، عناصر کاری را با نوع (دستی/ماشین/انتظار/هم‌زمان) تعریف کنید.', 'شناسه عناصر پایدار است؛ تغییر نام ارتباط تاریخی را از بین نمی‌برد.'], next: 'سپس اپراتورها را معرفی و گروه‌های مجاز را تعریف کنید.' },
-    operators: { steps: ['هر اپراتور را با نام نمایشی و کد داخلی ثبت کنید.', 'اپراتور در سطح پروژه تعریف می‌شود و در چند فعالیت شرکت می‌کند.', 'برگه زمان‌سنجی هر اپراتور برای هر فعالیت مستقل خواهد بود.'], next: 'سپس «گروه‌ها و مجازها» را تنظیم کنید.' },
+    structure: { steps: ['ایستگاه‌های خط تولید را اضافه و با Drag & Drop مرتب کنید.', 'برای هر ایستگاه، فعالیت‌ها را با نوع فرایندی (عملیات/بازرسی/حمل‌ونقل/تأخیر/انبارش) ثبت کنید.', 'برای هر فعالیت، عناصر کاری را با نوع (دستی/ماشین/انتظار/هم‌زمان) تعریف کنید.', 'شناسه عناصر پایدار است؛ تغییر نام ارتباط تاریخی را از بین نمی‌برد.'], next: 'سپس اپراتورها را معرفی و گروه‌های مجاز را تعریف کنید.' },
+    operators: { steps: ['هر اپراتور را با نام نمایشی و کد داخلی ثبت کنید.', 'اپراتور در سطح پروژه تعریف می‌شود و در چند فعالیت شرکت می‌کند.', 'برگه زمان‌سنجی هر اپراتور برای هر فعالیت مستقل خواهد بود (فاز ۳).'], next: 'سپس «گروه‌ها و مجازها» را تنظیم کنید.' },
     allowances: { steps: ['دسته‌های مجاز پروژه را تعریف کنید (مثلاً استراحت شخصی، نیازهای طبیعی، خستگی).', 'گروه‌های فعالیت بسازید و درصد هر دسته را در سطح گروه تعیین کنید.', 'فعالیت را به گروه تخصیص دهید؛ مقادیر به‌صورت ارث‌بری اعمال می‌شوند.', 'در صورت نیاز، هر دسته را در سطح فعالیت بازنویسی (Override) کنید.'], next: 'سپس ارزیابی وستینگهاوس عناصر را انجام دهید.' },
     westinghouse: { steps: ['جدول مرجع و منبع/نسخه آن را بازبینی کنید؛ جدول Seed صرفاً نقطه شروع است.', 'برای هر عنصر کاری، چهار عامل مهارت/تلاش/شرایط/یکنواختی را ارزیابی کنید.', 'ضریب R = ۱ + مجموع عوامل؛ برای هر عنصر یک‌بار ثبت و به همه مشاهدات همان عنصر اعمال می‌شود.', 'در صورت نیاز، ارزیابی را از عنصر مشابه کپی کنید.'], next: 'سپس در «زمان‌سنجی» جلسه بسازید و چرخه‌ها را ثبت کنید.' },
     timing: { steps: ['جلسه = فعالیت × اپراتور × روش کرنومتر؛ برای هر ترکیب جلسهٔ جدا بسازید.', 'روش را انتخاب کنید: برگشت به صفر (مقدار مستقل) یا پیوسته (قرائت تجمعی؛ تفاضل خودکار محاسبه می‌شود).', 'مقادیر را دستی وارد یا از Excel چندسلولی Paste کنید؛ پیش‌نمایش تطبیق ستون‌ها را ببینید.', 'برای عناصر هم‌زمان، در جزئیات چرخه بازهٔ مستقل (شروع/پایان) ثبت کنید؛ زمان سپری‌شده از گسترهٔ بازه‌ها به دست می‌آید نه جمع مدت‌ها.', 'خطای ورودی و دادهٔ مشکوک نمایش داده می‌شود؛ دادهٔ مشکوک فقط هشدار است و حذف نمی‌شود.'], next: 'سپس «تحلیل نتایج» را بازبینی کنید و مشکوک‌ها را تصمیم‌گیری کنید.' },
-    analysis: { steps: ['کارت‌های خلاصه را ببینید: پیشرفت نمونه، مشاهدات در محاسبات و نیازمند بازبینی.', 'برای هر عنصر، آمار کامل (میانگین، میانه، SD، CV و بازهٔ اطمینان) و OT/NT/ST را بازبینی کنید.', 'مشاهدات مشکوک را بررسی کنید: نگه‌داشتن (هشدار ≠ حذف) یا خروج با ثبت دلیل — دادهٔ خام همیشه حفظ می‌شود.', 'تغییر پارامتر مؤثر (ارزیابی، مجاز، روش) نتیجه را «نیازمند محاسبه مجدد» می‌کند؛ با دکمهٔ اجرای محاسبه نسخه جدید ثبت کنید.'], next: 'سپس «نمودار فرایند» را بازبینی و در پایان از «داشبورد» شاخص‌ها را ببینید.' },
+    analysis: { steps: ['کارت‌های خلاصه را ببینید: پیشرفت نمونه، مشاهدات در محاسبات و نیازمند بازبینی.', 'برای هر عنصر، آمار کامل (میانگین، میانه، SD، CV و بازهٔ اطمینان) و OT/NT/ST را بازبینی کنید.', 'مشاهدات مشکوک را بررسی کنید: نگه‌داشتن (هشدار ≠ حذف) یا خروج با ثبت دلیل — دادهٔ خام همیشه حفظ می‌شود.', 'تغییر پارامتر مؤثر (ارزیابی، مجاز، روش) نتیجه را «نیازمند محاسبهٔ مجدد» می‌کند؛ با دکمهٔ اجرای محاسبه نسخهٔ جدید ثبت کنید.'], next: 'سپس «نمودار فرایند» را بازبینی و در پایان از «داشبورد» شاخص‌ها را ببینید.' },
     charts: { steps: ['با بازکردن این مرحله، گره‌ها خودکار از فعالیت‌ها ساخته می‌شوند (OPC: عملیات/بازرسی؛ FPC: هر پنج نوع).', 'توالی را با اتصال گره‌ها یا دکمه‌های ترتیب بالا/پایین کامل کنید.', 'گرهٔ دستی اضافی (مثلاً کنترل کیفیت) را در صورت نیاز اضافه کنید.', 'با درگ، چیدمان را شخصی کنید؛ مختصات ذخیره می‌شود و چیدمان خودکار جای آن را نمی‌گیرد.'], next: 'سپس «داشبورد» را برای شاخص‌های کلان و «گزارش‌ها» را برای خروجی باز کنید.' },
     dashboard: { steps: ['ابتدا کارت‌های خلاصه: زمان استاندارد (در صورت قابل محاسبه بودن)، میانگین چرخه، تعداد نمونه و وضعیت هدف.', 'اگر داده کافی نباشد، کارت علت را نشان می‌دهد — هرگز صفر یا مقدار ساختگی نمی‌بینید.', 'نمودارهای تخصصی را در بخش‌های بازشونده ببینید: مقایسهٔ فعالیت‌ها، توزیع وضعیت، اپراتورها و پراکندگی.', 'از «شخصی‌سازی»، کارت‌ها و نمودارها را مرتب یا مخفی کنید؛ چیدمان ذخیره می‌شود.', 'بخش «نیازهای بازبینی» موارد باقی‌مانده را با میان‌بر اقدام نشان می‌دهد.'], next: 'در پایان، گزارش رسمی را از «گزارش‌ها» تهیه و نهایی‌سازی کنید.' },
-    reports: { steps: ['نوع گزارش Excel را انتخاب کنید: نگاه کل، خلاصه محاسبات، مقایسه اپراتورها یا داده‌های خام.', 'با فیلتر فعالیت/اپراتور، خروجی را محدود کنید؛ فیلتر هم روی Excel و هم گزارش رسمی اعمال می‌شود.', 'گزارش رسمی (پیش‌نمایش کاغذ A4) شامل فرمول‌ها، روش کرنومتر، وستینگهاوس، مجازها و داده‌های خارج‌شده است.', 'با «چاپ / ذخیره PDF» از پنجرهٔ چاپ مرورگر، PDF بومی و کاملاً آفلاین بسازید.', 'گزارش، نتیجهٔ نیازمند بازبینی را استاندارد قطعی معرفی نمی‌کند و موارد بازبینی را فهرست می‌کند.'], next: 'با اطمینان از داده‌ها، مطالعه را از «مشخصات پروژه» نهایی کنید (ویرایش باز می‌ماند).' },
-    data: { steps: ['پشتیبان‌گیری خودکار را فعال کنید؛ نسخه‌ها در حافطهٔ همین مرورگر می‌مانند.', 'برای نگهداری بلندمدت، نسخهٔ پشتیبان را به‌صورت فایل دانلود کنید.', 'بستهٔ کامل پروژه را برای انتقال به سیستم دیگر خروجی بگیرید.', 'تاریخچهٔ تغییرات، رویدادهای مهم را با جزئیات نشان می‌دهد.'], next: 'نسخهٔ پشتیبان فایل، تنها راه انتقال داده بین مرورگرها/سیستم‌ها است.' },
+    reports: { steps: ['نوع گزارش Excel را انتخاب کنید: نگاه کل، خلاصهٔ محاسبات، مقایسهٔ اپراتورها یا داده‌های خام.', 'با فیلتر فعالیت/اپراتور، خروجی را محدود کنید؛ فیلتر هم روی Excel و هم گزارش رسمی اعمال می‌شود.', 'گزارش رسمی (پیش‌نمایش کاغذ A4) شامل فرمول‌ها، روش کرنومتر، وستینگهاوس، مجازها و داده‌های خارج‌شده است.', 'با «چاپ / ذخیره PDF» از پنجرهٔ چاپ مرورگر، PDF بومی و کاملاً آفلاین بسازید.', 'گزارش، نتیجهٔ نیازمند بازبینی را استاندارد قطعی معرفی نمی‌کند و موارد بازبینی را فهرست می‌کند.'], next: 'با اطمینان از داده‌ها، مطالعه را از «مشخصات پروژه» نهایی کنید (ویرایش باز می‌ماند).' },
   };
 
   var STAGE_ICONS = { info: 'settings2', structure: 'network', operators: 'users', allowances: 'percent', westinghouse: 'gauge', timing: 'timer', analysis: 'barChart', charts: 'workflow', dashboard: 'layoutDashboard', reports: 'fileText', data: 'databaseBackup' };
 
-  var helpOpen = true;
+  /* حالت اولیه مطابق app-store.ts */
+  var helpOpen = false;
+  var sidebarCollapsed = false;
 
-  function renderChrome() {
+  function toggleSidebar() {
+    sidebarCollapsed = !sidebarCollapsed;
+    renderChrome({ keepView: true });
+  }
+  function setHelpOpen(open) {
+    helpOpen = open;
+    renderChrome({ keepView: true });
+  }
+
+  function renderChrome(opts) {
+    opts = opts || {};
     var shell = U.$('#app-root');
+    var oldContainer = document.getElementById('view-container');
+    var hadContent = !!(oldContainer && oldContainer.firstChild);
     U.clear(shell);
     if (route.name === 'home') {
-      shell.appendChild(U.h('div', { id: 'view-container', class: 'animate-view-in' }));
+      /* خانه: هدر و فوتر خودش را در views-home می‌سازد؛ شل فقط فوتر استاندارد می‌دهد (معادل HomeView + AppFooter) */
+      var homeShell = U.h('div', { class: 'app-shell' },
+        U.h('div', { id: 'view-container', class: 'animate-view-in', style: { display: 'flex', flexDirection: 'column', flex: '1', minWidth: 0 } }),
+        buildAppFooter());
+      shell.appendChild(homeShell);
+      if (opts.keepView && hadContent) {
+        var freshHome = document.getElementById('view-container');
+        if (freshHome && freshHome !== oldContainer) freshHome.parentNode.replaceChild(oldContainer, freshHome);
+      }
       return;
     }
     var project = DB.getProject(route.projectId);
@@ -67,108 +93,237 @@
 
     var shellEl = U.h('div', { class: 'app-shell' });
 
+    /* ── نوار بالا — معادل TopBar.tsx ── */
+    var isDark = document.documentElement.classList.contains('dark');
     var topbar = U.h('header', { class: 'topbar no-print' },
-      U.h('button', { class: 'icon-btn md:hidden', 'aria-label': 'بازکردن منوی مراحل', onclick: openMobileMenu }, U.icon('moreVertical')),
-      U.h('button', { class: 'btn btn-ghost btn-sm', 'aria-label': 'بازگشت به فهرست پروژه‌ها', onclick: function () { navigate('/'); } }, U.icon('home'), U.h('span', { class: 'hidden sm:inline', text: 'پروژه‌ها' })),
-      U.h('div', { class: 'divider-v hidden md:block', style: { height: '22px', alignSelf: 'center' } }),
-      U.h('div', { class: 'min-w-0 flex-1' },
-        U.h('div', { class: 'flex items-center gap-2' },
-          U.h('span', { class: 'font-extrabold text-sm truncate', text: project.name }),
-          UI.projectStatusBadge(project.status)),
-        U.h('div', { class: 'text-xs text-faint truncate', text: project.lineName + ' · ' + project.productName })),
-      !summary.finalized && route.name === 'project' ? U.h('button', { class: 'btn btn-sm btn-green-outline', onclick: showFinalizeDialog }, U.icon('flag'), 'نهایی‌سازی') : null,
-      U.h('button', { class: 'icon-btn', 'aria-label': document.documentElement.classList.contains('dark') ? 'تم روشن' : 'تم تیره', onclick: toggleTheme }, U.icon(document.documentElement.classList.contains('dark') ? 'sun' : 'moon')),
-      U.h('button', { class: 'icon-btn', 'aria-label': 'تنظیمات نمایش', onclick: showDisplaySettings }, U.icon('settings')),
-      U.h('button', { class: 'icon-btn' + (helpOpen ? ' brand' : ''), 'aria-label': helpOpen ? 'بستن راهنمای مرحله' : 'نمایش راهنمای مرحله', onclick: function () { helpOpen = !helpOpen; renderChrome(); renderView(); } }, U.icon('circleHelp'))
-    );
+      U.h('button', { class: 'icon-btn lg md:hidden', 'aria-label': 'بازکردن منوی مراحل', onclick: openMobileMenu }, U.icon('menu', 'i20')),
+      U.h('button', { class: 'btn btn-ghost btn-sm', 'aria-label': 'بازگشت به فهرست پروژه‌ها', onclick: function () { navigate('/'); } },
+        U.icon('home', 'i16'), U.h('span', { class: 'hidden sm:inline', text: 'پروژه‌ها' })),
+      U.h('div', { class: 'divider-v', 'aria-hidden': 'true', style: { height: '24px', alignSelf: 'center', margin: '0 4px' } }),
+      U.h('div', { class: 'flex min-w-0 flex-1 items-center gap-2' },
+        U.h('p', { class: 'truncate font-extrabold', style: { fontSize: '13px' }, text: project.name }),
+        U.h('span', { class: 'truncate hidden sm:inline', style: { fontSize: '12px', color: 'var(--muted-foreground)' }, text: project.lineName + ' · ' + project.productName }),
+        UI.projectStatusBadge(project.status)),
+      U.h('div', { class: 'flex items-center gap-0.5' },
+        !summary.finalized && route.name === 'project'
+          ? U.h('button', { class: 'btn btn-sm btn-green-outline hidden sm:inline-flex', onclick: showFinalizeDialog }, U.icon('flag'), 'نهایی‌سازی')
+          : null,
+        U.h('button', { class: 'icon-btn lg', 'aria-label': isDark ? 'تم روشن' : 'تم تیره', onclick: toggleTheme }, U.icon(isDark ? 'sun' : 'moon')),
+        U.h('button', { class: 'icon-btn lg', 'aria-label': 'تنظیمات نمایش', onclick: showDisplaySettings }, U.icon('settings')),
+        U.h('button', {
+          class: 'icon-btn lg' + (helpOpen ? ' on' : ''),
+          'aria-label': helpOpen ? 'بستن راهنمای مرحله' : 'نمایش راهنمای مرحله',
+          'aria-pressed': helpOpen ? 'true' : 'false',
+          onclick: function () { setHelpOpen(!helpOpen); },
+        }, U.icon('circleHelp'))));
 
-    var sidebar = U.h('aside', { class: 'sidebar no-print', 'aria-label': 'منوی پروژه' });
-    var stages = DB.CONST.STUDY_STAGES;
-    var nav = U.h('nav', { class: 'flex flex-col gap-1' });
-    nav.appendChild(U.h('div', { class: 'flex items-center gap-2 px-2 py-3 mb-1' },
-      U.h('span', { class: 'chip-icon' }, U.icon('timer')),
-      U.h('div', { class: 'sidebar-head-text' },
-        U.h('div', { class: 'font-bold text-sm', text: 'مراحل مطالعه' }),
-        U.h('div', { class: 'text-xs text-faint', text: 'جابه‌جایی آزاد بین مراحل' }))));
-    stages.forEach(function (st) {
-      var stageState = summary.stages[st.key] || { status: 'PENDING' };
-      var active = route.name === 'project' && route.stage === st.key;
-      nav.appendChild(U.h('a', {
-        class: 'nav-item' + (active ? ' active' : ''), href: '#/p/' + project.id + '/' + st.key,
-        'aria-current': active ? 'page' : null,
-      },
-        U.h('span', { class: 'stage-dot ' + stageState.status, title: DB.CONST.STAGE_STATUS_LABELS[stageState.status] }),
-        U.icon(STAGE_ICONS[st.key] || 'circleHelp'),
-        U.h('span', { class: 'sidebar-label' },
-          U.h('span', { class: 'block', text: st.label }),
-          U.h('span', { class: 'sidebar-desc block text-xs text-faint font-normal', text: st.desc }))));
-    });
-    nav.appendChild(U.h('div', { class: 'text-xs text-faint px-2 pt-4 pb-1 sidebar-label', text: 'ابزارها' }));
-    var dataActive = route.name === 'project' && route.stage === 'data';
-    nav.appendChild(U.h('a', { class: 'nav-item' + (dataActive ? ' active' : ''), href: '#/p/' + project.id + '/data' },
-      U.icon('databaseBackup'),
-      U.h('span', { class: 'sidebar-label' },
-        U.h('span', { class: 'block', text: 'داده و پشتیبان' }),
-        U.h('span', { class: 'sidebar-desc block text-xs text-faint font-normal', text: 'پشتیبان‌گیری، بازیابی، بسته پروژه و تاریخچه' }))));
-    sidebar.appendChild(nav);
+    /* ── سایدبار مراحل — معادل StageSidebar.tsx ── */
+    var sidebar = buildSidebar(project, summary);
 
-    var helpPanel = U.h('aside', { class: 'no-print', style: { width: '288px', flexShrink: 0 } });
-    if (helpOpen) {
-      var stageKey = route.name === 'activity' ? 'structure' : (route.stage || 'info');
-      var guide = STAGE_GUIDES[stageKey];
-      var stageLabel = route.name === 'activity' ? 'ساختار تولید' : ((DB.CONST.STUDY_STAGES.find(function (s) { return s.key === stageKey; }) || {}).label);
-      var stageState = summary.stages[stageKey] || { status: 'PENDING', hint: '' };
-      var panelInner = U.h('div', { class: 'card p-4 sticky', style: { top: '72px' } },
-        U.h('div', { class: 'flex items-center gap-2 mb-3' }, U.icon('lightbulb'), U.h('span', { class: 'font-bold text-sm', text: 'راهنمای مرحله' })),
-        U.h('div', { class: 'text-xs text-muted mb-1', text: stageLabel }),
-        U.h('div', { class: 'mb-3' }, U.h('div', { class: 'text-xs text-muted mb-1', text: 'وضعیت این مرحله:' }), UI.stageStatusBadge(stageState.status, DB.CONST.STAGE_STATUS_LABELS[stageState.status])),
-        guide ? U.h('ol', { class: 'list-none flex flex-col gap-2 text-xs leading-relaxed' },
-          guide.steps.map(function (s, i) { return U.h('li', { class: 'flex gap-2' }, U.h('span', { class: 'badge brand shrink-0', text: U.formatInt(i + 1) }), U.h('span', { text: s })); }),
-          U.h('li', { class: 'flex gap-2 bg-brand-soft rounded-md p-2 mt-1', style: { color: 'var(--accent-foreground)' } }, U.icon('arrowLeft'), U.h('span', { text: 'اقدام بعدی پیشنهادی: ' + guide.next }))) : null,
-        stageState.hint ? U.h('div', { class: 'text-xs text-muted mt-3 pt-3 border-t', text: stageState.hint }) : null,
-        U.h('button', { class: 'btn btn-ghost btn-sm w-full mt-3', onclick: function () { helpOpen = false; renderChrome(); renderView(); } }, 'جمع‌کردن پنل راهنما'));
-      helpPanel.appendChild(U.h('div', { class: 'hidden xl:block' }, panelInner));
-    } else {
-      helpPanel.appendChild(U.h('button', {
-        class: 'btn btn-outline btn-sm', style: { writingMode: 'vertical-rl', position: 'sticky', top: '72px', padding: '14px 6px' },
-        onclick: function () { helpOpen = true; renderChrome(); renderView(); },
-      }, 'راهنمای مرحله'));
-    }
+    /* ── پنل راهنما — معادل HelpPanel.tsx ── */
+    var helpPanel = buildHelpPanel(project, summary);
 
-    var footer = U.h('footer', { class: 'app-footer no-print' },
-      U.h('div', { class: 'flex items-center gap-2' },
-        U.h('span', { class: 'font-bold', text: 'زمان‌سنجی صنعتی' }),
-        U.h('span', { text: '·' }),
-        U.h('span', { text: 'نسخه اول — کامل (۷ فاز) — نسخه آفلاین ۱٫۰' })),
-      U.h('div', { class: 'flex items-center gap-3' },
-        U.h('span', { class: 'flex items-center gap-1', title: 'بدون هیچ درخواست خارجی در زمان اجرا' }, U.icon('wifiOff'), 'کارکرد کاملاً آفلاین'),
-        U.h('span', { class: 'flex items-center gap-1', title: 'داده‌ها در حافظهٔ همین مرورگر ذخیره می‌شوند' }, U.icon('shieldCheck'), 'داده محلی و امن')));
+    /* ── فوتر — معادل AppFooter.tsx ── */
+    var footer = buildAppFooter();
 
+    var newContainer = U.h('div', { id: 'view-container', class: 'animate-view-in' });
     var body = U.h('div', { class: 'shell-body' },
       sidebar,
-      U.h('main', { id: 'main-content', class: 'main-content scroll-slim' },
-        U.h('div', { id: 'view-container', class: 'animate-view-in' })),
-      U.h('div', { class: 'hidden lg:block' }, helpPanel));
+      U.h('main', { id: 'main-content', class: 'main-content scroll-slim' }, newContainer),
+      U.h('div', { class: 'hidden xl:block' }, helpPanel));
     shellEl.appendChild(topbar);
     shellEl.appendChild(body);
     shellEl.appendChild(footer);
     shell.appendChild(shellEl);
+
+    /* حفظ وضعیت نما (فرم/جدول/تمرکز) هنگام تغییرهای شل —
+       جمع/باز سایدبار، پنل راهنما و تم نباید محتوا را پاک کنند */
+    if (opts.keepView && hadContent) {
+      var fresh = document.getElementById('view-container');
+      if (fresh && fresh !== oldContainer) fresh.parentNode.replaceChild(oldContainer, fresh);
+    }
+  }
+
+  /* ═══════════ فوتر چسبان — معادل AppFooter.tsx ═══════════ */
+  function buildAppFooter() {
+    return U.h('footer', { class: 'app-footer no-print' },
+      U.h('div', { class: 'app-footer-inner' },
+        U.h('p', { class: 'flex items-center gap-1.5' },
+          U.h('span', { class: 'font-bold', style: { color: 'var(--muted-foreground)' }, text: 'زمان‌سنجی صنعتی' }),
+          U.h('span', { 'aria-hidden': 'true', text: '·' }),
+          U.h('span', { text: 'نسخه اول — کامل (۷ فاز)' })),
+        U.h('p', { class: 'flex items-center gap-3' },
+          U.h('span', { class: 'flex items-center gap-1', title: 'بدون هیچ درخواست خارجی در زمان اجرا' }, U.icon('wifiOff'), 'کارکرد کاملاً آفلاین'),
+          U.h('span', { class: 'flex items-center gap-1', title: 'داده‌ها روی دیسک محلی همین میزبان' }, U.icon('shieldCheck'), 'داده محلی و امن'))));
+  }
+
+  /* ═══════════ سایدبار — باز/جمع‌شونده (۲۶۸ ↔ ۶۴ پیکسل) ═══════════ */
+  function buildSidebar(project, summary) {
+    var sidebar = U.h('aside', {
+      class: 'sidebar no-print' + (sidebarCollapsed ? ' collapsed' : ''),
+      'aria-label': 'ناوبری مراحل',
+    });
+    var inner = U.h('div', { class: 'sidebar-inner' });
+
+    /* سربرگ جمع/باز — معادل بخش بالایی StageSidebar */
+    var toggleBtn = U.h('button', {
+      class: 'icon-btn md', type: 'button',
+      'aria-label': sidebarCollapsed ? 'بازکردن منو' : 'جمع‌کردن منو',
+      title: sidebarCollapsed ? 'بازکردن منو' : 'جمع‌کردن منو',
+      onclick: toggleSidebar,
+    }, U.icon('chevronLeft', sidebarCollapsed ? 'i16 flip-x' : 'i16'));
+    var topInner = U.h('div', { class: 'sidebar-top-inner' },
+      sidebarCollapsed ? null : U.h('span', { class: 'sidebar-top-label', text: 'منوی پروژه' }),
+      toggleBtn);
+    inner.appendChild(U.h('div', { class: 'sidebar-top' }, topInner));
+
+    if (sidebarCollapsed) {
+      /* حالت جمع‌شده: ستون آیکون‌ها — همه مراحل + ابزار داده قابل دسترس */
+      var minCol = U.h('div', { class: 'sidebar-min-col' });
+      Object.keys(STAGE_ICONS).forEach(function (key) {
+        var active = route.name === 'project' && route.stage === key;
+        minCol.appendChild(U.h('button', {
+          class: 'sidebar-min-btn' + (active ? ' active' : ''), type: 'button',
+          title: key, 'aria-label': key,
+          onclick: function () { navigate('/p/' + project.id + '/' + key); },
+        }, U.icon(STAGE_ICONS[key])));
+      });
+      inner.appendChild(minCol);
+    } else {
+      /* سربرگ محتوا — معادل StageSidebarContent */
+      inner.appendChild(U.h('div', { class: 'sidebar-head' },
+        U.h('span', { class: 'chip-icon' }, U.icon('timer')),
+        U.h('div', { class: 'min-w-0' },
+          U.h('p', { class: 'truncate font-extrabold', style: { fontSize: '13px' }, text: 'مراحل مطالعه' }),
+          U.h('p', { class: 'truncate', style: { fontSize: '11px', color: 'var(--muted-foreground)' }, text: 'جابه‌جایی آزاد بین مراحل' }))));
+
+      var scroll = U.h('div', { class: 'sidebar-scroll scroll-slim' });
+      var stageList = U.h('ul', { class: 'list-none flex flex-col gap-1' });
+      DB.CONST.STUDY_STAGES.forEach(function (st) {
+        var stageState = summary.stages[st.key] || { status: 'PENDING' };
+        var active = route.name === 'project' && route.stage === st.key;
+        stageList.appendChild(U.h('li', null,
+          U.h('a', {
+            class: 'nav-item' + (active ? ' active' : ''),
+            href: '#/p/' + project.id + '/' + st.key,
+            'aria-current': active ? 'page' : null,
+            title: st.desc,
+          },
+            U.h('span', { class: 'stage-dot ' + stageState.status, title: DB.CONST.STAGE_STATUS_LABELS[stageState.status] }),
+            U.icon(STAGE_ICONS[st.key] || 'circleHelp'),
+            U.h('span', { class: 'nav-label', text: st.label }),
+            stageState.status === 'FUTURE_PHASE' && stageState.phase
+              ? U.h('span', { class: 'badge muted num', text: 'فاز ' + U.formatInt(stageState.phase) })
+              : null)));
+      });
+      scroll.appendChild(stageList);
+
+      var tools = U.h('div', null,
+        U.h('p', { class: 'nav-group-label', text: 'ابزارها' }),
+        U.h('ul', { class: 'list-none flex flex-col gap-1' },
+          U.h('li', null,
+            U.h('a', {
+              class: 'nav-item' + (route.name === 'project' && route.stage === 'data' ? ' active' : ''),
+              href: '#/p/' + project.id + '/data',
+              title: 'پشتیبان‌گیری، بازیابی، بسته پروژه و تاریخچه',
+            },
+              U.h('span', { class: 'nav-dot-spacer' }),
+              U.icon('databaseBackup'),
+              U.h('span', { class: 'nav-label', text: 'داده و پشتیبان' })))));
+      scroll.appendChild(tools);
+      inner.appendChild(scroll);
+    }
+
+    sidebar.appendChild(inner);
+    return sidebar;
+  }
+
+  /* ═══════════ پنل راهنمای مرحله ═══════════ */
+  function buildHelpPanel(project, summary) {
+    var stageKey = route.name === 'activity' ? 'structure' : (route.stage || 'info');
+    var guide = STAGE_GUIDES[stageKey];
+    var stageMeta = null;
+    DB.CONST.STUDY_STAGES.forEach(function (s) { if (s.key === stageKey) stageMeta = s; });
+    var stageState = summary.stages[stageKey] || { status: 'PENDING', hint: '' };
+
+    if (!helpOpen) {
+      /* کنترل باریک لبه صفحه — آیکون لامپ + عنوان عمودی (معادل HelpPanel بسته) */
+      return U.h('div', { class: 'help-edge-col no-print' },
+        U.h('button', {
+          class: 'help-edge-btn', type: 'button',
+          'aria-label': 'نمایش راهنمای مرحله',
+          onclick: function () { setHelpOpen(true); },
+        },
+          U.icon('lightbulb'),
+          U.h('span', { class: 'help-edge-text', text: 'راهنمای مرحله' })));
+    }
+
+    var aside = U.h('aside', { class: 'help-panel scroll-slim no-print', 'aria-label': 'راهنمای مرحله' });
+
+    /* سربرگ: آیکون + عنوان + دکمه بستن */
+    aside.appendChild(U.h('div', { class: 'flex items-center justify-between mb-3' },
+      U.h('div', { class: 'flex items-center gap-2' },
+        U.h('span', { class: 'hp-head-chip' }, U.icon('listChecks')),
+        U.h('div', null,
+          U.h('p', { class: 'font-extrabold', style: { fontSize: '13px' }, text: 'راهنمای مرحله' }),
+          U.h('p', { style: { fontSize: '11px', color: 'var(--muted-foreground)' }, text: stageMeta ? stageMeta.label : '' }))),
+      U.h('button', {
+        class: 'icon-btn md', type: 'button', 'aria-label': 'جمع‌کردن راهنما',
+        onclick: function () { setHelpOpen(false); },
+      }, U.icon('x'))));
+
+    /* وضعیت این مرحله */
+    if (stageState && stageState.status !== 'FUTURE_PHASE') {
+      aside.appendChild(U.h('div', { class: 'card p-3 mb-3' },
+        U.h('p', { class: 'flex items-center gap-1.5 mb-1', style: { fontSize: '11px', fontWeight: 700, color: 'var(--muted-foreground)' } },
+          'وضعیت این مرحله:',
+          UI.stageStatusBadge(stageState.status, DB.CONST.STAGE_STATUS_LABELS[stageState.status])),
+        U.h('p', { style: { fontSize: '12px', lineHeight: 1.8, color: 'var(--muted-foreground)' }, text: stageState.hint || '' })));
+    }
+
+    /* مراحل راهنما + اقدام بعدی */
+    if (guide) {
+      var ol = U.h('ol', { class: 'list-none flex flex-col gap-2' });
+      guide.steps.forEach(function (s, i) {
+        ol.appendChild(U.h('li', { class: 'hp-step' },
+          U.h('span', { class: 'hp-step-num num', text: U.formatInt(i + 1) }),
+          U.h('span', { text: s })));
+      });
+      ol.appendChild(U.h('li', { class: 'hp-next' },
+        U.h('b', { style: { color: 'var(--accent-foreground)' }, text: 'اقدام بعدی پیشنهادی: ' }),
+        U.h('span', { style: { color: 'var(--muted-foreground)' }, text: guide.next })));
+      aside.appendChild(ol);
+    } else {
+      aside.appendChild(U.h('p', {
+        class: 'card p-3', style: { fontSize: '12px', lineHeight: 1.8, color: 'var(--muted-foreground)' },
+        text: 'راهنمای اختصاصی این بخش در فاز مربوط به آن تکمیل می‌شود. برای فیلدهای موجود، از آیکون راهنمای کنار هر فیلد استفاده کنید.',
+      }));
+    }
+
+    /* دکمه جمع‌کردن */
+    aside.appendChild(U.h('button', {
+      class: 'hp-collapse-btn', type: 'button',
+      onclick: function () { setHelpOpen(false); },
+    }, U.icon('chevronLeft'), 'جمع‌کردن پنل راهنما'));
+
+    return aside;
   }
 
   function openMobileMenu() {
     var project = DB.getProject(route.projectId);
     if (!project) return;
     var summary = DB.getProjectSummary(project.id);
-    var panel = U.h('div', { class: 'sheet-panel flex flex-col gap-1' });
+    var panel = U.h('div', { class: 'flex flex-col gap-1' });
     DB.CONST.STUDY_STAGES.forEach(function (st) {
       var stageState = summary.stages[st.key] || { status: 'PENDING' };
       panel.appendChild(U.h('a', {
         class: 'nav-item' + (route.stage === st.key ? ' active' : ''), href: '#/p/' + project.id + '/' + st.key,
         onclick: function () { close(); },
-      }, U.h('span', { class: 'stage-dot ' + stageState.status }), U.icon(STAGE_ICONS[st.key] || 'circleHelp'), U.h('span', { text: st.label })));
+      }, U.h('span', { class: 'stage-dot ' + stageState.status }), U.icon(STAGE_ICONS[st.key] || 'circleHelp'), U.h('span', { class: 'nav-label', text: st.label })));
     });
     panel.appendChild(U.h('div', { class: 'dd-sep' }));
-    panel.appendChild(U.h('a', { class: 'nav-item' + (route.stage === 'data' ? ' active' : ''), href: '#/p/' + project.id + '/data', onclick: function () { close(); } }, U.icon('databaseBackup'), 'داده و پشتیبان'));
+    panel.appendChild(U.h('a', { class: 'nav-item' + (route.stage === 'data' ? ' active' : ''), href: '#/p/' + project.id + '/data', onclick: function () { close(); } },
+      U.h('span', { class: 'nav-dot-spacer' }), U.icon('databaseBackup'), U.h('span', { class: 'nav-label', text: 'داده و پشتیبان' })));
     var root;
     function close() { if (root.parentNode) root.parentNode.removeChild(root); }
     root = U.h('div', { class: 'mobile-menu-sheet no-print' },
@@ -205,7 +360,8 @@
                 DB.finalizeProject(project.id, reason);
                 close();
                 UI.toast('مطالعه «' + project.name + '» نهایی شد. ویرایش همچنان باز است.');
-                renderChrome(); renderView();
+                renderChrome({ keepView: true });
+                if (route.stage === 'info') renderView();
               } catch (err) { UI.toastError(err); }
             },
           }));
@@ -248,7 +404,8 @@
               DB.setDisplayPrefs({ calendar: calendar, digits: digits, decimals: decimals });
               close();
               UI.toast('تنظیمات نمایش ذخیره شد.');
-              renderChrome(); renderView();
+              renderChrome();
+              renderView();
             },
           }));
       },
@@ -296,8 +453,9 @@
   }
 
   g.addEventListener('hashchange', function () {
-    route = parseHash();
-    if (route.name === 'home') { renderChrome(); renderView(); return; }
+    var next = parseHash();
+    if (JSON.stringify(next) === JSON.stringify(route)) return; // همان مسیر — بدون رندر مجدد
+    route = next;
     renderChrome();
     renderView();
   });
@@ -306,7 +464,12 @@
     DB.autoBackupTick().catch(function () {});
   }, 60000);
 
-  g.T2APP = { navigate: navigate, refresh: function () { renderChrome(); renderView(); }, route: function () { return route; }, STAGE_GUIDES: STAGE_GUIDES };
+  g.T2APP = {
+    navigate: navigate,
+    refresh: function () { renderChrome(); renderView(); },
+    route: function () { return route; },
+    STAGE_GUIDES: STAGE_GUIDES,
+  };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
   else boot();
 })(typeof window !== 'undefined' ? window : globalThis);

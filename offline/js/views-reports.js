@@ -415,17 +415,17 @@
           class: 'pr-meta font-bold mt-2 mb-1',
           text: 'دسته‌های مجاز مؤثر (جمع A = ' + U.formatPercent(an.allowances.totalA) + ') — منبع: ' + (an.allowances.groupName || 'اختصاصی فعالیت'),
         }));
-        sec.appendChild(prTable(
+        sec.appendChild(U.h('div', { class: 'overflow-x-auto' }, prTable(
           ['دسته', 'مقدار گروه', 'بازنویسی فعالیت', 'مؤثر', 'منبع'],
           activeCats.map(function (c) {
             return [c.name, U.formatPercent(c.groupValue), U.formatPercent(c.overrideValue), U.formatPercent(c.effectiveValue),
               ALLOWANCE_SOURCE_LABELS[c.source] || c.source];
-          })));
+          }))));
       }
 
       /* جدول عناصر — با فیلتر اپراتور، زمان‌ها میانگین همان اپراتور است */
       sec.appendChild(U.h('p', { class: 'pr-meta font-bold mt-2 mb-1', text: 'عناصر کاری:' }));
-      sec.appendChild(prTable(
+      sec.appendChild(U.h('div', { class: 'overflow-x-auto' }, prTable(
         ['عنصر', 'نوع', 'n', 'میانگین', 'SD', 'CV٪', 'OT', 'وستینگهاوس (S/E/C/Cons)', 'R', 'NT', 'ST'],
         an.elements.map(function (el) {
           var rating = DB.getElementRating(el.id);
@@ -459,7 +459,7 @@
             isNull(nt) ? '—' : U.formatTimeValue(nt),
             isNull(stv) ? NOT_COMPUTABLE : U.formatTimeValue(stv),
           ];
-        })));
+        }))));
 
       /* زمان استاندارد کل فعالیت */
       var total = an.activityTotal;
@@ -476,7 +476,7 @@
       var suspects = an.suspects.filter(function (s) { return !flt.operator || s.operatorId === flt.operator; });
       if (suspects.length) {
         sec.appendChild(U.h('p', { class: 'pr-meta font-bold mt-2 mb-1', text: 'مشاهدات مشکوک و خارج‌شده:' }));
-        sec.appendChild(prTable(
+        sec.appendChild(U.h('div', { class: 'overflow-x-auto' }, prTable(
           ['عنصر', 'چرخه', 'اپراتور', 'مقدار (ثانیه)', 'وضعیت', 'امتیاز Z / قاعده', 'دلیل خروج'],
           suspects.map(function (s) {
             var scoreTxt = isNull(s.score)
@@ -485,7 +485,7 @@
             return [s.elementName, U.formatInt(s.cycleNo), s.operatorName, U.formatTimeValue(s.value),
               s.validityStatus === 'SUSPECT' ? 'مشکوک' : 'خارج‌شده',
               scoreTxt, s.exclusionReason || '—'];
-          })));
+          }))));
       }
       return sec;
     }

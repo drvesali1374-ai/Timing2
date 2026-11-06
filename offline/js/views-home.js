@@ -45,7 +45,7 @@
     },
     studyDate: {
       what: 'تاریخ رسمی انجام مطالعه؛ در سربرگ گزارش‌های رسمی درج می‌شود.',
-      input: 'قالب ۱۴۰۴/۰۸/۱۳ را وارد کنید یا از دکمه «امروز» استفاده کنید.',
+      input: 'از تقویم شمسی انتخاب کنید یا قالب ۱۴۰۴/۰۸/۱۳ را دستی وارد کنید.',
       note: 'در پایگاه داده ISO میلادی ذخیره می‌شود؛ نمایش شمسی فقط لایه نمایش است.',
     },
   };
@@ -67,124 +67,18 @@
     try { g.localStorage.setItem(BANNER_KEY, '1'); } catch (e) { /* ادامه کار */ }
   }
 
-  // ── دور زدن باگ ui.js: پاپ‌اور helpDot هنگام ساخت visible است ──
-  // (نه style اولیه دارد نه CSS آن را می‌پوشاند؛ بازکردن inline
-  // display:block می‌گذارد و بستن none — پس قانون زیر رفتار را اصلاح می‌کند)
-  function ensureHelpStyle() {
-    if (document.getElementById('t2-helpdot-fix')) return;
-    var style = document.createElement('style');
-    style.id = 't2-helpdot-fix';
-    style.textContent = '.helpdot-pop{display:none}';
-    document.head.appendChild(style);
-  }
-
-  // ═══════════ تبدیل صحیح جلالی→میلادی (محلی) ═══════════
-  // U.jalaliToISO هسته خراب است (همیشه yyyy-03-01)؛ الگوریتم مرجع jalaali-js
-  function ddiv(a, b) { return ~~(a / b); }
-  function jalCalMarch(jy) {
-    var breaks = [-61, 9, 38, 199, 426, 686, 756, 818, 1111, 1181, 1210, 1635, 2060, 2097, 2192, 2262, 2324, 2394, 2456, 3178];
-    var gy = jy + 621, leapJ = -14, jp = breaks[0], jm2, jump = 0, n, i;
-    for (i = 1; i < breaks.length; i += 1) {
-      jm2 = breaks[i]; jump = jm2 - jp;
-      if (jy < jm2) break;
-      leapJ = leapJ + ddiv(jump, 33) * 8 + ddiv(jump % 33, 4);
-      jp = jm2;
-    }
-    n = jy - jp;
-    leapJ = leapJ + ddiv(n, 33) * 8 + ddiv(n % 33 + 3, 4);
-    if (jump % 33 === 4 && jump - n === 4) leapJ += 1;
-    var leapG = ddiv(gy, 4) - ddiv((ddiv(gy, 100) + 1) * 3, 4) - 150;
-    return 20 + leapJ - leapG;
-  }
-  function jalToGregJdn(jy, jm, jd) {
-    function g2d(gy, gm, gd) {
-      var d = ddiv((gy + ddiv(gm - 8, 6) + 100100) * 1461, 4) + ddiv(153 * ((gm + 9) % 12) + 2, 5) + gd - 34840408;
-      return d - ddiv(ddiv(gy + 100100 + ddiv(gm - 8, 6), 100) * 3, 4) + 752;
-    }
-    return g2d(jy + 621, 3, jalCalMarch(jy)) + (jm - 1) * 31 - ddiv(jm, 7) * (jm - 7) + jd - 1;
-  }
-  function jalaliToISOLocal(jy, jm, jd) {
-    var jdn = jalToGregJdn(jy, jm, jd);
-    var j = 4 * jdn + 139361631;
-    j = j + ddiv(ddiv(4 * jdn + 183187720, 146097) * 3, 4) * 4 - 3908;
-    var i = ddiv(j % 1461, 4) * 5 + 308;
-    var gd = ddiv(i % 153, 5) + 1;
-    var gm = (ddiv(i, 153) % 12) + 1;
-    var gy = ddiv(j, 1461) - 100100 + ddiv(8 - gm, 6);
-    function p2(n) { return String(n).padStart(2, '0'); }
-    return String(gy).padStart(4, '0') + '-' + p2(gm) + '-' + p2(gd);
-  }
-
-  // ═══════════ ورودی تاریخ جلالی — {el, getISO, setISO} ═══════════
-  // اعتبارسنجی روی input؛ نرمال‌سازی نمایش لاتین روی blur/Enter/امروز.
+  // ═══════════ ورودی تاریخ — پورت وفادار JalaliDatePicker.tsx ═══════════
+  // تقویم Popover شمسی/میلادی + ورود دستی؛ مقدار داخلی ISO میلادی.
+  // رابط {el, getISO, setISO} برای سازگاری با فرم‌های موجود حفظ شده است.
   function jalaliDateInput(opts) {
     opts = opts || {};
-    var iso = opts.value || null;
-
-    function isoToText(v) {
-      var j = v ? U.isoToJalali(v) : null;
-      return j ? j.jy + '/' + j.jm + '/' + j.jd : '';
-    }
-
-    var input = U.h('input', {
-      class: 'input ltr', type: 'text', inputmode: 'numeric',
-      placeholder: '1404/08/13', value: isoToText(iso),
-      'aria-label': opts.ariaLabel || 'تاریخ مطالعه',
-    });
-    var errEl = U.h('div', {
-      class: 'hint', style: { color: 'var(--red)', display: 'none' },
-      text: 'قالب تاریخ نامعتبر است. مثال: ۱۴۰۴/۰۸/۱۳',
-    });
-    function invalid() { return errEl.style.display !== 'none'; }
-    function setErr(on) {
-      errEl.style.display = on ? 'block' : 'none';
-      input.style.borderColor = on ? 'var(--red)' : '';
-      input.style.boxShadow = on ? '0 0 0 3px color-mix(in srgb, var(--red) 15%, transparent)' : '';
-    }
-    function emit() { if (opts.onChange) opts.onChange(iso, invalid()); }
-    function validate() {
-      var raw = U.normalizeDigits(input.value).trim();
-      if (raw === '') { iso = null; setErr(false); emit(); return; }
-      var m = /^(\d{4})[/\-](\d{1,2})[/\-](\d{1,2})$/.exec(raw);
-      if (m && U.isValidJalali(Number(m[1]), Number(m[2]), Number(m[3]))) {
-        iso = jalaliToISOLocal(Number(m[1]), Number(m[2]), Number(m[3]));
-        setErr(false);
-      } else {
-        iso = null;
-        setErr(true);
-      }
-      emit();
-    }
-    function canonicalize() {
-      var t = isoToText(iso);
-      if (iso && t && input.value !== t) input.value = t;
-    }
-    input.addEventListener('input', validate);
-    input.addEventListener('blur', canonicalize);
-    input.addEventListener('keydown', function (e) {
-      if (e.key === 'Enter') { e.preventDefault(); validate(); canonicalize(); }
-    });
-    var todayBtn = U.h('button', {
-      class: 'btn btn-sm shrink-0', type: 'button', text: 'امروز',
-      onclick: function () {
-        var t = U.todayJalali();
-        setISO(jalaliToISOLocal(t.jy, t.jm, t.jd));
+    return g.T2DATE.datePicker({
+      value: opts.value || null,
+      ariaLabel: opts.ariaLabel || 'تاریخ مطالعه',
+      onChange: function (iso) {
+        if (opts.onChange) opts.onChange(iso, false);
       },
     });
-    var el = U.h('div', { class: 'flex flex-col gap-1' },
-      U.h('div', { class: 'flex gap-1' }, input, todayBtn),
-      errEl);
-    function setISO(v) {
-      iso = v || null;
-      input.value = isoToText(iso);
-      setErr(false);
-      emit();
-    }
-    return {
-      el: el,
-      getISO: function () { return iso; },
-      setISO: setISO,
-    };
   }
 
   // ═══════════ دیالوگ‌های تأیید محلی ═══════════
@@ -543,7 +437,6 @@
   g.T2VIEWS = g.T2VIEWS || {};
   g.T2VIEWS.home = function (container) {
     U.clear(container);
-    ensureHelpStyle();
     var resultsEl = null;
 
     function listProjects() {
@@ -557,32 +450,38 @@
     // ── هدر ──
     function buildHeader() {
       var dark = document.documentElement.classList.contains('dark');
-      return U.h('div', { class: 'flex items-center gap-3 mb-6 flex-wrap' },
-        U.h('span', { class: 'logo-tile' }, U.icon('timer')),
-        U.h('div', { class: 'min-w-0' },
-          U.h('h1', { class: 'text-2xl font-extrabold', text: 'زمان‌سنجی صنعتی' }),
-          U.h('div', { class: 'text-sm text-muted', text: 'مطالعات زمان استاندارد خطوط تولید — کاملاً آفلاین' })),
-        U.h('div', { class: 'spacer flex-1' }),
-        U.h('button', {
-          class: 'icon-btn', type: 'button',
-          'aria-label': dark ? 'تم روشن' : 'تم تیره',
-          onclick: function () {
-            var nowDark = document.documentElement.classList.toggle('dark');
-            try { g.localStorage.setItem('timing2-theme', nowDark ? 'dark' : 'light'); } catch (e) { /* ادامه کار */ }
-            render();
-          },
-        }, U.icon(dark ? 'sun' : 'moon')),
-        UI.badge('نسخه آفلاین', 'brand'));
+      var themeBtn = U.h('button', {
+        class: 'icon-btn lg', type: 'button',
+        'aria-label': dark ? 'تم روشن' : 'تم تیره',
+        onclick: function () {
+          var nowDark = document.documentElement.classList.toggle('dark');
+          try { g.localStorage.setItem('timing2-theme', nowDark ? 'dark' : 'light'); } catch (e) { /* ادامه کار */ }
+          // به‌روزرسانی درجا — بدون رندر مجدد (حفظ وضعیت فرم‌ها)
+          themeBtn.replaceChild(U.icon(nowDark ? 'sun' : 'moon'), themeBtn.querySelector('svg'));
+        },
+      }, U.icon(dark ? 'sun' : 'moon'));
+      return U.h('header', { class: 'glass-bar sticky border-b no-print', style: { top: 0, zIndex: 40 } },
+        U.h('div', { class: 'mx-auto flex items-center gap-3', style: { height: '64px', maxWidth: '1280px', padding: '0 16px' } },
+          U.h('span', { class: 'logo-tile' }, U.icon('timer')),
+          U.h('div', { class: 'min-w-0 flex-1' },
+            U.h('h1', { class: 'font-extrabold', style: { fontSize: '18px', lineHeight: 1.3 }, text: 'زمان‌سنجی صنعتی' }),
+            U.h('p', { class: 'truncate', style: { fontSize: '11px', color: 'var(--muted-foreground)' }, text: 'مطالعات زمان استاندارد خطوط تولید — کاملاً آفلاین' })),
+          themeBtn));
     }
 
-    // ── نوار ابزار ──
+    // ── نوار ابزار — هم‌ارز HomeView.tsx (جهت مرتب‌سازی داخل گزینه‌ها تعبیه شده) ──
+    var SORT_OPTIONS = {
+      createdAt: { dir: 'desc', label: 'اخیراً ایجادشده' },
+      name: { dir: 'asc', label: 'نام (الفبایی)' },
+      progress: { dir: 'desc', label: 'بیشترین پیشرفت' },
+    };
     function buildToolbar() {
       var searchIn = U.h('input', {
         class: 'input flex-1', type: 'text',
         placeholder: 'جستجو در نام پروژه، خط تولید یا محصول…',
         'aria-label': 'جستجوی پروژه‌ها',
         value: toolbarState.searchText,
-        style: { minWidth: '200px' },
+        style: { minWidth: '200px', paddingInlineEnd: '36px', paddingInlineStart: '12px' },
       });
       var debounceTimer = null;
       function applyQuery() {
@@ -598,21 +497,14 @@
       searchIn.addEventListener('keydown', function (e) { if (e.key === 'Enter') applyQuery(); });
 
       var sortSel = UI.selectEl([
-        { value: 'createdAt', label: 'اخیراً ایجادشده' },
-        { value: 'name', label: 'نام (الفبایی)' },
-        { value: 'progress', label: 'بیشترین پیشرفت' },
+        { value: 'createdAt', label: SORT_OPTIONS.createdAt.label },
+        { value: 'name', label: SORT_OPTIONS.name.label },
+        { value: 'progress', label: SORT_OPTIONS.progress.label },
       ], toolbarState.sort, function (v) {
         toolbarState.sort = v;
+        toolbarState.dir = SORT_OPTIONS[v].dir;
         renderResults();
       }, 'مرتب‌سازی پروژه‌ها');
-
-      var dirSel = UI.selectEl([
-        { value: 'desc', label: 'نزولی' },
-        { value: 'asc', label: 'صعودی' },
-      ], toolbarState.dir, function (v) {
-        toolbarState.dir = v;
-        renderResults();
-      }, 'جهت مرتب‌سازی');
 
       // ورود بسته — FR-25
       var fileIn = U.h('input', { type: 'file', accept: '.json,application/json', class: 'sr-only', 'aria-label': 'انتخاب فایل بسته پروژه برای ورود' });
@@ -644,7 +536,7 @@
         reader.onerror = function () { UI.toast('ورود بسته ناموفق بود', { type: 'error' }); };
         reader.readAsText(file);
       });
-      var importBtn = U.h('button', { class: 'btn btn-outline shrink-0', type: 'button' }, U.icon('fileUp'), 'ورود بسته');
+      var importBtn = U.h('button', { class: 'btn btn-outline shrink-0', type: 'button' }, U.icon('fileUp'), U.h('span', { class: 'hidden sm:inline', text: 'ورود بسته' }));
       importBtn.addEventListener('click', function () { fileIn.click(); });
 
       var createBtn = U.h('button', { class: 'btn btn-brand shrink-0', type: 'button' }, U.icon('plus'), 'پروژه جدید');
@@ -673,13 +565,14 @@
       });
 
       return U.h('section', {
-        class: 'card p-4 mb-4 flex flex-wrap gap-3 items-center',
+        class: 'card p-3 mb-4 flex flex-col gap-2 sm:flex-row sm:items-center',
         'aria-label': 'ابزار فهرست پروژه‌ها',
       },
-        searchIn,
-        U.h('div', { class: 'shrink-0', style: { width: '176px' } }, sortSel),
-        U.h('div', { class: 'shrink-0', style: { width: '112px' } }, dirSel),
+        U.h('div', { class: 'relative min-w-0 flex-1' },
+          U.h('span', { class: 'search-icon', 'aria-hidden': 'true' }, U.icon('search')),
+          searchIn),
         U.h('div', { class: 'flex items-center gap-2 flex-wrap' },
+          U.h('div', { class: 'shrink-0 w-full sm:w-44' }, sortSel),
           importBtn,
           createBtn,
           demoBtn),
@@ -700,9 +593,9 @@
       return U.h('section', { class: 'card p-5 mb-4', 'aria-label': 'راهنمای اولین استفاده' },
         U.h('div', { class: 'flex items-center justify-between gap-3 mb-3' },
           U.h('div', { class: 'flex items-center gap-3 min-w-0' },
-            U.h('span', { class: 'chip-icon' }, U.icon('lightbulb')),
+            U.h('span', { class: 'chip-icon' }, U.icon('rocket')),
             U.h('div', { class: 'min-w-0' },
-              U.h('h2', { class: 'font-bold', text: 'خوش آمدید! شروع کار در سه مرحله' }),
+              U.h('h2', { class: 'font-extrabold', text: 'خوش آمدید! شروع کار در سه مرحله' }),
               U.h('p', { class: 'text-sm text-muted', text: 'این برنامه کاملاً آفلاین کار می‌کند؛ داده‌ها روی همین دستگاه می‌مانند.' }))),
           U.h('button', {
             class: 'icon-btn sm', type: 'button', 'aria-label': 'بستن راهنمای اولین استفاده',
@@ -775,6 +668,7 @@
       if (projects.length === 0) {
         if (toolbarState.q) {
           resultsEl.appendChild(UI.emptyState({
+            icon: 'search',
             title: 'پروژه‌ای مطابق جستجو یافت نشد',
             desc: 'عبارت «' + toolbarState.q + '» در نام پروژه‌ها، خطوط تولید یا محصولات یافت نشد. عبارت کوتاه‌تری را امتحان کنید.',
             actionLabel: 'پاک‌کردن جستجو',
@@ -786,6 +680,7 @@
           }));
         } else {
           resultsEl.appendChild(UI.emptyState({
+            icon: 'factory',
             title: 'هنوز پروژه‌ای ثبت نشده است',
             desc: 'هر پروژه یک مطالعه روی یک خط تولید و یک محصول مشخص است. با ایجاد اولین پروژه شروع کنید: مشخصات، ساختار خط، اپراتورها و تنظیمات مهندسی.',
             actionLabel: 'ایجاد اولین پروژه',
@@ -819,11 +714,12 @@
     // ── رندر کامل ──
     function render() {
       U.clear(container);
-      var page = U.h('div', { class: 'mx-auto w-full p-4 md:p-6', style: { maxWidth: '1200px' } },
+      var page = U.h('div', { class: 'flex flex-col flex-1 min-w-0' },
         buildHeader(),
-        buildToolbar(),
-        resultsEl = U.h('div', null),
-        buildFooter());
+        U.h('div', { class: 'mx-auto w-full flex flex-col gap-4', style: { maxWidth: '1280px', flex: '1', padding: '16px' } },
+          buildToolbar(),
+          resultsEl = U.h('div', null),
+          buildFooter()));
       container.appendChild(page);
       renderResults();
     }
