@@ -1217,6 +1217,7 @@ function ElementsSection({
         <SortableList
           items={elements}
           onReorder={handleReorder}
+          handleClassName="rounded-s-xl"
           renderItem={(element, index) => (
             <ElementRow
               element={element}
@@ -1380,7 +1381,7 @@ function ElementRow({
 
   if (isMobile) {
     return (
-      <div className="space-y-2.5 rounded-xl border border-border/60 bg-surface-2/50 p-3">
+      <div className="space-y-2.5 rounded-xl border border-border/60 bg-surface-2/50 py-3 pe-3 ps-9">
         <div className="flex items-start justify-between gap-2">
           <div className="flex min-w-0 items-center gap-2">
             {typeBadge}
@@ -1400,7 +1401,7 @@ function ElementRow({
   }
 
   return (
-    <div className="flex items-center gap-2.5 rounded-xl border border-border/60 bg-surface-2/50 py-2 pl-1.5 pr-3 transition-colors hover:border-brand/40 hover:bg-brand-soft/30">
+    <div className="flex items-center gap-2.5 rounded-xl border border-border/60 bg-surface-2/50 py-2 pe-1.5 ps-8 transition-colors hover:border-brand/40 hover:bg-brand-soft/30">
       <span className="num w-4 shrink-0 text-[11px] text-faint">{formatInt(index + 1, prefs)}</span>
       {typeBadge}
       <div className="min-w-0 flex-1">

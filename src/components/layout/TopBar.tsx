@@ -8,8 +8,8 @@ import { useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useTheme } from 'next-themes'
 import {
-  CircleHelp,
   Home,
+  Lightbulb,
   Menu,
   Moon,
   Settings,
@@ -97,9 +97,9 @@ export function TopBar({ projectId }: { projectId: string }) {
           aria-label={helpOpen ? 'بستن راهنمای مرحله' : 'نمایش راهنمای مرحله'}
           aria-pressed={helpOpen}
           onClick={() => setHelpOpen(!helpOpen)}
-          className={cn(helpOpen && 'bg-brand-soft text-brand')}
+          className={cn('size-9', helpOpen && 'bulb-on')}
         >
-          <CircleHelp className="size-4.5" aria-hidden />
+          <Lightbulb className="size-4.5" aria-hidden />
         </Button>
       </div>
     </header>

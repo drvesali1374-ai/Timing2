@@ -6,8 +6,10 @@
 // پنل جزئیات ایستگاه با ذخیره خودکار و کنترل هم‌زمانی
 // (expectedUpdatedAt — ۶.۶)؛ ایجاد/ویرایش/حذف با شمارش
 // وابستگی‌های واقعی (FR-26).
-// دسکتاپ: درخت در ستون راست (w-80) + جزئیات در ستون چپ؛
-// موبایل: درخت تاشو در بالا + جزئیات در پایین — FR-30
+// دسکتاپ: دو ستون هم‌عرض (۵۰-۵۰) با عرض کامل صفحه —
+// دستگیره درگ داخل کارت چسبیده به لبه راست؛ عملیات ویرایش/حذف
+// عمودی در راست کارت؛ عنوان تا دو خط؛ شمارش/گروه فقط روی کارت
+// انتخاب‌شده؛ موبایل: درخت تاشو در بالا + جزئیات در پایین — FR-30
 // ═══════════════════════════════════════════════════════════
 import { useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -467,7 +469,7 @@ export default function StructureView({ projectId }: { projectId: string }) {
   }
 
   return (
-    <div className="animate-view-in mx-auto max-w-6xl space-y-5">
+    <div className="animate-view-in w-full space-y-5">
       {/* سربرگ بخش */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
@@ -486,7 +488,7 @@ export default function StructureView({ projectId }: { projectId: string }) {
 
       {/* محتوا */}
       {treeQuery.isLoading ? (
-        <div className="grid items-start gap-5 lg:grid-cols-[20rem_minmax(0,1fr)]">
+        <div className="grid items-start gap-5 lg:grid-cols-2">
           <Skeleton className="h-[30rem] w-full rounded-2xl" />
           <div className="space-y-4">
             <Skeleton className="h-56 w-full rounded-2xl" />
@@ -507,7 +509,7 @@ export default function StructureView({ projectId }: { projectId: string }) {
           }
         />
       ) : (
-        <div className="grid items-start gap-5 lg:grid-cols-[20rem_minmax(0,1fr)]">
+        <div className="grid items-start gap-5 lg:grid-cols-2">
           {/* ستون راست (RTL): درخت ساختار — موبایل: تاشو در بالا */}
           <div className="lg:sticky lg:top-20">
             <div className="lg:hidden">
@@ -838,7 +840,7 @@ function StructureTree({
 }) {
   return (
     <div>
-      {/* ریشه درخت: خط تولید — یک خط، یک محصول */}
+      {/* ریشه درخت: خط تولید + محصول (کامل، بدون برش) */}
       <div className="border-b bg-gradient-to-l from-brand-soft/70 to-transparent p-4">
         <div className="flex items-center gap-2.5">
           <div className="chip-icon bg-brand-soft text-brand">
@@ -852,14 +854,11 @@ function StructureTree({
                 {lineName ?? 'خط تولید'}
               </p>
             )}
-            <p className="truncate text-xs text-muted-foreground" title={productName ?? undefined}>
+            <p className="text-xs leading-5 text-muted-foreground">
               محصول: {productName ?? '—'}
             </p>
           </div>
           <HelpDot label="خط تولید و محصول" content={LINE_HELP} />
-        </div>
-        <div className="mt-2.5">
-          <Badge className="border-0 bg-brand-soft text-brand">یک خط — یک محصول</Badge>
         </div>
       </div>
 
@@ -877,9 +876,14 @@ function StructureTree({
           <SortableList
             items={stations}
             onReorder={onReorderStations}
-            renderItem={(station, index) => {
+            handleClassName="rounded-s-xl"
+            renderItem={(station) => {
               const isSelected = station.id === selectedStationId
               const isOpen = openMap[station.id] !== false
+              const elementCount = station.activities.reduce(
+                (sum, a) => sum + activityElementCount(a),
+                0
+              )
               return (
                 <Collapsible
                   key={station.id}
@@ -888,125 +892,143 @@ function StructureTree({
                 >
                   <div
                     className={cn(
-                      'overflow-hidden rounded-xl border transition-colors',
+                      'overflow-hidden rounded-xl border bg-card transition-all',
                       isSelected
-                        ? 'border-brand bg-brand-soft/30'
-                        : 'border-border/60 hover:border-brand/40 hover:bg-muted/40'
+                        ? 'border-brand bg-brand-soft/40 shadow-[0_6px_18px_-8px_rgba(114,87,255,0.5)] ring-2 ring-brand/25'
+                        : 'border-border/60 hover:border-brand/40'
                     )}
                   >
-                    <div className="flex items-center gap-0.5 py-0.5 pl-1">
-                      <CollapsibleTrigger asChild>
+                    {/* سربرگ کارت — کل ناحیه کلیک‌پذیر: انتخاب + باز/بسته شدن */}
+                    <div
+                      role="button"
+                      tabIndex={0}
+                      aria-expanded={isOpen}
+                      aria-current={isSelected ? true : undefined}
+                      onClick={(e) => {
+                        if ((e.target as HTMLElement).closest('button')) return
+                        onSelectStation(station.id)
+                        onStationOpenChange(station.id, !isOpen)
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault()
+                          onSelectStation(station.id)
+                          onStationOpenChange(station.id, !isOpen)
+                        }
+                      }}
+                      className="flex cursor-pointer items-stretch gap-1.5 py-1 pe-1.5 ps-8 focus-visible:outline-2 focus-visible:outline-ring"
+                    >
+                      {/* عملیات: ویرایش بالا، حذف پایین — چسبیده به راست */}
+                      <div className="flex shrink-0 flex-col justify-center gap-0.5">
                         <Button
                           variant="ghost"
                           size="icon"
-                          className="size-7 shrink-0 text-faint"
-                          aria-label={isOpen ? `بستن فعالیت‌های ${station.name}` : `باز کردن فعالیت‌های ${station.name}`}
+                          className="size-7"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            onEditStation(station)
+                          }}
+                          aria-label={`ویرایش ایستگاه ${station.name}`}
                         >
-                          <ChevronDown
-                            className={cn('size-4 transition-transform', !isOpen && '-rotate-90')}
-                            aria-hidden
-                          />
+                          <Pencil className="size-3.5" aria-hidden />
                         </Button>
-                      </CollapsibleTrigger>
-                      <button
-                        type="button"
-                        onClick={() => onSelectStation(station.id)}
-                        className="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-1.5 py-2 text-right focus-visible:outline-2 focus-visible:outline-ring"
-                        aria-current={isSelected ? true : undefined}
-                      >
-                        <span className="num w-4 shrink-0 text-[11px] text-faint">
-                          {formatInt(index + 1, prefs)}
-                        </span>
-                        <Warehouse className="size-4 shrink-0 text-brand" aria-hidden />
-                        <span className="truncate text-sm font-bold">{station.name}</span>
-                      </button>
-                      <Badge
-                        variant="secondary"
-                        className="num shrink-0 border-0 bg-surface-2 text-[11px] text-muted-foreground"
-                      >
-                        {formatInt(station.activities.length, prefs)} فعالیت
-                      </Badge>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="size-7 shrink-0"
-                        onClick={() => onEditStation(station)}
-                        aria-label={`ویرایش ایستگاه ${station.name}`}
-                      >
-                        <Pencil className="size-3.5" aria-hidden />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="size-7 shrink-0 text-red hover:text-red"
-                        onClick={() => onDeleteStation(station)}
-                        aria-label={`حذف ایستگاه ${station.name}`}
-                      >
-                        <Trash2 className="size-3.5" aria-hidden />
-                      </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="size-7 text-red hover:text-red"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            onDeleteStation(station)
+                          }}
+                          aria-label={`حذف ایستگاه ${station.name}`}
+                        >
+                          <Trash2 className="size-3.5" aria-hidden />
+                        </Button>
+                      </div>
+                      {/* عنوان تا دو خط + شمارش فقط برای کارت انتخاب‌شده */}
+                      <div className="min-w-0 flex-1 self-center">
+                        <p
+                          className="line-clamp-2 text-sm font-bold leading-5"
+                          title={station.name}
+                        >
+                          {station.name}
+                        </p>
+                        {isSelected && (
+                          <p className="num mt-0.5 text-[11px] leading-4 text-muted-foreground">
+                            {formatInt(station.activities.length, prefs)} فعالیت ·{' '}
+                            {formatInt(elementCount, prefs)} عنصر کاری
+                          </p>
+                        )}
+                      </div>
                     </div>
 
                     <CollapsibleContent>
-                      <div className="border-t border-dashed px-2 pb-2 pr-2 pt-2">
+                      {/* زیرمنوی فعالیت‌ها — تورفتگی + خط راهنمای درختی در راست */}
+                      <div className="mt-1 mb-2 ms-2 border-s-2 border-dashed border-brand/25 pb-1 ps-2.5">
                         {station.activities.length === 0 ? (
                           <p className="py-1.5 text-center text-[11px] text-faint">فعالیتی ثبت نشده است</p>
                         ) : (
                           <SortableList
                             items={station.activities}
                             onReorder={(ids) => onReorderActivities(station.id, ids)}
-                            className="space-y-1.5"
-                            renderItem={(activity, actIndex) => (
-                              <div className="flex items-center gap-1 rounded-lg border border-transparent bg-surface-2/70 pl-1 transition-colors hover:border-brand/40 hover:bg-brand-soft/40">
-                                <button
-                                  type="button"
-                                  onClick={() => onOpenActivity(activity.id)}
-                                  className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-right focus-visible:outline-2 focus-visible:outline-ring"
-                                  aria-label={`باز کردن صفحه فعالیت ${activity.name}`}
+                            className="space-y-1"
+                            renderItem={(activity) => {
+                              const parentSelected = isSelected
+                              const group = activity.group
+                              return (
+                                <div
+                                  className="flex items-stretch gap-1.5 rounded-lg bg-surface-2/70 py-0.5 pe-1 ps-8 transition-colors hover:bg-brand-soft/30"
+                                  title={`نوع رویداد فرایندی: ${processLabelOf(activity.processType)}${group ? ` · گروه مجازها: ${group.name}` : ''} · ${formatInt(activityElementCount(activity), prefs)} عنصر`}
                                 >
-                                  <span className="num w-3.5 shrink-0 text-[10px] text-faint">
-                                    {formatInt(actIndex + 1, prefs)}
-                                  </span>
-                                  <span
-                                    className="num flex size-6 shrink-0 items-center justify-center rounded-md bg-background text-sm font-bold text-brand"
-                                    title={processLabelOf(activity.processType)}
-                                  >
-                                    {processSymbolOf(activity.processType)}
-                                  </span>
-                                  <span className="min-w-0 flex-1 truncate text-[13px] font-medium">
-                                    {activity.name}
-                                  </span>
-                                  {activity.group && (
-                                    <Badge
-                                      className="max-w-24 shrink-0 truncate border-0 bg-cyan-soft text-cyan"
-                                      title={`گروه مجازها: ${activity.group.name}`}
+                                  {/* عملیات: ویرایش بالا، حذف پایین — چسبیده به راست */}
+                                  <div className="flex shrink-0 flex-col justify-center gap-0.5">
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      className="size-6"
+                                      onClick={(e) => {
+                                        e.stopPropagation()
+                                        onEditActivity(activity)
+                                      }}
+                                      aria-label={`ویرایش فعالیت ${activity.name}`}
                                     >
-                                      {activity.group.name}
-                                    </Badge>
-                                  )}
-                                  <span className="num shrink-0 text-[11px] text-faint">
-                                    {formatInt(activityElementCount(activity), prefs)} عنصر
-                                  </span>
-                                </button>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="size-7 shrink-0"
-                                  onClick={() => onEditActivity(activity)}
-                                  aria-label={`ویرایش فعالیت ${activity.name}`}
-                                >
-                                  <Pencil className="size-3.5" aria-hidden />
-                                </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="size-7 shrink-0 text-red hover:text-red"
-                                  onClick={() => onDeleteActivity(activity)}
-                                  aria-label={`حذف فعالیت ${activity.name}`}
-                                >
-                                  <Trash2 className="size-3.5" aria-hidden />
-                                </Button>
-                              </div>
-                            )}
+                                      <Pencil className="size-3" aria-hidden />
+                                    </Button>
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      className="size-6 text-red hover:text-red"
+                                      onClick={(e) => {
+                                        e.stopPropagation()
+                                        onDeleteActivity(activity)
+                                      }}
+                                      aria-label={`حذف فعالیت ${activity.name}`}
+                                    >
+                                      <Trash2 className="size-3" aria-hidden />
+                                    </Button>
+                                  </div>
+                                  {/* عنوان تا دو خط + گروه/شمارش فقط برای فعالیت‌های ایستگاه انتخاب‌شده */}
+                                  <button
+                                    type="button"
+                                    onClick={() => onOpenActivity(activity.id)}
+                                    className="flex min-w-0 flex-1 items-center rounded-md text-right focus-visible:outline-2 focus-visible:outline-ring"
+                                    aria-label={`باز کردن صفحه فعالیت ${activity.name}`}
+                                  >
+                                    <span className="min-w-0">
+                                      <span className="line-clamp-2 block text-[13px] font-medium leading-5">
+                                        {activity.name}
+                                      </span>
+                                      {parentSelected && (
+                                        <span className="num mt-0.5 block text-[10.5px] leading-4 text-muted-foreground">
+                                          {formatInt(activityElementCount(activity), prefs)} عنصر ·{' '}
+                                          {group ? group.name : 'بدون گروه'}
+                                        </span>
+                                      )}
+                                    </span>
+                                  </button>
+                                </div>
+                              )
+                            }}
                           />
                         )}
                         <Button

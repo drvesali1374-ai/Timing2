@@ -111,11 +111,11 @@
         U.h('button', { class: 'icon-btn lg', 'aria-label': isDark ? 'تم روشن' : 'تم تیره', onclick: toggleTheme }, U.icon(isDark ? 'sun' : 'moon')),
         U.h('button', { class: 'icon-btn lg', 'aria-label': 'تنظیمات نمایش', onclick: showDisplaySettings }, U.icon('settings')),
         U.h('button', {
-          class: 'icon-btn lg' + (helpOpen ? ' on' : ''),
+          class: 'icon-btn lg' + (helpOpen ? ' bulb-on' : ''),
           'aria-label': helpOpen ? 'بستن راهنمای مرحله' : 'نمایش راهنمای مرحله',
           'aria-pressed': helpOpen ? 'true' : 'false',
           onclick: function () { setHelpOpen(!helpOpen); },
-        }, U.icon('circleHelp'))));
+        }, U.icon('lightbulb'))));
 
     /* ── سایدبار مراحل — معادل StageSidebar.tsx ── */
     var sidebar = buildSidebar(project, summary);
@@ -129,10 +129,11 @@
     var newContainer = U.h('div', { id: 'view-container', class: 'animate-view-in' });
     var body = U.h('div', { class: 'shell-body' },
       sidebar,
-      U.h('main', { id: 'main-content', class: 'main-content scroll-slim' }, newContainer),
-      U.h('div', { class: 'hidden xl:block' }, helpPanel));
+      U.h('main', { id: 'main-content', class: 'main-content scroll-slim' }, newContainer));
     shellEl.appendChild(topbar);
     shellEl.appendChild(body);
+    /* پنل راهنما — Overlay روی محتوا (بدون اشغال عرض)؛ بسته = حذف کامل */
+    if (helpPanel) shellEl.appendChild(helpPanel);
     shellEl.appendChild(footer);
     shell.appendChild(shellEl);
 
@@ -238,7 +239,7 @@
     return sidebar;
   }
 
-  /* ═══════════ پنل راهنمای مرحله ═══════════ */
+  /* ═══════════ پنل راهنمای مرحله — Overlay کدر روی محتوا ═══════════ */
   function buildHelpPanel(project, summary) {
     var stageKey = route.name === 'activity' ? 'structure' : (route.stage || 'info');
     var guide = STAGE_GUIDES[stageKey];
@@ -246,17 +247,8 @@
     DB.CONST.STUDY_STAGES.forEach(function (s) { if (s.key === stageKey) stageMeta = s; });
     var stageState = summary.stages[stageKey] || { status: 'PENDING', hint: '' };
 
-    if (!helpOpen) {
-      /* کنترل باریک لبه صفحه — آیکون لامپ + عنوان عمودی (معادل HelpPanel بسته) */
-      return U.h('div', { class: 'help-edge-col no-print' },
-        U.h('button', {
-          class: 'help-edge-btn', type: 'button',
-          'aria-label': 'نمایش راهنمای مرحله',
-          onclick: function () { setHelpOpen(true); },
-        },
-          U.icon('lightbulb'),
-          U.h('span', { class: 'help-edge-text', text: 'راهنمای مرحله' })));
-    }
+    /* بسته = هیچ اشغال عرضی ندارد (دکمه لامپ هدر تنها راه بازکردن است) */
+    if (!helpOpen) return null;
 
     var aside = U.h('aside', { class: 'help-panel scroll-slim no-print', 'aria-label': 'راهنمای مرحله' });
 
@@ -268,7 +260,7 @@
           U.h('p', { class: 'font-extrabold', style: { fontSize: '13px' }, text: 'راهنمای مرحله' }),
           U.h('p', { style: { fontSize: '11px', color: 'var(--muted-foreground)' }, text: stageMeta ? stageMeta.label : '' }))),
       U.h('button', {
-        class: 'icon-btn md', type: 'button', 'aria-label': 'جمع‌کردن راهنما',
+        class: 'icon-btn md', type: 'button', 'aria-label': 'بستن راهنمای مرحله',
         onclick: function () { setHelpOpen(false); },
       }, U.icon('x'))));
 
@@ -300,11 +292,11 @@
       }));
     }
 
-    /* دکمه جمع‌کردن */
+    /* دکمه بستن */
     aside.appendChild(U.h('button', {
       class: 'hp-collapse-btn', type: 'button',
       onclick: function () { setHelpOpen(false); },
-    }, U.icon('chevronLeft'), 'جمع‌کردن پنل راهنما'));
+    }, U.icon('lightbulb'), 'بستن پنل راهنما'));
 
     return aside;
   }

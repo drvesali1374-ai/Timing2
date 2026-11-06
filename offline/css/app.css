@@ -173,7 +173,9 @@ button { font-family: inherit; }
 
 @media (min-width: 640px) {
   .sm\:grid-cols-2 { grid-template-columns: repeat(2, minmax(0,1fr)); }
+  .sm\:grid-cols-3 { grid-template-columns: repeat(3, minmax(0,1fr)); }
   .sm\:flex-row { flex-direction: row; }
+  .sm\:items-center { align-items: center; }
   .sm\:inline { display: inline !important; }
   .sm\:inline-flex { display: inline-flex !important; }
   .sm\:w-44 { width: 176px !important; }
@@ -183,6 +185,7 @@ button { font-family: inherit; }
   .md\:grid-cols-3 { grid-template-columns: repeat(3, minmax(0,1fr)); }
   .md\:grid-cols-4 { grid-template-columns: repeat(4, minmax(0,1fr)); }
   .md\:flex { display: flex !important; } .md\:hidden { display: none !important; }
+  .md\:block { display: block !important; }
   .md\:flex-row { flex-direction: row; } .md\:items-center { align-items: center; }
   .md\:p-6 { padding: 24px; } .md\:text-3xl { font-size: 26px; }
   .md\:w-auto { width: auto; }
@@ -193,6 +196,7 @@ button { font-family: inherit; }
   .lg\:grid-cols-2 { grid-template-columns: repeat(2, minmax(0,1fr)); }
   .lg\:grid-cols-3 { grid-template-columns: repeat(3, minmax(0,1fr)); }
   .lg\:grid-cols-4 { grid-template-columns: repeat(4, minmax(0,1fr)); }
+  .lg\:grid-cols-6 { grid-template-columns: repeat(6, minmax(0,1fr)); }
   .lg\:block { display: block !important; } .lg\:hidden { display: none !important; }
   .lg\:flex { display: flex !important; }
 }
@@ -231,26 +235,26 @@ svg.icon { width: 16px; height: 16px; flex-shrink: 0; }
 @media (min-width: 640px) { .app-footer .app-footer-inner { flex-direction: row; } }
 .app-footer .icon { width: 14px; height: 14px; }
 
-/* ── پنل راهنمای مرحله (معادل HelpPanel.tsx) ── */
-.help-edge-col {
-  width: 44px; flex-shrink: 0; align-self: flex-start;
-  padding-top: 80px;
-}
-.help-edge-btn {
-  display: flex; flex-direction: column; align-items: center; gap: 6px;
-  border: 1px solid var(--border); background: var(--card); color: var(--faint);
-  border-radius: calc(var(--radius) + 9px); padding: 12px 6px; cursor: pointer;
-  box-shadow: var(--shadow-1); transition: border-color .15s var(--ease), color .15s var(--ease);
-  font-family: inherit; width: 100%;
-}
-.help-edge-btn:hover { border-color: color-mix(in srgb, var(--brand) 40%, var(--border)); color: var(--brand); }
-.help-edge-btn .icon { width: 20px; height: 20px; }
-.help-edge-btn .help-edge-text { font-size: 10px; font-weight: 700; writing-mode: vertical-rl; }
+/* ── پنل راهنمای مرحله — Overlay کدر روی محتوا (معادل HelpPanel.tsx جدید) ──
+   بدون اشغال عرض صفحه؛ پس‌زمینه کاملاً مات تا اجزای پشت آن دیده نشوند */
 .help-panel {
-  width: 288px; flex-shrink: 0; border-inline-start: 1px solid var(--border);
-  background: color-mix(in srgb, var(--surface-2) 60%, transparent);
-  padding: 16px; overflow-y: auto; height: calc(100vh - 56px);
+  position: fixed; top: 56px; bottom: 0; inset-inline-end: 0; z-index: 30;
+  width: 288px; max-width: 85vw;
+  border-inline-start: 1px solid var(--border);
+  background: var(--surface-2);
+  box-shadow: 10px 0 28px -14px rgba(15, 23, 42, 0.35);
+  padding: 16px; overflow-y: auto;
 }
+/* لامپ راهنمای هدر — حالت روشن‌شده (درخشش کهربایی) */
+.icon-btn.bulb-on,
+.icon-btn.bulb-on:hover {
+  background: var(--amber-soft);
+  color: var(--amber);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--amber) 30%, transparent),
+    0 0 14px color-mix(in srgb, var(--amber) 45%, transparent);
+}
+.icon-btn.bulb-on .icon { filter: drop-shadow(0 0 5px color-mix(in srgb, var(--amber) 70%, transparent)); }
 .help-panel .hp-head-chip {
   width: 32px; height: 32px; border-radius: calc(var(--radius) + 5px); flex-shrink: 0;
   display: inline-flex; align-items: center; justify-content: center;
@@ -736,11 +740,18 @@ code.inline { background: var(--muted); padding: 1px 7px; border-radius: 6px; fo
 }
 .search-icon .icon { width: 16px; height: 16px; }
 .drag-handle {
-  cursor: grab; color: var(--faint); width: 24px; display: inline-flex; align-items: center; justify-content: center;
-  opacity: 0; transition: opacity .15s var(--ease); align-self: stretch; border-start-end-radius: calc(var(--radius) - 2px); border-end-end-radius: calc(var(--radius) - 2px);
+  position: absolute; inset-inline-start: 0; top: 0; bottom: 0; width: 28px; z-index: 2;
+  cursor: grab; color: var(--faint); display: inline-flex; align-items: center; justify-content: center;
+  opacity: 0; transition: opacity .15s var(--ease);
+  border-start-start-radius: calc(var(--radius) - 2px);
+  border-end-start-radius: calc(var(--radius) - 2px);
 }
+.drag-handle:hover { background: var(--muted); }
 .drag-handle .icon { width: 16px; height: 16px; }
 .list-row:hover .drag-handle, .drag-handle:focus-visible { opacity: 1; }
 .drag-handle:active { cursor: grabbing; }
+/* ردیف دارای دستگیره — رزرو فضای دستگیره در لبه راست (آغازین RTL) */
+.list-row.t2-sort { position: relative; padding-inline-start: 32px; }
+.t2-sort { position: relative; }
 .rot-n90 { transform: rotate(-90deg); }
 .drop-target { outline: 2px dashed var(--brand); outline-offset: -2px; border-radius: var(--radius); }

@@ -2,17 +2,17 @@
 
 // ═══════════════════════════════════════════════════════════
 // پنل راهنمای مرحله — FR-28 / ۷.۲
-// نوار کنار صفحه، جمع‌شونده، با اقدام بعدی پیشنهادی
+// باز و بسته شدن فقط از دکمه لامپ هدر؛ پنل به‌صورت Overlay
+// روی محتوا باز می‌شود (بدون اشغال عرض صفحه) و پس‌زمینه آن
+// کاملاً کدر است تا اجزای پشت آن دیده نشوند.
 // ═══════════════════════════════════════════════════════════
-import { useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { ChevronLeft, Lightbulb, ListChecks, X } from 'lucide-react'
+import { Lightbulb, ListChecks, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { projectsApi } from '@/lib/api/endpoints'
 import { qk } from '@/lib/api/keys'
 import { useAppStore } from '@/store/app-store'
-import { useIsMobile } from '@/hooks/use-mobile'
 import { STUDY_STAGES, STAGE_STATUS_LABELS, type StageStatus } from '@/domain/types'
 import { cn } from '@/lib/utils'
 
@@ -113,7 +113,6 @@ const STAGE_GUIDES: Record<string, { steps: string[]; next: string }> = {
 
 export function HelpPanel({ projectId }: { projectId: string }) {
   const { helpOpen, setHelpOpen, view } = useAppStore()
-  const isMobile = useIsMobile()
   const stage = view.name === 'project' ? view.stage : 'structure'
   const guide = STAGE_GUIDES[stage]
   const { data: summary } = useQuery({
@@ -122,29 +121,14 @@ export function HelpPanel({ projectId }: { projectId: string }) {
   })
   const stageState = summary?.stages[stage]
 
-  if (isMobile) return null // در موبایل از دکمه راهنمای فیلدها استفاده می‌شود
-
-  if (!helpOpen) {
-    return (
-      <div className="sticky top-0 hidden h-fit w-11 shrink-0 self-start pt-20 xl:block no-print">
-        <button
-          type="button"
-          onClick={() => setHelpOpen(true)}
-          aria-label="نمایش راهنمای مرحله"
-          className="group flex flex-col items-center gap-1.5 rounded-2xl border bg-card px-1.5 py-3 text-faint shadow-[var(--shadow-1)] transition-colors hover:border-brand/40 hover:text-brand"
-        >
-          <Lightbulb className="size-5" aria-hidden />
-          <span className="text-[10px] font-bold [writing-mode:vertical-rl]">راهنمای مرحله</span>
-        </button>
-      </div>
-    )
-  }
+  // بسته = هیچ اشغال عرضی ندارد؛ باز = Overlay روی محتوا (کدر، غیرشفاف)
+  if (!helpOpen) return null
 
   const stageMeta = STUDY_STAGES.find((s) => s.key === stage)
 
   return (
     <aside
-      className="scroll-slim sticky top-14 hidden h-[calc(100vh-3.5rem)] w-72 shrink-0 overflow-y-auto border-r bg-surface-2/60 p-4 xl:block no-print"
+      className="no-print scroll-slim fixed bottom-0 end-0 top-14 z-30 w-72 max-w-[85vw] overflow-y-auto border-s bg-surface-2 p-4 shadow-[10px_0_28px_-14px_rgba(15,23,42,0.35)]"
       aria-label="راهنمای مرحله"
     >
       <div className="mb-3 flex items-center justify-between">
@@ -157,7 +141,7 @@ export function HelpPanel({ projectId }: { projectId: string }) {
             <p className="text-[11px] text-muted-foreground">{stageMeta?.label}</p>
           </div>
         </div>
-        <Button variant="ghost" size="icon" className="size-7" onClick={() => setHelpOpen(false)} aria-label="جمع‌کردن راهنما">
+        <Button variant="ghost" size="icon" className="size-7" onClick={() => setHelpOpen(false)} aria-label="بستن راهنمای مرحله">
           <X className="size-4" aria-hidden />
         </Button>
       </div>
@@ -207,10 +191,10 @@ export function HelpPanel({ projectId }: { projectId: string }) {
       <button
         type="button"
         onClick={() => setHelpOpen(false)}
-        className="mt-3 flex w-full items-center justify-center gap-1 rounded-xl border border-dashed py-2 text-[11px] text-faint transition-colors hover:border-brand/40 hover:text-brand"
+        className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-xl border border-dashed py-2 text-[11px] text-faint transition-colors hover:border-brand/40 hover:text-brand"
       >
-        <ChevronLeft className="size-3.5" aria-hidden />
-        جمع‌کردن پنل راهنما
+        <Lightbulb className="size-3.5" aria-hidden />
+        بستن پنل راهنما
       </button>
     </aside>
   )

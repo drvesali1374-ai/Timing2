@@ -282,6 +282,20 @@
       transform: translateY(0);
     }
   }
+
+  /* لامپ راهنمای مرحله — حالت روشن‌شده (FR-28)
+     دکمه لامپ هدر هنگام باز بودن پنل راهنما روشن می‌شود:
+     رنگ کهربایی + هالهٔ درخشش */
+  .bulb-on {
+    background: var(--amber-soft) !important;
+    color: var(--amber) !important;
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--amber) 30%, transparent),
+      0 0 14px color-mix(in srgb, var(--amber) 45%, transparent);
+  }
+  .bulb-on svg {
+    filter: drop-shadow(0 0 5px color-mix(in srgb, var(--amber) 70%, transparent));
+  }
 }
 
 @media print {

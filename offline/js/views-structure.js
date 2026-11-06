@@ -80,15 +80,28 @@
     var style = document.createElement('style');
     style.id = 't2-structure-v2-style';
     style.textContent = [
-      // چیدمان دوستونه دسکتاپ (مکمل کلاس lg:flex-row که در app.css تعریف نشده)
+      // چیدمان دوستونه دسکتاپ — ستون‌های هم‌عرض (۵۰-۵۰) با عرض کامل صفحه
       '@media (min-width: 1024px) {',
-      '  .t2-two-col { flex-direction: row; }',
-      '  .t2-tree-col { width: 20rem; }',
+      '  .t2-two-col { flex-direction: row; gap: 20px; }',
+      '  .t2-tree-col { width: calc(50% - 10px); }',
       '}',
-      // تورفتگی فهرست فعالیت‌ها زیر ایستگاه (در RTL از لبه آغازین)
-      '.t2-indent { margin-inline-start: 16px; }',
-      // ایستگاه انتخاب‌شده در درخت
-      '.t2-row-selected { border-color: var(--brand); background: color-mix(in srgb, var(--brand-soft) 30%, transparent); }',
+      // ── کارت ایستگاه در درخت ──
+      '.t2-station-card { border: 1px solid var(--border); border-radius: calc(var(--radius) + 5px); background: var(--card); overflow: hidden; transition: border-color .15s, background .15s, box-shadow .2s; }',
+      '.t2-station-card:hover { border-color: color-mix(in srgb, var(--brand) 40%, var(--border)); }',
+      '.t2-station-card.selected { border-color: var(--brand); background: color-mix(in srgb, var(--brand-soft) 40%, var(--card)); box-shadow: 0 0 0 2px color-mix(in srgb, var(--brand) 25%, transparent), 0 6px 18px -8px rgba(114,87,255,.5); }',
+      '.t2-station-head { display: flex; align-items: stretch; gap: 6px; padding: 4px 6px 4px 0; padding-inline-start: 32px; cursor: pointer; }',
+      '.t2-station-head:focus-visible { outline: 2px solid var(--brand); outline-offset: -2px; }',
+      '.t2-station-title { font-weight: 700; font-size: 13px; line-height: 1.45; margin: 0; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }',
+      '.t2-station-meta { font-size: 11px; line-height: 1.5; color: var(--muted-foreground); margin: 2px 0 0; }',
+      // ── ردیف فعالیت — ظاهر زیرمنو (بدون قاب، پس‌زمینه رنگی) ──
+      '.t2-activity-row { display: flex; align-items: stretch; gap: 6px; padding: 2px 4px 2px 0; padding-inline-start: 32px; border-radius: var(--radius); background: color-mix(in srgb, var(--surface-2) 75%, transparent); transition: background .15s; }',
+      '.t2-activity-row:hover { background: color-mix(in srgb, var(--brand-soft) 30%, transparent); }',
+      '.t2-activity-title { font-size: 12.5px; font-weight: 500; line-height: 1.45; display: block; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; text-align: start; }',
+      '.t2-activity-meta { font-size: 10.5px; line-height: 1.5; color: var(--muted-foreground); display: block; margin-top: 2px; }',
+      // ستون عملیات عمودی (ویرایش بالا، حذف پایین) چسبیده به راست
+      '.t2-actions-col { display: flex; flex-direction: column; justify-content: center; gap: 2px; flex-shrink: 0; }',
+      // زیرمنوی فعالیت‌ها — تورفتگی + خط راهنمای درختی در راست
+      '.t2-acts { margin: 4px 8px 8px 0; margin-inline-start: 8px; padding-inline-start: 10px; border-inline-start: 2px dashed color-mix(in srgb, var(--brand) 25%, transparent); display: flex; flex-direction: column; gap: 4px; }',
       // ردیف جمع A در انتهای جدول مجازها
       'table.table tfoot td { border-top: 2px solid var(--border); border-bottom: none; background: color-mix(in srgb, var(--surface-2) 70%, transparent); }',
       // دکمه پیوندی مسیر (breadcrumb)
@@ -123,6 +136,21 @@
       class: 'drag-handle shrink-0', title: 'جابه‌جایی',
       onclick: function (e) { e.stopPropagation(); },
     }, U.icon('gripVertical'));
+  }
+
+  /** ستون عملیات عمودی — ویرایش بالا، حذف پایین؛ چسبیده به راست کارت */
+  function actionButtons(edit, del) {
+    return U.h('div', { class: 't2-actions-col' },
+      U.h('button', {
+        class: 'icon-btn sm shrink-0', type: 'button',
+        'aria-label': edit.label, title: edit.title,
+        onclick: function (e) { e.stopPropagation(); edit.fn(); },
+      }, U.icon('pencil')),
+      U.h('button', {
+        class: 'icon-btn sm danger shrink-0', type: 'button',
+        'aria-label': del.label, title: del.title,
+        onclick: function (e) { e.stopPropagation(); del.fn(); },
+      }, U.icon('trash')));
   }
 
   /** دکمه‌های جابه‌جایی بالا/پایین — فقط دسکتاپ (در موبایل درگ فعال است؛ هم‌ارز نسخه اصلی که فقط DnD دارد) */
@@ -310,8 +338,8 @@
         U.h('h1', { class: 'text-xl font-extrabold', text: 'ساختار تولید' }),
         U.h('p', { class: 'text-sm text-muted num', text: U.formatInt(stations.length) + ' ایستگاه · ' + U.formatInt(totalActs) + ' فعالیت · ' + U.formatInt(totalEls) + ' عنصر کاری' }))));
 
-    // ── بدنه: درخت + جزئیات ──
-    var treeCol = U.h('div', { class: 'w-full lg:w-80 shrink-0 t2-tree-col' }, buildTreeCard(ctx, stations));
+    // ── بدنه: درخت + جزئیات — دو ستون هم‌عرض (۵۰-۵۰) ──
+    var treeCol = U.h('div', { class: 'w-full shrink-0 t2-tree-col' }, buildTreeCard(ctx, stations));
     var detailsCol = U.h('div', { class: 'flex-1 min-w-0 w-full' });
 
     if (!sel) {
@@ -337,21 +365,20 @@
     var project = ctx.project;
     var card = U.h('div', { class: 'card p-3' });
 
-    // ریشه درخت: خط تولید — یک خط، یک محصول
+    // ریشه درخت: خط تولید + محصول (کامل، بدون برش — بدون لیبل «یک خط — یک محصول»)
     card.appendChild(U.h('div', { class: 'flex flex-wrap items-center gap-2' },
       U.h('span', { class: 'chip-icon' }, U.icon('factory')),
       U.h('div', { class: 'flex-1 min-w-0' },
         U.h('p', { class: 'font-bold text-sm truncate', title: project.lineName || undefined, text: project.lineName || 'خط تولید' }),
-        U.h('p', { class: 'text-xs text-muted truncate', title: project.productName || undefined, text: 'محصول: ' + (project.productName || '—') })),
-      UI.helpDot('خط تولید و محصول', LINE_HELP),
-      UI.badge('یک خط — یک محصول', 'brand')));
+        U.h('p', { class: 'text-xs text-muted', style: { lineHeight: '1.45' }, title: project.productName || undefined, text: 'محصول: ' + (project.productName || '—') })),
+      UI.helpDot('خط تولید و محصول', LINE_HELP)));
 
     // فهرست ایستگاه‌ها — قابل مرتب‌سازی با Drag & Drop
     var listWrap = U.h('div', { class: 'flex flex-col gap-2 mt-3' });
     if (!stations.length) {
       listWrap.appendChild(U.h('p', { class: 'text-sm text-muted', text: 'هنوز ایستگاهی ثبت نشده است.' }));
     } else {
-      stations.forEach(function (st, i) { listWrap.appendChild(stationNode(st, i, stations, ctx)); });
+      stations.forEach(function (st) { listWrap.appendChild(stationNode(st, stations, ctx)); });
     }
     card.appendChild(listWrap);
 
@@ -364,62 +391,59 @@
     return card;
   }
 
-  // ── گره ایستگاه در درخت (قابل درگ + کلیک = انتخاب و باز/بسته) ──
-  function stationNode(st, index, stations, ctx) {
+  // ── گره ایستگاه در درخت — کارت با کلیک = انتخاب + باز/بسته؛ ──
+  // دستگیره درگ داخل کارت چسبیده به لبه راست؛ عملیات ویرایش/حذف
+  // عمودی در راست؛ عنوان تا دو خط؛ شمارش فقط روی کارت انتخاب‌شده
+  function stationNode(st, stations, ctx) {
     var isOpen = _stationOpen[st.id] !== false;
     var acts = DB.sortActivities(st.id);
     var isSelected = ctx.selectedId === st.id;
+    var elsCount = acts.reduce(function (n, a) { return n + DB.sortElements(a.id).length; }, 0);
 
-    function move(delta) {
-      var ids = stations.map(function (s) { return s.id; });
-      ids = swapIds(ids, st.id, delta);
-      if (!ids) return;
-      DB.reorderStations(ctx.projectId, ids);
-      appRefresh();
-    }
-
-    var row = U.h('div', { class: 'list-row' + (isSelected ? ' t2-row-selected' : ''), style: { position: 'relative' } },
-      dragHandleEl(),
-      U.h('button', {
-        class: 'icon-btn sm shrink-0', type: 'button',
-        'aria-label': (isOpen ? 'بستن فعالیت‌های ' : 'باز کردن فعالیت‌های ') + st.name, title: isOpen ? 'بستن فعالیت‌ها' : 'باز کردن فعالیت‌ها',
-        onclick: function (e) { e.stopPropagation(); _stationOpen[st.id] = !isOpen; appRefresh(); },
-      }, U.icon('chevronDown', isOpen ? '' : 'rot-n90')),
-      U.h('button', {
-        type: 'button',
-        class: 'flex min-w-0 flex-1 items-center gap-2 text-right',
-        style: { padding: '8px 6px', border: 'none', background: 'transparent', cursor: 'pointer', color: 'inherit', fontFamily: 'inherit' },
-        'aria-current': isSelected ? 'true' : null,
-        onclick: function (e) { e.stopPropagation(); _selectedStation[ctx.projectId] = st.id; appRefresh(); },
-      },
-        U.h('span', { class: 'num text-xs text-faint shrink-0', style: { width: '16px', textAlign: 'center' }, text: U.formatInt(index + 1) }),
-        U.h('span', { class: 'shrink-0 text-brand' }, U.icon('warehouse')),
-        U.h('span', { class: 'font-bold text-sm truncate', 'data-station-name': st.id, text: st.name })),
-      numBadge(U.formatInt(acts.length) + ' فعالیت', 'muted'),
-      U.h('button', {
-        class: 'icon-btn sm shrink-0', type: 'button',
-        'aria-label': 'ویرایش ایستگاه ' + st.name, title: 'ویرایش ایستگاه',
-        onclick: function (e) { e.stopPropagation(); openStationEditDialog(st); },
-      }, U.icon('pencil')),
-      U.h('button', {
-        class: 'icon-btn sm danger shrink-0', type: 'button',
-        'aria-label': 'حذف ایستگاه ' + st.name, title: 'حذف ایستگاه',
-        onclick: function (e) { e.stopPropagation(); confirmDeleteStation(st, ctx); },
-      }, U.icon('trash')));
-
-    // کلیک روی ردیف (نه دکمه‌ها) → انتخاب ایستگاه + باز/بسته شدن فهرست فعالیت‌ها
-    row.addEventListener('click', function (e) {
-      if (e.target.closest('button')) return;
+    function activate() {
       _selectedStation[ctx.projectId] = st.id;
       _stationOpen[st.id] = !isOpen;
       appRefresh();
+    }
+
+    // سربرگ کارت — کل ناحیه کلیک‌پذیر (به‌جز دکمه‌ها)
+    var head = U.h('div', {
+      class: 't2-station-head',
+      role: 'button', tabindex: '0',
+      'aria-expanded': isOpen ? 'true' : 'false',
+      'aria-current': isSelected ? 'true' : null,
+    },
+      actionButtons(
+        { label: 'ویرایش ایستگاه ' + st.name, title: 'ویرایش ایستگاه', fn: function () { openStationEditDialog(st); } },
+        { label: 'حذف ایستگاه ' + st.name, title: 'حذف ایستگاه', fn: function () { confirmDeleteStation(st, ctx); } }
+      ),
+      U.h('div', { class: 'min-w-0 flex-1' },
+        U.h('p', { class: 't2-station-title', 'data-station-name': st.id, title: st.name, text: st.name }),
+        isSelected
+          ? U.h('p', { class: 't2-station-meta num', text: U.formatInt(acts.length) + ' فعالیت · ' + U.formatInt(elsCount) + ' عنصر کاری' })
+          : null));
+
+    head.addEventListener('click', function (e) {
+      if (e.target.closest('button')) return;
+      activate();
+    });
+    head.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        activate();
+      }
     });
 
-    var node = U.h('div', null, row);
+    // کارت ایستگاه — دستگیره درگ داخل کارت، چسبیده به لبه راست
+    var card = U.h('div', { class: 't2-station-card t2-sort' + (isSelected ? ' selected' : '') },
+      dragHandleEl(),
+      head);
+
+    var node = U.h('div', null, card);
     if (isOpen) {
-      node.appendChild(U.h('div', { class: 'me-4 t2-indent flex flex-col gap-1 mt-1' }, activitiesSubList(st, acts, ctx)));
+      node.appendChild(U.h('div', { class: 't2-acts' }, activitiesSubList(st, acts, ctx)));
     }
-    makeSortable(row, 'station', st.id, ctx.projectId, function (fromId, toId) {
+    makeSortable(card, 'station', st.id, ctx.projectId, function (fromId, toId) {
       var ids = stations.map(function (s) { return s.id; });
       ids = moveBefore(ids, fromId, toId);
       if (!ids) return;
@@ -435,7 +459,7 @@
     if (!acts.length) {
       wrap.push(U.h('p', { class: 'text-xs text-faint text-center', text: 'فعالیتی ثبت نشده است' }));
     } else {
-      acts.forEach(function (a, ai) { wrap.push(activityTreeRow(a, ai, acts, station, ctx)); });
+      acts.forEach(function (a) { wrap.push(activityTreeRow(a, acts, station, ctx)); });
     }
     wrap.push(U.h('button', {
       class: 'btn btn-ghost btn-sm w-full', type: 'button',
@@ -444,44 +468,35 @@
     return wrap;
   }
 
-  // ── ردیف فعالیت در درخت (قابل درگ) ──
-  function activityTreeRow(a, index, acts, station, ctx) {
+  // ── ردیف فعالیت در درخت — ظاهر زیرمنو؛ بدون لوگو/شماره/گروه/شمارش ──
+  // عنوان تا دو خط؛ گروه و شمارش فقط برای فعالیت‌های ایستگاه انتخاب‌شده
+  function activityTreeRow(a, acts, station, ctx) {
     var group = ctx.groupMap[a.groupId];
     var elsCount = DB.sortElements(a.id).length;
-    var label = processLabelOf(a.processType);
+    var parentSelected = ctx.selectedId === station.id;
 
-    function move(delta) {
-      var ids = acts.map(function (x) { return x.id; });
-      ids = swapIds(ids, a.id, delta);
-      if (!ids) return;
-      DB.reorderActivities(station.id, ids);
-      appRefresh();
-    }
-
-    var row = U.h('div', { class: 'list-row', style: { position: 'relative', padding: '6px 8px' } },
+    var row = U.h('div', {
+      class: 't2-activity-row t2-sort',
+      title: 'نوع رویداد فرایندی: ' + processLabelOf(a.processType) +
+        (group ? ' · گروه مجازها: ' + group.name : '') + ' · ' + U.formatInt(elsCount) + ' عنصر',
+    },
       dragHandleEl(),
+      actionButtons(
+        { label: 'ویرایش فعالیت ' + a.name, title: 'ویرایش فعالیت', fn: function () { openActivityDialog(ctx, station, a); } },
+        { label: 'حذف فعالیت ' + a.name, title: 'حذف فعالیت', fn: function () { confirmDeleteActivity(a, ctx, false); } }
+      ),
       U.h('button', {
         type: 'button',
-        class: 'flex min-w-0 flex-1 items-center gap-2 text-right',
-        style: { padding: '6px 8px', border: 'none', background: 'transparent', cursor: 'pointer', color: 'inherit', fontFamily: 'inherit' },
+        class: 'flex min-w-0 flex-1 items-center text-right',
+        style: { border: 'none', background: 'transparent', cursor: 'pointer', color: 'inherit', fontFamily: 'inherit', padding: '6px 4px' },
         'aria-label': 'باز کردن صفحه فعالیت ' + a.name,
         onclick: function (e) { e.stopPropagation(); appNavigate('/p/' + ctx.projectId + '/activity/' + a.id); },
       },
-        U.h('span', { class: 'num text-xs text-faint shrink-0', style: { width: '14px', textAlign: 'center' }, text: U.formatInt(index + 1) }),
-        symbolTile(a.processType, 'نوع رویداد فرایندی: ' + label),
-        U.h('span', { class: 'text-sm font-medium flex-1 truncate', text: a.name }),
-        group ? U.h('span', { class: 'badge cyan shrink-0 truncate', title: 'گروه مجازها: ' + group.name, style: { maxWidth: '96px' }, text: group.name }) : null,
-        U.h('span', { class: 'text-xs text-faint num shrink-0', text: U.formatInt(elsCount) + ' عنصر' })),
-      U.h('button', {
-        class: 'icon-btn sm shrink-0', type: 'button',
-        'aria-label': 'ویرایش فعالیت ' + a.name, title: 'ویرایش فعالیت',
-        onclick: function (e) { e.stopPropagation(); openActivityDialog(ctx, station, a); },
-      }, U.icon('pencil')),
-      U.h('button', {
-        class: 'icon-btn sm danger shrink-0', type: 'button',
-        'aria-label': 'حذف فعالیت ' + a.name, title: 'حذف فعالیت',
-        onclick: function (e) { e.stopPropagation(); confirmDeleteActivity(a, ctx, false); },
-      }, U.icon('trash')));
+        U.h('span', { class: 'min-w-0' },
+          U.h('span', { class: 't2-activity-title', text: a.name }),
+          parentSelected
+            ? U.h('span', { class: 't2-activity-meta num', text: U.formatInt(elsCount) + ' عنصر · ' + (group ? group.name : 'بدون گروه') })
+            : null)));
 
     makeSortable(row, 'activity', a.id, station.id, function (fromId, toId) {
       var ids = acts.map(function (x) { return x.id; });
@@ -1049,7 +1064,8 @@
       appRefresh();
     }
 
-    var row = U.h('div', { class: 'list-row', style: { position: 'relative' } },
+    var row = U.h('div', { class: 'list-row t2-sort' },
+      dragHandleEl(),
       numBadge(U.formatInt(index + 1), 'muted'),
       U.h('div', { class: 'flex-1 min-w-0' },
         U.h('p', { class: 'font-semibold text-sm truncate', text: e.name }),
@@ -1072,8 +1088,7 @@
         class: 'icon-btn sm danger shrink-0', type: 'button',
         'aria-label': 'حذف عنصر ' + e.name, title: 'حذف عنصر کاری',
         onclick: function (e2) { e2.stopPropagation(); confirmDeleteElement(e); },
-      }, U.icon('trash')),
-      dragHandleEl());
+      }, U.icon('trash')));
 
     makeSortable(row, 'element', e.id, activityId, function (fromId, toId) {
       var ids = elements.map(function (x) { return x.id; });
