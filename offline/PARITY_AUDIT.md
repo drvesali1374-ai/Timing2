@@ -41,3 +41,35 @@
 - پیش‌فرض مبنا: WE → PER_ELEMENT_EXECUTION؛ سایر سطوح → PER_CYCLE.
 - حذف تعریف دارای سابقه → آرشیو (`isArchived`) در هر دو.
 - per-execution در سطح بالاتر از عنصر → «نیازمند قاعده تجمیع» (اعلان صریح؛ نه حذف بی‌صدا).
+
+
+---
+
+# ممیزی هم‌ارزی — جلسه دوم (نسخه ۱.۴.۰)
+
+**تاریخ:** ۱۴۰۵/۰۸/۲۶ · **مرجع وب:** شاخه `v1.4.0-session2-parallel-ui` · **دامنه:** ماتریس هم‌پوشانی + زمان‌سنجی/تحلیل/داشبورد/نمودار/گزارش
+
+## نتیجه کلی: هم‌ارز ✅
+
+## نگاشت فایل‌های کلیدی جلسه دوم
+
+| منطق | وب | آفلاین |
+|---|---|---|
+| موتور هم‌پوشانی | `src/calculation/overlap-matrix.ts` | `js/formulas.js` (پورت خط‌به‌خط — تست parity ۵۲/۵۲) |
+| سرویس مرکزی رابطه/ماتریس/مقدار | `src/application/overlap-service.ts` | `db.js` (listOverlapRelations/create/archive/restore/getOverlapMatrix/setCycleOverlaps/getElementRelations) |
+| stage ماتریس | `MatrixView.tsx` + `matrix/*` (۷ جزء) | `views-matrix.js` (۱۱۲۱ خط) |
+| بخش روابط فرم عنصر | `ParallelRelationsSection.tsx` + `ElementParallelPopover.tsx` | `views-matrix.js _parallelRelationsSection` |
+| بوم zoom/anchor/orthogonal/snapshot/PDF | `charts/ChartCanvas.tsx` + `PdfExportDialog.tsx` | `views-charts.js` (بازنویسی) |
+| ProcessSymbol مشترک | `components/common/ProcessSymbol.tsx` | `ui.js processSymbol` |
+| زیرهدر timing | `timing/TimingSubheader.tsx` | `views-timing.js t2t-subheader` (sticky/56px) |
+| پنل SUSPECT | `timing/SuspectDiagnosticDialog.tsx` | `views-timing.js` (دیالوگ تشخیص) |
+| مرکز گزارش‌ها | `ReportsView.tsx` + API report-settings | `views-reports.js` + `DB.getReportSettings/putReportSettings` |
+| داده v۳ | Prisma (OverlapRelation/ObservationOverlap/outlierSnapshot/anchors) | db.js TABLES/SINGULAR/FK_MAP + مهاجرت load() |
+
+## راستی‌آزمایی واقعی این جلسه
+
+- تست parity موتور: ۸ fixture دستی + ۲۰۰ مجموعه تصادفی seed ثابت روی هر دو موتور — نتایج دقیقاً یکسان (scripts/test-overlap-parity.ts — ۵۲/۵۲).
+- رگرسیون هسته: ۱۳۰/۱۳۰ (شامل schema v۳ و سازگاری بسته v۲).
+- مرورگر file://: موتور T2F/T2DB بارگذاری، seed با ۳ رابطه موازی، getOverlapMatrix/setCycleOverlaps با union،
+  UI مرحله ماتریس (جدول + انتخاب چرخه + chips بررسی‌نشده)، زیرهدر sticky، toolbar بوم، مرکز گزارش‌ها — بدون خطای کنسول.
+- اسکرین‌شات‌ها: `parity-shots/session2/` (وب و آفلاین).

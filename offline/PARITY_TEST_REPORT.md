@@ -53,3 +53,25 @@ bun run lint                       →  ۰ خطا (۱ هشدار پیش‌ین d
 
 - لمس فیزیکی DnD (touch) شبیه‌سازی نشد؛ DnD ماوس/کیبورد از طریق dnd-kit (وب) و HTML5 (آفلاین) با سناریوهای reorder سرویس تست شد.
 - مقایسه پیکسلی PDF چاپ در این جلسه خارج از دامنه بود.
+
+
+---
+
+# گزارش تست پارتی — جلسه دوم (۱۴۰۵/۰۸/۲۶)
+
+| تست | ابزار | نتیجه |
+|---|---|---|
+| ۱۳ آزمون اجباری §۹ + property-based (۳۰۰ بازه واقعی + ۳۰۰ نامعتبر، seed ثابت) | bun scripts/test-overlap-quick.ts | ۱۹/۱۹ ✅ |
+| یکپارچگی API ماتریس (CRUD/عضویت/استقلال چرخه/sync/رد قطعی/هشدار) | bun scripts/test-overlap-api.ts (سرور dev) | ۴۰/۴۰ ✅ |
+| parity موتور هم‌پوشانی (fixture یکسان روی وب TS و آفلاین JS) | bun scripts/test-overlap-parity.ts | ۵۲/۵۲ ✅ |
+| رگرسیون هسته آفلاین (schema v۳ + بسته v۲) | bun scripts/test-offline-core.js | ۱۳۰/۱۳۰ ✅ |
+| TypeScript وب | npx tsc --noEmit | پاک ✅ |
+| lint وب | bun run lint | ۰ خطا ✅ |
+| سینتکس آفلاین | node --check ×۱۷ فایل | همه معتبر ✅ |
+| مرورگر وب (ماتریس کامل + زیرهدر + بوم + گزارش‌ها) | agent-browser | بدون خطا ✅ |
+| مرورگر آفلاین file:// (ماتریس + موتور + زیرهدر + بوم + گزارش‌ها) | agent-browser | بدون خطا ✅ |
+| تولید PDF واقعی گزارش | page.pdf | PDF معتبر ۲ صفحه ✅ |
+
+اسکرین‌شات‌ها: parity-shots/session2/ — on-matrix-empty, on-matrix-relation-added, on-matrix-value-committed,
+on-timing-subheader, on-charts, on-reports-center, off-matrix-desktop, off-matrix-cycle-selected,
+off-timing-subheader, off-charts, off-reports-center + k25c2-* (زیرهدر موبایل/فیلتر/برگه).
