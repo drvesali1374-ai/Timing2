@@ -19,6 +19,8 @@
      D7  حفظ ترتیب پس از Refresh کامل صفحه
      D8  رفتار درست در زمان فعال بودن جست‌وجو (§۴):
          قفل سه سطح + راهنما + بدون sortOrder تکراری + بازگشت ترتیب
+     D9  UI آفلاین الونس‌ها (§۳/§۵): برچسب مبنا در ردیف‌های EXCLUDED
+         (هر چرخه / مبنا نامشخص) + متن منوی Restore والد-EXCLUDE + اجرای آن
 
    نکته: بین بخش‌ها «بازچینش آزمایشی» فقط ابزار setup است (مثل ساخت fixture)؛
    خود سناریوها و Assertionها صرفاً با رویدادهای واقعی مرورگر اجرا می‌شوند.
@@ -451,6 +453,80 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     await gotoStructure();
     const afterReload = await orderOf('station');
     ok(JSON.stringify(afterReload) === JSON.stringify(final), 'D8n. ترتیب پس از Refresh مجدد نیز پایدار است', afterReload.map((id) => fx.stations.indexOf(id) + 1));
+  }
+
+  // ═══ D9 — UI آفلاین: برچسب مبنا EXCLUDED + متن Restore (§۳/§۵) ═══
+  console.log('\n── D9 UI آفلاین الونس‌ها — مبنا و متن Restore ──');
+  {
+    // fixture: والد PER_CYCLE → EXCLUDE؛ بدون والد (پیش‌فرض مرکزی) → EXCLUDE؛ والد EXCLUDE + فرزند SET
+    const alw = await page.evaluate(() => {
+      const p = T2DB.createProject({ name: 'تست UI الونس آفلاین', lineName: 'خط تست', productName: 'محصول تست' });
+      const pid = p.id ?? p.project?.id;
+      const s = T2DB.createStation(pid, { name: 'ایستگاه الف' });
+      const sid = s.id ?? s.station?.id;
+      const a = T2DB.createActivity(sid, { name: 'فعالیت الف' });
+      const aid = a.id ?? a.activity?.id;
+      const mk = (r) => r.id ?? r.definition?.id;
+      const d1 = mk(T2DB.createAllowanceDefinition(pid, { title: 'استراحت چرخه‌ای', defaultValueType: 'FIXED_TIME', defaultTimeSeconds: 300, isActive: true, sortOrder: 0 }));
+      const d2 = mk(T2DB.createAllowanceDefinition(pid, { title: 'بدون والد فعال', defaultValueType: 'FIXED_TIME', defaultTimeSeconds: 20, isActive: true, sortOrder: 1 }));
+      const d3 = mk(T2DB.createAllowanceDefinition(pid, { title: 'بازفعال‌شده', defaultValueType: 'PERCENT', defaultValuePercent: 0.05, isActive: true, sortOrder: 2 }));
+      return { pid, sid, aid, d1, d2, d3 };
+    });
+    await page.evaluate((f) => {
+      T2DB.putScopeAllowanceOps('PROJECT', f.pid, [
+        { definitionId: f.d1, action: 'SET', valueType: 'FIXED_TIME', timeValueSeconds: 300, applicationBasis: 'PER_CYCLE' },
+        { definitionId: f.d3, action: 'SET', valueType: 'PERCENT', percentValue: 0.05 },
+      ]);
+      T2DB.putScopeAllowanceOps('STATION', f.sid, [
+        { definitionId: f.d1, action: 'EXCLUDE' },
+        { definitionId: f.d2, action: 'EXCLUDE' },
+        { definitionId: f.d3, action: 'EXCLUDE' },
+      ]);
+      T2DB.putScopeAllowanceOps('ACTIVITY', f.aid, [
+        { definitionId: f.d3, action: 'SET', valueType: 'PERCENT', percentValue: 0.07 },
+      ]);
+    }, alw);
+
+    await page.evaluate((h) => { location.hash = h; }, '#/p/' + alw.pid + '/activity/' + alw.aid);
+    await page.waitForSelector('section[aria-label="الونس‌ها و زمان‌های مجاز"] table', { timeout: 10000 });
+
+    const cellsOf = (title) => page.evaluate((t) => {
+      const rows = Array.from(document.querySelectorAll('section[aria-label="الونس‌ها و زمان‌های مجاز"] table tr'));
+      for (const tr of rows) {
+        const tds = Array.from(tr.querySelectorAll('td'));
+        if (tds.length && tds[0].textContent.indexOf(t) >= 0) return tds.map((td) => td.textContent.trim().replace(/\s+/g, ' '));
+      }
+      return null;
+    }, title);
+
+    const r1 = await cellsOf('استراحت چرخه‌ای');
+    ok(Boolean(r1) && r1[1].indexOf('هر چرخه') >= 0 && r1[1].indexOf('هر اجرا') === -1, 'D9a. EXCLUDED با والد PER_CYCLE: «زمان ثابت — هر چرخه» (نه «هر اجرا»)', r1 && r1[1]);
+    const r2 = await cellsOf('بدون والد فعال');
+    ok(Boolean(r2) && r2[1].indexOf('مبنا نامشخص') >= 0 && r2[1].indexOf('هر اجرا') === -1, 'D9b. EXCLUDED با پیش‌فرض مرکزی و بدون والد: «مبنا نامشخص» (نه «هر اجرا»)', r2 && r2[1]);
+    const r3 = await cellsOf('بازفعال‌شده');
+    ok(Boolean(r3) && r3[1] === 'درصدی' && r3[2].indexOf('۷٪') >= 0, 'D9c. بازفعال‌سازی فرزند روی والد EXCLUDE: درصدی ۷٪ فعال', r3 && r3.slice(0, 3));
+
+    // منوی عملیات ردیف بازفعال‌شده → متن Restore جدید
+    await page.click('button[aria-label="عملیات الونس بازفعال‌شده"]');
+    await page.waitForSelector('.dd-menu [role="menuitem"]', { timeout: 5000 });
+    const restoreLabel = await page.evaluate(() => {
+      const items = Array.from(document.querySelectorAll('.dd-menu [role="menuitem"]'));
+      return items.map((b) => b.textContent.trim()).find((t) => t.indexOf('بازگردانی') >= 0) || null;
+    });
+    ok(restoreLabel === 'بازگردانی به وضعیت والد (حذف تخصیص محلی)', 'D9d. متن منوی Restore والد-EXCLUDE: عبارت جدید', restoreLabel);
+
+    // اجرای Restore → حذف تخصیص محلی + وضعیت EXCLUDED والد + toast
+    await page.click('.dd-menu [role="menuitem"]:last-child');
+    await page.waitForFunction(() => {
+      const toasts = Array.from(document.querySelectorAll('.toast, [class*="toast"]'));
+      return toasts.some((t) => t.textContent.indexOf('وضعیت حذف از ارث‌بری والد دوباره برقرار شد') >= 0);
+    }, null, { timeout: 5000 }).catch(() => null);
+    const r3b = await cellsOf('بازفعال‌شده');
+    ok(Boolean(r3b) && r3b[2] === '—', 'D9e. پس از Restore: مقدار حذف و EXCLUDED والد دوباره برقرار', r3b && r3b[2]);
+    const stAssign = await page.evaluate((f) => T2DB.getState().allowanceAssignments.find((a) => a.definitionId === f.d3 && a.scopeType === 'STATION' && a.scopeId === f.sid), alw);
+    const actAssign = await page.evaluate((f) => T2DB.getState().allowanceAssignments.find((a) => a.definitionId === f.d3 && a.scopeType === 'ACTIVITY' && a.scopeId === f.aid), alw);
+    ok(Boolean(stAssign) && stAssign.mode === 'EXCLUDE' && !actAssign, 'D9f. تخصیص EXCLUDE والد دست‌نخورده + تخصیص محلی حذف شد', { st: stAssign && stAssign.mode, act: Boolean(actAssign) });
+    await page.screenshot({ path: path.join(SHOT_DIR, 'off-allowances-basis-restore.png'), fullPage: false });
   }
 
   // ═══ خطای صفر جاوااسکریپت ═══
