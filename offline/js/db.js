@@ -36,6 +36,7 @@
       { key: 'allowances', label: 'مجازها و الونس‌ها', desc: 'تعریف مرکزی الونس، تخصیص سلسله‌مراتبی و گروه‌های فعالیت' },
       { key: 'westinghouse', label: 'ارزیابی وستینگهاوس', desc: 'جدول مرجع و ارزیابی عناصر کاری' },
       { key: 'timing', label: 'زمان‌سنجی', desc: 'جلسه، جدول چرخه‌محور، Paste از Excel' },
+      { key: 'matrix', label: 'ماتریس هم‌پوشانی', desc: 'روابط موازی عناصر کاری و مقادیر هر چرخه' },
       { key: 'analysis', label: 'تحلیل نتایج', desc: 'آمار، داده غیرعادی و مقایسه اپراتورها' },
       { key: 'charts', label: 'نمودار فرایند', desc: 'OPC و FPC با گره‌های فعالیت' },
       { key: 'dashboard', label: 'داشبورد', desc: 'کارت‌های خلاصه و شاخص‌های تخصصی' },
@@ -65,7 +66,7 @@
       'backup.autoEnabled': 'true', 'backup.intervalMinutes': '30', 'backup.retention': '10',
       'outlier.method': 'mad', 'outlier.threshold': '3.5',
     },
-    SCHEMA_VERSION: 2,
+    SCHEMA_VERSION: 3,
     // ── جلسه اول: الونس‌های سلسله‌مراتبی ──
     ALLOWANCE_SCOPE_LABELS: { PROJECT: 'خط تولید', STATION: 'ایستگاه', ACTIVITY: 'فعالیت', WORK_ELEMENT: 'عنصر کاری' },
     ALLOWANCE_STATUS_LABELS: { INHERITED: 'ارث‌رسیده', OVERRIDDEN: 'جایگزین‌شده', CUSTOM: 'اختصاصی', EXCLUDED: 'حذف‌شده از ارث‌بری' },
@@ -83,6 +84,8 @@
     'operators', 'studySessions', 'cycleObservations', 'timelineLanes', 'elementObservations',
     'ratingTables', 'ratingTableGrades', 'ratingAssessments',
     'calculationRuns', 'chartNodes', 'chartEdges', 'finalizationInfos',
+    // ── جلسه دوم: روابط موازی و مقادیر هم‌پوشانی ──
+    'overlapRelations', 'observationOverlaps',
     'auditEvents', 'deletionMarkers', 'appSettings', 'backups',
   ];
 
@@ -106,6 +109,9 @@
         TABLES.forEach(function (t) { if (Array.isArray(parsed[t])) s[t] = parsed[t]; });
         // ارتقای schema درجا — v۱: مهاجرت الونس‌ها به مدل سلسله‌مراتبی (جلسه اول §۴)
         migrateAllowancesAll(s);
+        // ارتقای v۳ — جلسه دوم: snapshot تشخیصی SUSPECT + anchorهای یال (پیش‌فرض تهی، بدون دادهٔ ساختگی)
+        (s.elementObservations || []).forEach(function (o) { if (o.outlierSnapshot === undefined) o.outlierSnapshot = null; });
+        (s.chartEdges || []).forEach(function (e) { if (e.sourceAnchor === undefined) e.sourceAnchor = null; if (e.targetAnchor === undefined) e.targetAnchor = null; });
         return s;
       }
     } catch (e) { storageOk = false; }
@@ -544,7 +550,10 @@
     var e = byId('workElements', id);
     if (!e) throw new Error('عنصر کاری یافت نشد.');
     var obs = filterBy('elementObservations', 'workElementId', id);
+    // جلسه ۲ — آرشیو روابط موازی مرجع (حفظ تاریخچهٔ مقادیر چرخه‌ها)
+    var archivedRelations = archiveOverlapRelationsForElement(id);
     var deps = { 'مشاهده': obs.length, 'ارزیابی وستینگهاوس این عنصر': state.ratingAssessments.filter(function (r) { return r.workElementId === id; }).length };
+    if (archivedRelations > 0) deps['رابطهٔ موازی (آرشیو شد)'] = archivedRelations;
     cascadeDelete([id]);
     markDeleted('WorkElement', [id]);
     markProjectCalculationsStale(projectIdOfActivity(e.activityId));
@@ -2246,7 +2255,7 @@
     var activityById = {};
     allActivities.forEach(function (a) { activityById[a.id] = a; });
     var byType = {};
-    ['OPERATION', 'INSPECTION', 'TRANSPORT', 'DELAY', 'STORAGE', 'MANUAL'].forEach(function (t) { byType[t] = 0; });
+    ['OPERATION', 'INSPECTION', 'TRANSPORT', 'DELAY', 'STORAGE', 'MANUAL', 'MATERIAL_INPUT'].forEach(function (t) { byType[t] = 0; });
     var maxX = CANVAS_MARGIN * 2, maxY = CANVAS_MARGIN * 2;
     var nodeDtos = nodes.map(function (n) {
       byType[n.nodeType] = (byType[n.nodeType] || 0) + 1;
@@ -2272,10 +2281,13 @@
     };
   }
   function createManualNode(projectId, chartType, input) {
-    var allowed = chartType === 'OPC' ? OPC_TYPES : ['OPERATION', 'INSPECTION', 'TRANSPORT', 'DELAY', 'STORAGE'];
+    // جلسه ۲ §۱۵.۱ — OPC توسعه‌یافته: ورودی مواد + انبار اختیاری؛ FPC: ۵ نوع + ورودی مواد
+    var allowed = chartType === 'OPC'
+      ? ['OPERATION', 'INSPECTION', 'MATERIAL_INPUT', 'STORAGE']
+      : ['OPERATION', 'INSPECTION', 'TRANSPORT', 'DELAY', 'STORAGE', 'MATERIAL_INPUT'];
     if (allowed.indexOf(input.nodeType) < 0) {
       throw new Error(chartType === 'OPC'
-        ? 'در نمودار OPC فقط گره عملیات و بازرسی مجاز است؛ گره سایر انواع را در FPC بسازید.'
+        ? 'در نمودار OPC کلاسیک فقط گره عملیات و بازرسی مجاز است؛ «ورودی مواد» و «انبارش» به‌عنوان توسعهٔ اختیاری قابل افزودن‌اند.'
         : 'نوع گره معتبر نیست.');
     }
     var nodes = filterBy('chartNodes', 'chartType', chartType).filter(function (n) { return n.projectId === projectId; });
@@ -2315,6 +2327,10 @@
       }
     });
     commit();
+    // جلسه ۲ §۱۵.۵ — هر ذخیرهٔ چیدمان دستی، snapshot پایدار را هم به‌روز می‌کند
+    var chart = getChart(projectId, chartType);
+    var snapNodes = chart.nodes.map(function (n) { return { id: n.id, positionX: n.positionX, positionY: n.positionY }; });
+    saveChartLayoutSnapshot(projectId, chartType, snapNodes, chart.canvas);
   }
   function moveChartNodeOrder(projectId, chartType, nodeId, dir) {
     var nodes = filterBy('chartNodes', 'chartType', chartType).filter(function (n) { return n.projectId === projectId; }).sort(function (a, b) { return a.sortOrder - b.sortOrder; });
@@ -2330,11 +2346,21 @@
     rebuildChain(projectId, chartType, orderedIds);
     commit();
   }
-  function createChartEdge(projectId, chartType, sourceNodeId, targetNodeId) {
+  function createChartEdge(projectId, chartType, sourceNodeId, targetNodeId, anchors) {
     if (sourceNodeId === targetNodeId) throw new Error('اتصال یک گره به خودش معنا ندارد.');
-    var exists = state.chartEdges.find(function (e) { return e.projectId === projectId && e.chartType === chartType && e.sourceNodeId === sourceNodeId && e.targetNodeId === targetNodeId; });
+    var exists = state.chartEdges.find(function (e) {
+      return e.projectId === projectId && e.chartType === chartType &&
+        ((e.sourceNodeId === sourceNodeId && e.targetNodeId === targetNodeId) ||
+         (e.sourceNodeId === targetNodeId && e.targetNodeId === sourceNodeId));
+    });
     if (exists) throw new Error('این اتصال قبلاً ثبت شده است.');
-    state.chartEdges.push({ id: U.uid(), projectId: projectId, chartType: chartType, sourceNodeId: sourceNodeId, targetNodeId: targetNodeId, isChain: false, sortOrder: 0 });
+    state.chartEdges.push({
+      id: U.uid(), projectId: projectId, chartType: chartType,
+      sourceNodeId: sourceNodeId, targetNodeId: targetNodeId,
+      sourceAnchor: (anchors && anchors.sourceAnchor) || null,
+      targetAnchor: (anchors && anchors.targetAnchor) || null,
+      isChain: false, sortOrder: 0,
+    });
     commit();
   }
   function deleteChartEdge(edgeId) {
@@ -2609,10 +2635,12 @@
     timelineLanes: 'timelineLane', elementObservations: 'elementObservation',
     ratingTables: 'ratingTable', ratingTableGrades: 'ratingTableGrade', ratingAssessments: 'ratingAssessment',
     calculationRuns: 'calculationRun', chartNodes: 'chartNode', chartEdges: 'chartEdge', finalizationInfos: 'finalizationInfo',
+    // جلسه ۲ — روابط موازی و مقادیر هم‌پوشانی
+    overlapRelations: 'overlapRelation', observationOverlaps: 'observationOverlap',
   };
   var PLURAL = {};
   Object.keys(SINGULAR).forEach(function (p) { PLURAL[SINGULAR[p]] = p; });
-  var DOMAIN_ORDER = ['projects', 'projectSettings', 'stations', 'activityGroups', 'allowanceDefinitions', 'allowanceCategories', 'operators', 'ratingTables', 'activities', 'ratingTableGrades', 'groupAllowances', 'activityAllowanceOverrides', 'workElements', 'allowanceAssignments', 'studySessions', 'ratingAssessments', 'cycleObservations', 'timelineLanes', 'elementObservations', 'chartNodes', 'chartEdges', 'calculationRuns', 'finalizationInfos'];
+  var DOMAIN_ORDER = ['projects', 'projectSettings', 'stations', 'activityGroups', 'allowanceDefinitions', 'allowanceCategories', 'operators', 'ratingTables', 'activities', 'ratingTableGrades', 'groupAllowances', 'activityAllowanceOverrides', 'workElements', 'allowanceAssignments', 'studySessions', 'ratingAssessments', 'cycleObservations', 'timelineLanes', 'elementObservations', 'overlapRelations', 'observationOverlaps', 'chartNodes', 'chartEdges', 'calculationRuns', 'finalizationInfos'];
 
   function dumpDomain(projectId) {
     var snap = {};
@@ -2657,6 +2685,16 @@
             if (se && projectIdOfActivity(se.activityId) === projectId) cIds[c.id] = true;
           });
           rows = rows.filter(function (r) { return cIds[r.cycleId]; });
+        } else if (plural === 'observationOverlaps') {
+          // جلسه ۲ — مقدار هر رابطه در چرخه‌های همین پروژه
+          var ovRelIds = {};
+          state.overlapRelations.forEach(function (r) { if (r.projectId === projectId) ovRelIds[r.id] = true; });
+          var ovCIds = {};
+          state.cycleObservations.forEach(function (c) {
+            var se = byId('studySessions', c.sessionId);
+            if (se && projectIdOfActivity(se.activityId) === projectId) ovCIds[c.id] = true;
+          });
+          rows = rows.filter(function (r) { return ovRelIds[r.relationId] && ovCIds[r.cycleId]; });
         }
       }
       snap[SINGULAR[plural]] = rows.map(function (r) { return Object.assign({}, r); });
@@ -2678,7 +2716,7 @@
     var manifest = {
       format: 'timing-project-package', schemaVersion: CONST.SCHEMA_VERSION,
       createdAt: U.nowISO(), appVersion: 'offline-1.0.0',
-      includes: ['settings', 'structure', 'operators', 'groupsAndAllowances', 'ratingTables', 'rawObservations', 'charts', 'calculations'],
+      includes: ['settings', 'structure', 'operators', 'groupsAndAllowances', 'ratingTables', 'rawObservations', 'overlaps', 'charts', 'calculations'],
       projectName: project.name,
     };
     return checksumOf({ manifest: manifest, data: data }).then(function (sum) {
@@ -2724,10 +2762,12 @@
     workElement: ['activityId'], studySession: ['activityId', 'operatorId'],
     ratingAssessment: ['workElementId', 'ratingTableId'], cycleObservation: ['sessionId'],
     timelineLane: ['cycleId'], elementObservation: ['cycleId', 'workElementId', 'laneId'],
+    overlapRelation: ['projectId', 'elementLowId', 'elementHighId'],
+    observationOverlap: ['relationId', 'cycleId'],
     chartNode: ['projectId', 'activityId'], chartEdge: ['projectId', 'sourceNodeId', 'targetNodeId'],
     calculationRun: ['projectId'], finalizationInfo: ['projectId'],
   };
-  var NULLABLE_FKS = { 'activity.groupId': true, 'chartNode.activityId': true, 'elementObservation.laneId': true };
+  var NULLABLE_FKS = { 'activity.groupId': true, 'chartNode.activityId': true, 'elementObservation.laneId': true, 'overlapRelation.elementLowId': true, 'overlapRelation.elementHighId': true, 'chartEdge.sourceAnchor': true, 'chartEdge.targetAnchor': true };
   var ASSIGNMENT_SCOPE_TABLE = { PROJECT: 'project', STATION: 'station', ACTIVITY: 'activity', WORK_ELEMENT: 'workElement' };
   function reverseFkTable(fk) {
     return { projectId: 'project', stationId: 'station', groupId: 'activityGroup', categoryId: 'allowanceCategory', definitionId: 'allowanceDefinition', activityId: 'activity', ratingTableId: 'ratingTable', operatorId: 'operator', workElementId: 'workElement', sessionId: 'studySession', cycleId: 'cycleObservation', laneId: 'timelineLane', sourceNodeId: 'chartNode', targetNodeId: 'chartNode' }[fk];
@@ -3028,6 +3068,19 @@
     insp.forEach(function (v, i) { cells4.push({ cycleNo: i + 1, workElementId: e5.id, rawDuration: v }); });
     putCells(s4.id, cells4);
 
+    // ── جلسه دوم: روابط موازی نمونه با مقادیر چرخه‌ای (دموی ماتریس هم‌پوشانی) ──
+    var relPE = createOverlapRelation(projectId, e3.id, e2.id); // «پرس اتوماتیک» ↔ «بستن چهار پیچ» (هم‌زمان مونتاژ)
+    var relPR = createOverlapRelation(projectId, e4.id, e1.id); // «پرس کوبی روتور» ↔ «برداشتن قطعه از گراناق» (بارگذاری هم‌زمان)
+    var s3cycles = filterBy('cycleObservations', 'sessionId', s3.id).sort(function (a, b) { return a.cycleNo - b.cycleNo; });
+    if (s3cycles.length >= 2) {
+      setCycleOverlaps(s3cycles[0].id, [{ relationId: relPR.id, status: 'OVERLAP', overlapDuration: 3.2 }]);
+      setCycleOverlaps(s3cycles[1].id, [{ relationId: relPR.id, status: 'NO_OVERLAP' }]);
+    }
+    var s1cycles = filterBy('cycleObservations', 'sessionId', s1.id).sort(function (a, b) { return a.cycleNo - b.cycleNo; });
+    if (s1cycles.length >= 1) {
+      setCycleOverlaps(s1cycles[0].id, [{ relationId: relPE.id, status: 'OVERLAP', overlapDuration: 2.5 }]);
+    }
+
     refreshOutliersForProject(projectId, { silent: true });
     commit();
     return p;
@@ -3035,6 +3088,389 @@
 
   // ═══════════ راه‌اندازی و API عمومی ═══════════
   state = load();
+
+
+  /* ═══════════════════════════════════════════════════════════
+     جلسه دوم — سرویس مرکزی هم‌پوشانی عناصر کاری
+     یک منبع دادهٔ معتبر: OverlapRelation (یگانی زوج) + ObservationOverlap
+     (مقدار هر چرخه). فرم A، فرم B و ماتریس هر سه از همین توابع می‌خوانند.
+     ═══════════════════════════════════════════════════════════ */
+
+  function projectIdOfElement(elementId) {
+    var e = byId('workElements', elementId);
+    if (!e) return null;
+    return projectIdOfActivity(e.activityId);
+  }
+
+  function nameOfElement(elementId) {
+    var e = byId('workElements', elementId);
+    return e ? e.name : '؟';
+  }
+
+  /** مرتب‌سازی عناصر مطابق ساختار پروژه: ایستگاه → فعالیت → sortOrder */
+  function projectElementsSorted(projectId) {
+    var stations = filterBy('stations', 'projectId', projectId).slice().sort(function (a, b) { return a.sortOrder - b.sortOrder; });
+    var out = [];
+    stations.forEach(function (st) {
+      var acts = filterBy('activities', 'stationId', st.id).slice().sort(function (a, b) { return a.sortOrder - b.sortOrder; });
+      acts.forEach(function (ac) {
+        var els = filterBy('workElements', 'activityId', ac.id).slice().sort(function (a, b) { return a.sortOrder - b.sortOrder; });
+        els.forEach(function (el) {
+          out.push({ elementId: el.id, name: el.name, activityId: ac.id, activityName: ac.name, stationId: st.id, stationName: st.name, stationSort: st.sortOrder, activitySort: ac.sortOrder, elementSort: el.sortOrder });
+        });
+      });
+    });
+    return out;
+  }
+
+  function listOverlapRelations(projectId) {
+    return filterBy('overlapRelations', 'projectId', projectId).slice().sort(function (a, b) { return (a.createdAt || '').localeCompare(b.createdAt || ''); });
+  }
+
+  function createOverlapRelation(projectId, elementAId, elementBId) {
+    if (elementAId === elementBId) throw new Error('عنصر نمی‌تواند با خودش رابطهٔ موازی داشته باشد.');
+    var projA = projectIdOfElement(elementAId);
+    var projB = projectIdOfElement(elementBId);
+    if (!projA || !projB) throw new Error('عنصر کاری یافت نشد.');
+    if (projA !== projectId || projB !== projectId) throw new Error('هر دو عنصر باید متعلق به همین پروژه باشند.');
+    var low = elementAId < elementBId ? elementAId : elementBId;
+    var high = elementAId < elementBId ? elementBId : elementAId;
+    var existing = state.overlapRelations.find(function (r) { return r.projectId === projectId && r.elementLowId === low && r.elementHighId === high; });
+    if (existing && existing.isActive) throw new Error('رابطهٔ موازی این دو عنصر از قبل تعریف شده است.');
+    var relation;
+    if (existing) {
+      existing.isActive = true;
+      existing.version = (existing.version || 1) + 1;
+      touch(existing);
+      relation = existing;
+    } else {
+      relation = { id: U.uid(), projectId: projectId, elementLowId: low, elementHighId: high, isActive: true, version: 1, createdAt: U.nowISO(), updatedAt: U.nowISO() };
+      state.overlapRelations.push(relation);
+    }
+    markProjectCalculationsStale(projectId);
+    recordAudit({ entityType: 'OverlapRelation', entityId: relation.id, action: existing ? 'RESTORE' : 'CREATE', entityName: nameOfElement(low) + ' ↔ ' + nameOfElement(high), projectId: projectId });
+    commit();
+    return relation;
+  }
+
+  function archiveOverlapRelation(relationId) {
+    var r = byId('overlapRelations', relationId);
+    if (!r) throw new Error('رابطه یافت نشد.');
+    if (!r.isActive) return r;
+    r.isActive = false;
+    r.version = (r.version || 1) + 1;
+    touch(r);
+    markProjectCalculationsStale(r.projectId);
+    recordAudit({ entityType: 'OverlapRelation', entityId: relationId, action: 'DELETE', entityName: nameOfElement(r.elementLowId) + ' ↔ ' + nameOfElement(r.elementHighId), projectId: r.projectId });
+    commit();
+    return r;
+  }
+
+  function restoreOverlapRelation(relationId) {
+    var r = byId('overlapRelations', relationId);
+    if (!r) throw new Error('رابطه یافت نشد.');
+    if (r.isActive) return r;
+    r.isActive = true;
+    r.version = (r.version || 1) + 1;
+    touch(r);
+    markProjectCalculationsStale(r.projectId);
+    recordAudit({ entityType: 'OverlapRelation', entityId: relationId, action: 'RESTORE', projectId: r.projectId });
+    commit();
+    return r;
+  }
+
+  function archiveOverlapRelationsForElement(elementId) {
+    var affected = state.overlapRelations.filter(function (r) { return r.isActive && (r.elementLowId === elementId || r.elementHighId === elementId); });
+    affected.forEach(function (r) {
+      r.isActive = false;
+      r.version = (r.version || 1) + 1;
+      touch(r);
+      recordAudit({ entityType: 'OverlapRelation', entityId: r.id, action: 'DELETE', entityName: 'آرشیو خودکار پس از حذف عنصر', projectId: r.projectId });
+    });
+    return affected.length;
+  }
+
+  /** مدت و بازهٔ هر عنصر در یک چرخه — از دادهٔ خام مشاهده */
+  function cycleOverlapContext(cycleId) {
+    var cycle = byId('cycleObservations', cycleId);
+    if (!cycle) throw new Error('چرخه یافت نشد.');
+    var session = byId('studySessions', cycle.sessionId);
+    var durations = {};
+    var intervals = {};
+    filterBy('elementObservations', 'cycleId', cycleId).forEach(function (o) {
+      var d = o.derivedDuration != null ? o.derivedDuration : (o.rawDuration != null ? o.rawDuration : null);
+      durations[o.workElementId] = d;
+      intervals[o.workElementId] = (o.startOffset != null && o.endOffset != null) ? { startOffset: o.startOffset, endOffset: o.endOffset } : null;
+    });
+    return { cycle: cycle, session: session, durations: durations, intervals: intervals };
+  }
+
+  function overlapValidationSummary(out, elementsSorted) {
+    var nameOf = {};
+    elementsSorted.forEach(function (e) { nameOf[e.elementId] = e.name; });
+    var verdict = (out.localFailures.length > 0 || out.tripleIssues.length > 0 || out.confirmed.verdict === 'INVALID')
+      ? 'INVALID'
+      : (out.confirmed.verdict === 'INDETERMINATE' ? 'INDETERMINATE' : 'VALID');
+    return {
+      verdict: verdict,
+      localFailures: out.localFailures.map(function (lf) {
+        return { pair: lf.pair, failures: lf.failures, pairLabel: (nameOf[lf.pair[0]] || lf.pair[0]) + ' ↔ ' + (nameOf[lf.pair[1]] || lf.pair[1]) };
+      }),
+      tripleIssues: out.tripleIssues,
+      globalIssues: out.confirmed.issues,
+      provisionalWarnings: out.provisional.warnings,
+      multiOverlaps: Object.keys(out.multiOverlaps).map(function (key) {
+        return { members: key.split('|'), memberNames: key.split('|').map(function (id) { return nameOf[id] || id; }), value: out.multiOverlaps[key].value, provisional: out.multiOverlaps[key].provisional };
+      }),
+      unions: Object.keys(out.unions).map(function (key) {
+        return { members: key.split('|'), memberNames: key.split('|').map(function (id) { return nameOf[id] || id; }), value: out.unions[key].value, source: out.unions[key].source };
+      }),
+    };
+  }
+
+  /** projection ماتریس — عضویت پویا از روابط فعال؛ مقادیر چرخهٔ انتخاب‌شده */
+  function getOverlapMatrix(projectId, cycleId) {
+    var elementsSorted = projectElementsSorted(projectId);
+    var relations = listOverlapRelations(projectId);
+    var activeRelations = relations.filter(function (r) { return r.isActive; });
+    var memberIds = {};
+    activeRelations.forEach(function (r) { memberIds[r.elementLowId] = true; memberIds[r.elementHighId] = true; });
+    var members = elementsSorted.filter(function (e) { return !!memberIds[e.elementId]; });
+
+    // فهرست چرخه‌ها برای انتخاب‌گر — گروه‌بندی جلسات (ادغام نمی‌شوند)
+    var cycles = [];
+    var sessions = [];
+    state.studySessions.forEach(function (ss) {
+      var act = byId('activities', ss.activityId);
+      if (!act) return;
+      var st = byId('stations', act.stationId);
+      if (!st || st.projectId !== projectId) return;
+      var op = byId('operators', ss.operatorId);
+      filterBy('cycleObservations', 'sessionId', ss.id).sort(function (a, b) { return a.cycleNo - b.cycleNo; }).forEach(function (c) {
+        cycles.push({
+          cycleId: c.id, cycleNo: c.cycleNo, sessionId: ss.id, operatorId: ss.operatorId,
+          operatorName: op ? op.displayName : '؟', timingMethod: ss.timingMethod, sessionStatus: ss.status,
+          activityId: ss.activityId, activityName: act.name, createdAt: c.createdAt,
+        });
+      });
+    });
+
+    var cells = {};
+    var selectedCycle = null;
+    var validation = null;
+    if (cycleId) {
+      selectedCycle = cycles.find(function (c) { return c.cycleId === cycleId; }) || null;
+      if (!selectedCycle) throw new Error('چرخه یافت نشد یا متعلق به این پروژه نیست.');
+      filterBy('observationOverlaps', 'cycleId', cycleId).forEach(function (v) {
+        cells[v.relationId] = { relationId: v.relationId, status: v.status, overlapDuration: v.overlapDuration, version: v.version || 1, updatedAt: v.updatedAt };
+      });
+      var ctx = cycleOverlapContext(cycleId);
+      var pairLookup = function (a, b) {
+        var rel = activeRelations.find(function (r) { return (r.elementLowId === a && r.elementHighId === b) || (r.elementLowId === b && r.elementHighId === a); });
+        if (!rel) return undefined;
+        var cell = cells[rel.id];
+        if (!cell) return undefined;
+        return { status: cell.status, overlapDuration: cell.overlapDuration };
+      };
+      var nameOfFn = function (id) {
+        var el = elementsSorted.find(function (e) { return e.elementId === id; });
+        return el ? el.name : id;
+      };
+      var out = T2F.runFullValidation(members.map(function (m) { return m.elementId; }), ctx.durations, ctx.intervals, pairLookup, nameOfFn);
+      validation = overlapValidationSummary(out, elementsSorted);
+    }
+
+    return {
+      projectId: projectId,
+      members: members,
+      relations: relations.map(function (r) { return { id: r.id, elementLowId: r.elementLowId, elementHighId: r.elementHighId, isActive: r.isActive, version: r.version || 1, createdAt: r.createdAt, updatedAt: r.updatedAt }; }),
+      cells: cells,
+      selectedCycle: selectedCycle,
+      cycles: cycles,
+      elementsCatalog: elementsSorted,
+      validation: validation,
+    };
+  }
+
+  /** ثبت مقادیر هم‌پوشانی یک چرخه — خط کامل اعتبارسنجی + rollback (§۱۰) */
+  function setCycleOverlaps(cycleId, updates) {
+    if (!updates || updates.length === 0) throw new Error('تغییری برای ثبت وجود ندارد.');
+    var ctx = cycleOverlapContext(cycleId);
+    var projectId = projectIdOfActivity(ctx.session.activityId);
+    var elementsSorted = projectElementsSorted(projectId);
+    var nameOfFn = function (id) {
+      var el = elementsSorted.find(function (e) { return e.elementId === id; });
+      return el ? el.name : id;
+    };
+    var relationById = {};
+    updates.forEach(function (u) {
+      var rel = byId('overlapRelations', u.relationId);
+      if (!rel) throw new Error('رابطه یافت نشد.');
+      if (rel.projectId !== projectId) throw new Error('رابطه به پروژهٔ این چرخه تعلق ندارد.');
+      if (!rel.isActive) throw new Error('رابطهٔ آرشیوشده قابل ویرایش نیست؛ ابتدا آن را بازگردانی کنید.');
+      relationById[rel.id] = rel;
+    });
+
+    var allActive = state.overlapRelations.filter(function (r) { return r.projectId === projectId && r.isActive; });
+    var valueByKey = {};
+    filterBy('observationOverlaps', 'cycleId', cycleId).forEach(function (v) { valueByKey[v.relationId] = v; });
+    var newByKey = Object.assign({}, valueByKey);
+    updates.forEach(function (u) {
+      var normalized = u.status === 'NO_OVERLAP' ? 0 : (u.status === 'UNREVIEWED' ? null : (u.overlapDuration != null ? u.overlapDuration : null));
+      newByKey[u.relationId] = { relationId: u.relationId, cycleId: cycleId, status: u.status, overlapDuration: normalized, version: (valueByKey[u.relationId] || {}).version || 0 };
+    });
+
+    var memberIds = {};
+    allActive.forEach(function (r) { memberIds[r.elementLowId] = true; memberIds[r.elementHighId] = true; });
+    var memberList = Object.keys(memberIds);
+    var pairLookup = function (a, b) {
+      var rel = allActive.find(function (r) { return (r.elementLowId === a && r.elementHighId === b) || (r.elementLowId === b && r.elementHighId === a); });
+      if (!rel) return undefined;
+      var v = newByKey[rel.id];
+      if (!v) return undefined;
+      return { status: v.status, overlapDuration: v.overlapDuration };
+    };
+    var out = T2F.runFullValidation(memberList, ctx.durations, ctx.intervals, pairLookup, nameOfFn);
+    var hasDefinite = out.localFailures.length > 0 || out.tripleIssues.length > 0 || out.confirmed.verdict === 'INVALID';
+    if (hasDefinite) {
+      var msgs = [];
+      out.localFailures.forEach(function (lf) {
+        lf.failures.forEach(function (f) { msgs.push(nameOfFn(lf.pair[0]) + ' ↔ ' + nameOfFn(lf.pair[1]) + ': ' + f.message); });
+      });
+      out.tripleIssues.forEach(function (i) { msgs.push(i.message); });
+      out.confirmed.issues.forEach(function (i) { if (i.kind === 'DEFINITE') msgs.push(i.message); });
+      var err = new Error('ثبت تغییرات ممکن نیست — دادهٔ غیرممکن رد شد:\n' + msgs.join('\n'));
+      err.code = 'OVERLAP_VALIDATION_FAILED';
+      err.details = { issues: msgs };
+      throw err;
+    }
+
+    // ثبت (تراکنش ساده در حافظه — rollback با throw قبل از commit)
+    updates.forEach(function (u) {
+      var normalized = u.status === 'NO_OVERLAP' ? 0 : (u.status === 'UNREVIEWED' ? null : (u.overlapDuration != null ? u.overlapDuration : null));
+      var existing = valueByKey[u.relationId];
+      if (existing) {
+        if (u.expectedVersion != null && (existing.version || 1) !== u.expectedVersion) {
+          var conflict = new Error('مقدار این زوج هم‌پوشانی از محل دیگری هم‌زمان تغییر کرده است؛ صفحه را نوسازی کنید.');
+          conflict.code = 'VERSION_CONFLICT';
+          throw conflict;
+        }
+        existing.status = u.status;
+        existing.overlapDuration = normalized;
+        existing.version = (existing.version || 1) + 1;
+        touch(existing);
+      } else {
+        state.observationOverlaps.push({ id: U.uid(), relationId: u.relationId, cycleId: cycleId, status: u.status, overlapDuration: normalized, version: 1, updatedAt: U.nowISO() });
+      }
+      var rel = relationById[u.relationId];
+      recordAudit({
+        entityType: 'ObservationOverlap', entityId: u.relationId + ':' + cycleId, action: 'UPDATE',
+        entityName: nameOfFn(rel.elementLowId) + ' ↔ ' + nameOfFn(rel.elementHighId) + ' — چرخهٔ ' + ctx.cycle.cycleNo,
+        projectId: projectId,
+      });
+    });
+    markProjectCalculationsStale(projectId);
+    commit();
+    var after = getOverlapMatrix(projectId, cycleId);
+    return { cells: after.cells, validation: after.validation, warnings: out.provisional.warnings.map(function (w) { return w.message; }) };
+  }
+
+  /** روابط یک عنصر برای فرم — منبع واحد (§۴.۲) */
+  function getElementRelations(elementId) {
+    var element = byId('workElements', elementId);
+    if (!element) throw new Error('عنصر کاری یافت نشد.');
+    var projectId = projectIdOfActivity(element.activityId);
+    var relations = state.overlapRelations.filter(function (r) { return r.elementLowId === elementId || r.elementHighId === elementId; });
+    var rows = relations.map(function (r) {
+      var otherId = r.elementLowId === elementId ? r.elementHighId : r.elementLowId;
+      var other = byId('workElements', otherId);
+      var otherActivity = other ? byId('activities', other.activityId) : null;
+      var otherStation = otherActivity ? byId('stations', otherActivity.stationId) : null;
+      var latest = null;
+      if (r.isActive) {
+        var lastValue = state.observationOverlaps.filter(function (v) { return v.relationId === r.id; }).sort(function (a, b) { return (b.updatedAt || '').localeCompare(a.updatedAt || ''); })[0];
+        if (lastValue) {
+          var cyc = byId('cycleObservations', lastValue.cycleId);
+          if (cyc) {
+            var sess = byId('studySessions', cyc.sessionId);
+            var op = sess ? byId('operators', sess.operatorId) : null;
+            var sact = sess ? byId('activities', sess.activityId) : null;
+            latest = {
+              cycleNo: cyc.cycleNo,
+              operatorName: op ? op.displayName : '؟',
+              activityName: sact ? sact.name : '؟',
+              status: lastValue.status,
+              overlapDuration: lastValue.overlapDuration,
+              cycleId: lastValue.cycleId,
+            };
+          }
+        }
+      }
+      return {
+        relationId: r.id,
+        otherElementId: otherId,
+        otherElementName: other ? other.name : '؟',
+        otherActivityName: otherActivity ? otherActivity.name : '؟',
+        otherStationName: otherStation ? otherStation.name : '؟',
+        isActive: r.isActive,
+        latest: latest,
+      };
+    });
+    return { elementId: elementId, elementName: element.name, rows: rows, projectId: projectId };
+  }
+
+  /** تنظیمات گزارش/بوم نمودار — بر پایهٔ projectSettings با پیش‌فرض امن */
+  function getReportSettings(projectId) {
+    var s = getProjectSettings(projectId);
+    var mode = s['report.westinghouseMode'];
+    if (mode !== 'GRADE' && mode !== 'NUMERIC' && mode !== 'BOTH') mode = 'BOTH';
+    var paper = s['report.paperSize'] === 'A3' ? 'A3' : 'A4';
+    var orientation = s['report.orientation'] === 'landscape' ? 'landscape' : 'portrait';
+    return { westinghouseMode: mode, paperSize: paper, orientation: orientation };
+  }
+
+  function putReportSettings(projectId, input) {
+    var values = {};
+    if (input.westinghouseMode) values['report.westinghouseMode'] = input.westinghouseMode;
+    if (input.paperSize) values['report.paperSize'] = input.paperSize;
+    if (input.orientation) values['report.orientation'] = input.orientation;
+    putProjectSettings(projectId, values);
+    commit();
+    return getReportSettings(projectId);
+  }
+
+  function getChartCanvasSetting(projectId, chartType) {
+    var s = getProjectSettings(projectId);
+    var raw = s['chart.canvas.' + chartType];
+    if (!raw) return null;
+    try {
+      var parsed = JSON.parse(raw);
+      if (parsed && parsed.width && parsed.height) return parsed;
+      return null;
+    } catch (e) { return null; }
+  }
+
+  function putChartCanvasSetting(projectId, chartType, width, height) {
+    putProjectSettings(projectId, { ['chart.canvas.' + chartType]: JSON.stringify({ width: width, height: height }) });
+    commit();
+  }
+
+  function resetChartCanvasSetting(projectId, chartType) {
+    state.projectSettings = state.projectSettings.filter(function (s) { return !(s.projectId === projectId && s.key === 'chart.canvas.' + chartType); });
+    commit();
+  }
+
+  function getChartLayoutSnapshot(projectId, chartType) {
+    var s = getProjectSettings(projectId);
+    var raw = s['chart.layoutSnapshot.' + chartType];
+    if (!raw) return null;
+    try { return JSON.parse(raw); } catch (e) { return null; }
+  }
+
+  function saveChartLayoutSnapshot(projectId, chartType, nodes, canvas) {
+    putProjectSettings(projectId, { ['chart.layoutSnapshot.' + chartType]: JSON.stringify({ nodes: nodes, canvas: canvas, savedAt: U.nowISO() }) });
+    commit();
+  }
 
   g.T2DB = {
     CONST: CONST,
@@ -3047,10 +3483,22 @@
         return { bytes: bytes, projects: state.projects.length, ok: storageOk };
       } catch (e) { return { bytes: 0, projects: state.projects.length, ok: false }; }
     },
+    // ── جلسه دوم: ماتریس هم‌پوشانی ──
+    listOverlapRelations: listOverlapRelations,
+    createOverlapRelation: createOverlapRelation,
+    archiveOverlapRelation: archiveOverlapRelation,
+    restoreOverlapRelation: restoreOverlapRelation,
+    getOverlapMatrix: getOverlapMatrix,
+    setCycleOverlaps: setCycleOverlaps,
+    getElementRelations: getElementRelations,
+    getReportSettings: getReportSettings,
+    putReportSettings: putReportSettings,
+    getChartCanvasSetting: getChartCanvasSetting,
+    putChartCanvasSetting: putChartCanvasSetting,
+    resetChartCanvasSetting: resetChartCanvasSetting,
+    getChartLayoutSnapshot: getChartLayoutSnapshot,
+    saveChartLayoutSnapshot: saveChartLayoutSnapshot,
     resetAll: function () {
-      state = emptyState();
-      if (g.localStorage) g.localStorage.removeItem(STORAGE_KEY);
-      commit();
     },
     exportAll: function () { return JSON.stringify(state); },
     importAll: function (json) {

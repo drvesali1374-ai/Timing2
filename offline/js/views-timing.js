@@ -74,6 +74,213 @@
     return null;
   }
 
+  /* ═══════════ زیرهدر چسبان فعالیت — §۱۲.۱ ═══════════
+     تنها نوار چسبان صفحهٔ زمان‌سنجی (زیر TopBar با ارتفاع ۵۶ پیکسل):
+     عنوان فعالیت + ایستگاه (تنها یک‌بار)، بازگشت به فهرست فعالیت‌ها،
+     فیلتر اپراتور (حالت فهرست جلسات) یا نشان اپراتور جلسهٔ فعال
+     (حالت برگه) و دکمهٔ کوچک «جلسهٔ جدید».
+     کارت‌های جلسه و جدول برگه هرگز چسبان نیستند. */
+  function buildSubheader(ctx, opts) {
+    var bar = U.h('div', { class: 't2t-subheader', role: 'region', 'aria-label': 'نوار فعالیت زمان‌سنجی' });
+
+    /* هویت فعالیت — تنها محل نمایش آن در طول کار */
+    bar.appendChild(U.h('div', { class: 'flex items-center gap-2 min-w-0' },
+      U.h('span', { class: 'chip-icon shrink-0', style: { width: '32px', height: '32px' } }, U.icon('timer')),
+      U.h('div', { class: 'min-w-0' },
+        U.h('p', { class: 'font-bold truncate', style: { fontSize: '13px', lineHeight: '1.45' }, text: opts.activityName }),
+        U.h('p', { class: 'truncate', style: { fontSize: '11px', lineHeight: '1.45', color: 'var(--muted-foreground)' }, text: 'ایستگاه ' + (opts.stationName || '—') }))));
+
+    /* بازگشت به حالت انتخاب فعالیت — فقط در نمای مرحله‌ای با انتخابگر */
+    if (ctx.withChangeActivity && ctx.backToPicker) {
+      bar.appendChild(U.h('button', {
+        class: 'btn btn-sm btn-outline shrink-0', type: 'button',
+        onclick: function () { selectedSession[ctx.activityId] = null; ctx.backToPicker(); },
+      }, U.icon('listTree'), 'فهرست فعالیت‌ها'));
+    }
+
+    if (opts.variant === 'list' && opts.sessions.length > 0) {
+      /* فیلتر اپراتور — منتقل‌شده به زیرهدر چسبان §۱۲.۱ */
+      var chips = U.h('div', { class: 'flex flex-wrap items-center gap-1.5 min-w-0' },
+        U.h('span', { class: 'text-xs font-bold shrink-0', style: { color: 'var(--muted-foreground)' }, text: 'اپراتور:' }),
+        UI.badge(U.formatInt(opts.sessions.length) + ' جلسه', 'muted'));
+      function chip(label, value, count) {
+        var active = opts.operatorFilter === value;
+        return U.h('button', {
+          class: 't2t-op-chip' + (active ? ' active' : ''), type: 'button',
+          onclick: function () { operatorFilter[ctx.activityId] = value; ctx.render(); },
+        }, label,
+          U.h('span', { class: 't2t-op-count num' }, U.formatInt(count)));
+      }
+      chips.appendChild(chip('همه', 'ALL', opts.sessions.length));
+      opts.operators.forEach(function (op) {
+        var n = opts.sessions.filter(function (s) { return s.operatorId === op.id; }).length;
+        if (n > 0) chips.appendChild(chip(op.displayName, op.id, n));
+      });
+      bar.appendChild(chips);
+    } else if (opts.variant === 'sheet' && opts.activeOperatorName) {
+      /* نشان برجستهٔ یکتای اپراتور جلسهٔ فعال */
+      bar.appendChild(U.h('span', { class: 't2t-sub-op-chip', title: 'اپراتور جلسهٔ فعال' },
+        U.icon('users'),
+        U.h('span', { class: 'truncate', text: opts.activeOperatorName })));
+    }
+
+    /* دکمهٔ کوچک «جلسهٔ جدید» — انتهای نوار */
+    if (opts.canCreate) {
+      bar.appendChild(U.h('button', {
+        class: 'btn btn-sm btn-brand shrink-0 t2t-sub-new', type: 'button',
+        onclick: function () { openCreateSessionDialog(ctx); },
+      }, U.icon('plus'), 'جلسهٔ جدید'));
+    }
+    return bar;
+  }
+
+  /* ═══════════ دیالوگ ایجاد جلسه — مشترک فهرست جلسات و زیرهدر برگه ═══════════ */
+  function openCreateSessionDialog(ctx) {
+    var operators = DB.listOperators(ctx.projectId);
+    var operatorId = '';
+    var method = 'SNAPBACK';
+    var notes = '';
+    UI.dialog({
+      title: 'جلسهٔ زمان‌سنجی جدید',
+      desc: 'جلسه = فعالیت × اپراتور × روش اندازه‌گیری. روش پس از ایجاد قابل تغییر نیست؛ برای روش دیگر جلسهٔ جدید بسازید.',
+      bodyBuilder: function (body) {
+        /* اپراتور */
+        var sel = U.h('select', { class: 'select', 'aria-label': 'اپراتور' });
+        sel.appendChild(U.h('option', { value: '' }, 'انتخاب اپراتور…'));
+        operators.forEach(function (op) {
+          sel.appendChild(U.h('option', { value: op.id }, op.displayName + ' (' + (op.code || '—') + ')'));
+        });
+        sel.addEventListener('change', function () { operatorId = sel.value; });
+        body.appendChild(U.h('div', null,
+          U.h('label', { class: 'field-label' }, 'اپراتور', UI.helpDot('اپراتور جلسه', {
+            what: 'اپراتوری که برگهٔ زمان‌سنجی این جلسه به او تعلق دارد.',
+            input: 'یکی از اپراتورهای ثبت‌شدهٔ پروژه را انتخاب کنید.',
+            example: '«اپراتور ۱ — آقای رضایی»',
+            note: 'برگهٔ هر اپراتور مستقل است و می‌توانید برای هر اپراتور چند جلسه ثبت کنید.',
+          })),
+          sel));
+
+        /* روش اندازه‌گیری */
+        var methodWrap = U.h('div', null,
+          U.h('div', { class: 'field-label' }, 'روش اندازه‌گیری', UI.helpDot('روش اندازه‌گیری', {
+            what: 'نحوهٔ ثبت زمان‌ها در این جلسه؛ پس از ایجاد قابل تغییر نیست.',
+            input: '«برگشت به صفر»: مدت هر عنصر مستقیم ثبت می‌شود. «پیوسته»: قرائت تجمعی کرنومتر در پایان هر عنصر ثبت می‌شود و مدت‌ها از تفاضل قرائت‌ها محاسبه می‌شوند.',
+            example: 'در روش پیوسته، قرائت‌های ۸، ۲۰ و ۴۵ مدت‌های ۸، ۱۲ و ۲۵ ثانیه را می‌دهند.',
+            note: 'مبنای قرائت پیوسته با شروع هر جلسهٔ جدید از صفر آغاز می‌شود؛ کرنومتر داخلی در نسخهٔ اول وجود ندارد و ثبت دستی/از Excel است.',
+          })));
+        var cards = [];
+        var radios = [];
+        [
+          ['SNAPBACK', 'برگشت به صفر (Snapback)', 'زمان سپری‌شدهٔ هر عنصر به‌صورت مستقیم ثبت می‌شود؛ مناسب عناصر کوتاه با توقف کرنومتر.'],
+          ['CONTINUOUS', 'پیوسته (Continuous)', 'قرائت تجمعی در پایان هر عنصر ثبت می‌شود؛ مدت‌ها از تفاضل قرائت‌ها محاسبه می‌شوند و زنجیره در طول جلسه ادامه دارد.'],
+        ].forEach(function (m) {
+          var card = U.h('label', { class: 'radio-card' + (method === m[0] ? ' selected' : '') },
+            U.h('input', { type: 'radio', name: 't2t-method', checked: method === m[0], style: { accentColor: 'var(--brand)', marginTop: '3px' } }),
+            U.h('div', { class: 'min-w-0' },
+              U.h('div', { class: 'text-sm font-semibold', text: m[1] }),
+              U.h('div', { class: 'text-xs text-muted leading-relaxed', text: m[2] })));
+          var radio = card.querySelector('input');
+          radio.addEventListener('change', function () {
+            method = m[0];
+            cards.forEach(function (c2) { c2.classList.remove('selected'); });
+            card.classList.add('selected');
+          });
+          cards.push(card);
+          radios.push(radio);
+          methodWrap.appendChild(card);
+        });
+        body.appendChild(methodWrap);
+
+        /* توضیحات */
+        var ta = U.h('textarea', { class: 'textarea', placeholder: 'مثلاً: نوبت عصر — شرایط دمای کارگاه بالاتر از حد معمول' });
+        ta.addEventListener('input', function () { notes = ta.value; });
+        body.appendChild(UI.field('توضیحات (اختیاری)', ta));
+      },
+      footerBuilder: function (close) {
+        return U.h('div', { class: 'dialog-footer' },
+          U.h('button', { class: 'btn', text: 'انصراف', onclick: close }),
+          U.h('div', { class: 'spacer' }),
+          U.h('button', {
+            class: 'btn btn-brand',
+            onclick: function () {
+              if (!operatorId) { UI.toast('ابتدا اپراتور را انتخاب کنید', { type: 'error' }); return; }
+              var s;
+              try { s = DB.createSession(ctx.activityId, { operatorId: operatorId, timingMethod: method, notes: notes }); }
+              catch (err) { UI.toastError(err); return; }
+              close();
+              invalidateSheetCache(s.id);
+              selectedSession[ctx.activityId] = s.id;
+              UI.toast('جلسه ایجاد شد؛ برگهٔ خالی آمادهٔ ثبت است');
+              ctx.render();
+            },
+          }, U.icon('plus'), 'ایجاد جلسه و باز کردن برگه'));
+      },
+    });
+  }
+
+  /* ═══════════ ابزارهای دیالوگ «تشخیص مشاهدهٔ مشکوک» — §۱۲.۳ ═══════════ */
+  /* برچسب فارسی قواعد تشخیص — هم‌نام با موتور محاسبات */
+  var OUTLIER_RULE_LABELS = {
+    MODIFIED_Z_MAD: 'امتیاز Z تعدیل‌شده (میانه و MAD)',
+    IQR_FENCE: 'حصار IQR',
+    INSUFFICIENT_DATA: 'دادهٔ ناکافی',
+  };
+  /** snapshot ثبت‌شده در لحظهٔ پرچم‌گذاری — DTO برگه (getSheet) آن را
+      ندارد؛ دفاعی و مستقیم از وضعیت زندهٔ DB بر اساس id خوانده می‌شود. */
+  function readOutlierSnapshot(obs) {
+    var raw = null;
+    try {
+      var recs = DB.getState().elementObservations || [];
+      for (var i = 0; i < recs.length; i++) {
+        if (recs[i].id === obs.id) { raw = recs[i].outlierSnapshot; break; }
+      }
+    } catch (e) { raw = null; }
+    if (raw === null || raw === undefined) return null;
+    if (typeof raw === 'string') {
+      if (raw.trim() === '') return null;
+      try {
+        var parsed = JSON.parse(raw);
+        return parsed && typeof parsed === 'object' ? parsed : null;
+      } catch (e2) { return null; }
+    }
+    return typeof raw === 'object' ? raw : null;
+  }
+  /** مقدار مشاهده به‌صورت متنی — بازه‌ها «X تا Y» */
+  function observationValueText(obs) {
+    if (obs.startOffset !== null || obs.endOffset !== null) {
+      var s = obs.startOffset !== null ? U.formatTimeValue(obs.startOffset) : '؟';
+      var e = obs.endOffset !== null ? U.formatTimeValue(obs.endOffset) : '؟';
+      return s + ' تا ' + e;
+    }
+    var v = obs.rawDuration !== null ? obs.rawDuration
+      : (obs.cumulativeReading !== null ? obs.cumulativeReading : obs.derivedDuration);
+    return U.formatTimeValue(v);
+  }
+  /** عدد با حداکثر دو اعشار بدون صفرهای انتهایی — برای آستانه/ضریب */
+  function fmtCompact(v) {
+    if (v === null || v === undefined || !isFinite(v)) return '—';
+    return U.displayServerText(String(Math.round(v * 100) / 100));
+  }
+  /** مقدار عددی با واحد ثانیه — عدد LTR و واحد فارسی */
+  function valueWithUnit(text) {
+    return U.h('span', { class: 'inline-flex items-baseline justify-end gap-1 min-w-0' },
+      U.h('span', { class: 'num', dir: 'ltr', text: text }),
+      U.h('span', { style: { fontSize: '10px', color: 'var(--muted-foreground)' }, text: 'ثانیه' }));
+  }
+  /** بج وضعیت فعلی مشاهده — معتبر/مشکوک/خارج‌شده/نامعتبر */
+  function suspectValidityBadge(status) {
+    if (status === 'EXCLUDED') return UI.badge('خارج‌شده', 'outline', 'eraser');
+    if (status === 'SUSPECT') return UI.badge('مشکوک', 'amber', 'alertTriangle');
+    if (status === 'INVALID') return UI.badge('نامعتبر', 'red', 'xCircle');
+    return UI.badge('معتبر', 'green', 'checkCircle');
+  }
+  /** ردیف برچسب-مقدار دیالوگ تشخیص */
+  function diagRow(label, valueNode) {
+    return U.h('div', { class: 't2t-diag-row' },
+      U.h('span', { class: 't2t-diag-label', text: label }),
+      U.h('span', { class: 't2t-diag-value' }, valueNode));
+  }
+
   /* ═══════════ کش برگه (فهرست جلسات) ═══════════ */
   function getSheetCached(sessionId) {
     if (!sheetCache[sessionId]) sheetCache[sessionId] = DB.getSheet(sessionId);
@@ -340,48 +547,26 @@
           U.h('div', { style: { color: 'var(--foreground)' }, text: 'هر جلسه ترکیبی از فعالیت × اپراتور × روش اندازه‌گیری است؛ ابتدا اپراتورها را ثبت کنید.' }))));
     }
 
-    var canCreate = elements.length > 0 && operators.length > 0;
-    var createTitle = !canCreate
-      ? (elements.length === 0
-        ? 'این فعالیت عنصر کاری ندارد؛ ابتدا عناصر را در ساختار تولید تعریف کنید.'
-        : 'اپراتوری ثبت نشده است؛ ابتدا اپراتورها را ثبت کنید.')
-      : null;
+    /* زیرهدر چسبان — §۱۲.۱: عنوان فعالیت/ایستگاه، فهرست فعالیت‌ها،
+        چیپ‌های فیلتر اپراتور و جلسهٔ جدید؛ کارت‌های جلسه چسبان نیستند */
+    wrap.appendChild(buildSubheader(ctx, {
+      variant: 'list',
+      activityName: activity.name,
+      stationName: station ? station.name : '—',
+      operatorFilter: filter,
+      operators: operators,
+      sessions: sessions,
+      canCreate: elements.length > 0 && operators.length > 0,
+    }));
 
-    /* کارت بالایی: عنوان فعالیت + دکمه‌ها */
-    var topCard = U.h('div', { class: 'card p-4' },
+    /* سربرگ لاغر مرحله — اطلاعات فعالیت/ایستگاه و دکمه‌ها در زیرهدر چسبان است — §۱۲.۱ */
+    wrap.appendChild(U.h('div', { class: 'card', style: { padding: '10px 16px' } },
       U.h('div', { class: 'flex flex-wrap items-center gap-2' },
-        U.h('h2', { class: 'text-lg font-bold truncate', text: activity.name }),
-        UI.badge(station ? station.name : '—', 'muted', 'warehouse'),
+        U.h('h2', { class: 'text-sm font-bold shrink-0', text: 'جلسات این فعالیت' }),
         activity.targetSampleCount
           ? UI.badge('هدف ' + U.formatInt(activity.targetSampleCount) + ' چرخه', 'brand', 'target')
           : UI.badge('بدون هدف نمونه', 'muted'),
-        U.h('div', { class: 'spacer' }),
-        ctx.withChangeActivity
-          ? U.h('button', { class: 'btn btn-sm btn-outline shrink-0', type: 'button', onclick: ctx.backToPicker }, U.icon('factory'), 'تغییر فعالیت')
-          : null,
-        U.h('button', {
-          class: 'btn btn-brand shrink-0', type: 'button', disabled: !canCreate, title: createTitle,
-          onclick: function () { openCreateSessionDialog(); },
-        }, U.icon('plus'), 'جلسهٔ جدید')));
-
-    /* فیلتر اپراتور */
-    var chipsRow = U.h('div', { class: 'flex flex-wrap items-center gap-2 mt-3' },
-      U.h('span', { class: 'text-xs text-muted shrink-0', text: 'اپراتور:' }));
-    function chip(label, value, count) {
-      var active = filter === value;
-      return U.h('button', {
-        class: 'btn btn-sm ' + (active ? 'btn-brand' : 'btn-outline'), type: 'button',
-        onclick: function () { operatorFilter[ctx.activityId] = value; ctx.render(); },
-      }, label,
-        count !== undefined ? U.h('span', { class: 'badge ' + (active ? 'outline' : 'muted') + ' t2t-count-badge' }, U.formatInt(count)) : null);
-    }
-    chipsRow.appendChild(chip('همه', 'ALL', sessions.length));
-    operators.forEach(function (op) {
-      var n = sessions.filter(function (s) { return s.operatorId === op.id; }).length;
-      chipsRow.appendChild(chip(op.displayName, op.id, n));
-    });
-    topCard.appendChild(chipsRow);
-    wrap.appendChild(topCard);
+        U.h('span', { class: 'text-xs text-muted' }, U.formatInt(sessions.length) + ' جلسه ثبت‌شده'))));
 
     /* فهرست جلسات */
     var listWrap = U.h('div', { class: 'flex flex-col gap-3' });
@@ -392,7 +577,7 @@
         desc: 'برای شروع زمان‌سنجی، جلسه‌ای با انتخاب اپراتور و روش اندازه‌گیری (برگشت به صفر یا پیوسته) ایجاد کنید. هر جلسه برگهٔ مستقلی دارد و جلسهٔ جدید مستقل از جلسهٔ قبلی است.',
         icon: 'timer',
         actionLabel: 'ایجاد اولین جلسه',
-        onAction: function () { openCreateSessionDialog(); },
+        onAction: function () { openCreateSessionDialog(ctx); },
       }));
       return;
     }
@@ -476,89 +661,6 @@
           ctx.render();
         });
     }
-
-    /* ── دیالوگ ایجاد جلسه ── */
-    function openCreateSessionDialog() {
-      var operatorId = '';
-      var method = 'SNAPBACK';
-      var notes = '';
-      UI.dialog({
-        title: 'جلسهٔ زمان‌سنجی جدید',
-        desc: 'جلسه = فعالیت × اپراتور × روش اندازه‌گیری. روش پس از ایجاد قابل تغییر نیست؛ برای روش دیگر جلسهٔ جدید بسازید.',
-        bodyBuilder: function (body) {
-          /* اپراتور */
-          var sel = U.h('select', { class: 'select', 'aria-label': 'اپراتور' });
-          sel.appendChild(U.h('option', { value: '' }, 'انتخاب اپراتور…'));
-          operators.forEach(function (op) {
-            sel.appendChild(U.h('option', { value: op.id }, op.displayName + ' (' + (op.code || '—') + ')'));
-          });
-          sel.addEventListener('change', function () { operatorId = sel.value; });
-          body.appendChild(U.h('div', null,
-            U.h('label', { class: 'field-label' }, 'اپراتور', UI.helpDot('اپراتور جلسه', {
-              what: 'اپراتوری که برگهٔ زمان‌سنجی این جلسه به او تعلق دارد.',
-              input: 'یکی از اپراتورهای ثبت‌شدهٔ پروژه را انتخاب کنید.',
-              example: '«اپراتور ۱ — آقای رضایی»',
-              note: 'برگهٔ هر اپراتور مستقل است و می‌توانید برای هر اپراتور چند جلسه ثبت کنید.',
-            })),
-            sel));
-
-          /* روش اندازه‌گیری */
-          var methodWrap = U.h('div', null,
-            U.h('div', { class: 'field-label' }, 'روش اندازه‌گیری', UI.helpDot('روش اندازه‌گیری', {
-              what: 'نحوهٔ ثبت زمان‌ها در این جلسه؛ پس از ایجاد قابل تغییر نیست.',
-              input: '«برگشت به صفر»: مدت هر عنصر مستقیم ثبت می‌شود. «پیوسته»: قرائت تجمعی کرنومتر در پایان هر عنصر ثبت می‌شود و مدت‌ها از تفاضل قرائت‌ها محاسبه می‌شوند.',
-              example: 'در روش پیوسته، قرائت‌های ۸، ۲۰ و ۴۵ مدت‌های ۸، ۱۲ و ۲۵ ثانیه را می‌دهند.',
-              note: 'مبنای قرائت پیوسته با شروع هر جلسهٔ جدید از صفر آغاز می‌شود؛ کرنومتر داخلی در نسخهٔ اول وجود ندارد و ثبت دستی/از Excel است.',
-            })));
-          var cards = [];
-          var radios = [];
-          [
-            ['SNAPBACK', 'برگشت به صفر (Snapback)', 'زمان سپری‌شدهٔ هر عنصر به‌صورت مستقیم ثبت می‌شود؛ مناسب عناصر کوتاه با توقف کرنومتر.'],
-            ['CONTINUOUS', 'پیوسته (Continuous)', 'قرائت تجمعی در پایان هر عنصر ثبت می‌شود؛ مدت‌ها از تفاضل قرائت‌ها محاسبه می‌شوند و زنجیره در طول جلسه ادامه دارد.'],
-          ].forEach(function (m) {
-            var card = U.h('label', { class: 'radio-card' + (method === m[0] ? ' selected' : '') },
-              U.h('input', { type: 'radio', name: 't2t-method', checked: method === m[0], style: { accentColor: 'var(--brand)', marginTop: '3px' } }),
-              U.h('div', { class: 'min-w-0' },
-                U.h('div', { class: 'text-sm font-semibold', text: m[1] }),
-                U.h('div', { class: 'text-xs text-muted leading-relaxed', text: m[2] })));
-            var radio = card.querySelector('input');
-            radio.addEventListener('change', function () {
-              method = m[0];
-              cards.forEach(function (c2) { c2.classList.remove('selected'); });
-              card.classList.add('selected');
-            });
-            cards.push(card);
-            radios.push(radio);
-            methodWrap.appendChild(card);
-          });
-          body.appendChild(methodWrap);
-
-          /* توضیحات */
-          var ta = U.h('textarea', { class: 'textarea', placeholder: 'مثلاً: نوبت عصر — شرایط دمای کارگاه بالاتر از حد معمول' });
-          ta.addEventListener('input', function () { notes = ta.value; });
-          body.appendChild(UI.field('توضیحات (اختیاری)', ta));
-        },
-        footerBuilder: function (close) {
-          return U.h('div', { class: 'dialog-footer' },
-            U.h('button', { class: 'btn', text: 'انصراف', onclick: close }),
-            U.h('div', { class: 'spacer' }),
-            U.h('button', {
-              class: 'btn btn-brand',
-              onclick: function () {
-                if (!operatorId) { UI.toast('ابتدا اپراتور را انتخاب کنید', { type: 'error' }); return; }
-                var s;
-                try { s = DB.createSession(ctx.activityId, { operatorId: operatorId, timingMethod: method, notes: notes }); }
-                catch (err) { UI.toastError(err); return; }
-                close();
-                invalidateSheetCache(s.id);
-                selectedSession[ctx.activityId] = s.id;
-                UI.toast('جلسه ایجاد شد؛ برگهٔ خالی آمادهٔ ثبت است');
-                ctx.render();
-              },
-            }, U.icon('plus'), 'ایجاد جلسه و باز کردن برگه'));
-        },
-      });
-    }
   }
 
   /* ═══════════ برگهٔ زمان‌سنجی ═══════════ */
@@ -598,7 +700,17 @@
       ctx.render();
     }
 
-    /* ۱) بنر جلسهٔ بسته */
+    /* ۱) زیرهدر چسبان — §۱۲.۱: عنوان فعالیت/ایستگاه، فهرست فعالیت‌ها،
+          نشان اپراتور جلسهٔ فعال (نشان برجستهٔ یکتا) و جلسهٔ جدید */
+    wrap.appendChild(buildSubheader(ctx, {
+      variant: 'sheet',
+      activityName: sheet.activity.name,
+      stationName: sheet.activity.stationName || '—',
+      activeOperatorName: sheet.operator.displayName,
+      canCreate: elements.length > 0 && DB.listOperators(ctx.projectId).length > 0,
+    }));
+
+    /* ۲) بنر جلسهٔ بسته */
     if (!editable) {
       wrap.appendChild(U.h('div', { class: 'banner info mb-3' }, U.icon('lock'),
         U.h('div', { class: 'flex flex-wrap items-center gap-2' },
@@ -606,18 +718,30 @@
           U.h('button', { class: 'btn btn-sm btn-outline shrink-0', type: 'button', onclick: reopen }, U.icon('lockOpen'), 'بازگشایی'))));
     }
 
-    /* ۲) کارت سربرگ */
-    wrap.appendChild(U.h('div', { class: 'card p-4 mb-3' },
+    /* راهنمای برگه — نزدیک عنوان برگه (منتقل‌شده از نوار ابزار) */
+    var sheetHelp = {
+      what: 'جدول چرخه‌محور زمان‌سنجی: هر ردیف یک چرخهٔ کامل فعالیت و هر ستون یک عنصر کاری.',
+      input: method === 'CONTINUOUS'
+        ? 'در روش پیوسته، قرائت تجمعی کرنومتر را در پایان هر عنصر وارد کنید؛ مدت هر عنصر به‌صورت خودکار از تفاضل قرائت‌ها محاسبه و زیر سلول نمایش داده می‌شود. قرائت‌ها باید نزولی نباشند.'
+        : 'در روش برگشت به صفر، مدت سپری‌شدهٔ هر عنصر را مستقیم وارد کنید. برای عناصر هم‌زمان، مقدار را به‌صورت «شروع-پایان» (مثل ۳-۹) نسبت به مبدأ چرخه وارد کنید.',
+      example: 'ورودی «۱۲٫۵» یا «12.5» — بازهٔ «۳ تا ۹» یا «3-9» — حرکت با Tab/Enter و جهت‌نما؛ کپی محدوده با Shift+جهت‌نما و Ctrl+C.',
+      note: 'زمان سپری‌شدهٔ چرخه در کارهای هم‌زمان، گستره (دیرترین پایان − زودترین شروع) است نه جمع مدت‌ها. دادهٔ خام هرگز حذف نمی‌شود؛ خروج از محاسبه فقط وضعیت را عوض می‌کند.',
+    };
+
+    /* ۳) سربرگ لاغر برگه — §۱۲.۱: عنوان فعالیت/ایستگاه و اپراتور
+          فقط در زیرهدر چسبان بالای صفحه نمایش داده می‌شوند */
+    wrap.appendChild(U.h('div', { class: 'card mb-3', style: { padding: '10px 14px' } },
       U.h('div', { class: 'flex flex-wrap items-center gap-2' },
         U.h('button', {
-          class: 'icon-btn shrink-0', type: 'button', 'aria-label': 'بازگشت به جلسات', title: 'بازگشت به جلسات',
+          class: 'btn btn-sm btn-outline shrink-0', type: 'button',
           onclick: function () { selectedSession[ctx.activityId] = null; ctx.render(); },
-        }, U.icon('arrowRight')),
-        U.h('h2', { class: 'font-bold truncate', text: sheet.activity.name }),
-        UI.badge(sheet.operator.displayName, 'brand'),
+        }, U.icon('arrowRight'), 'بازگشت به جلسات'),
+        U.h('h2', { class: 'font-bold shrink-0', style: { fontSize: '14px' } },
+          'برگهٔ زمان‌سنجی',
+          UI.helpDot('برگهٔ زمان‌سنجی', sheetHelp)),
         UI.badge(methodLabel, method === 'SNAPBACK' ? 'cyan' : 'brand'),
         !editable ? UI.badge('بسته', 'muted', 'lock') : null,
-        U.h('span', { class: 'text-xs text-muted' }, 'ایستگاه ' + (sheet.activity.stationName || '—') + ' — ' + U.formatInt(stats.sessionCycles) + ' چرخه در این جلسه'),
+        U.h('span', { class: 'num text-xs text-muted shrink-0' }, U.formatInt(stats.sessionCycles) + ' چرخه در این جلسه'),
         U.h('div', { class: 'spacer' }),
         editable
           ? U.h('button', {
@@ -639,7 +763,7 @@
             }, U.icon('lock'), 'بستن جلسه')
           : U.h('button', { class: 'btn btn-sm btn-outline shrink-0', type: 'button', onclick: reopen }, U.icon('lockOpen'), 'بازگشایی'))));
 
-    /* ۳) نوار ابزار */
+    /* ۴) نوار ابزار */
     var closedHint = 'جلسه بسته است؛ برای ثبت داده، جلسهٔ جدید ایجاد کنید.';
     var addDd = UI.dropdownMenu(
       [[1, '۱ چرخه'], [5, '۵ چرخه'], [10, '۱۰ چرخه'], [20, '۲۰ چرخه']].map(function (it) {
@@ -678,18 +802,10 @@
         class: 'btn btn-sm btn-outline', type: 'button', disabled: !editable, title: editable ? null : closedHint,
         onclick: function () { openPasteDialog(); },
       }, U.icon('clipboardPaste'), 'Paste از Excel'),
-      U.h('span', { class: 'text-xs text-faint' }, 'Tab/Enter حرکت • F2 یا کلیک ویرایش • Ctrl+Z واگردانی'),
-      UI.helpDot('برگهٔ زمان‌سنجی', {
-        what: 'جدول چرخه‌محور زمان‌سنجی: هر ردیف یک چرخهٔ کامل فعالیت و هر ستون یک عنصر کاری.',
-        input: method === 'CONTINUOUS'
-          ? 'در روش پیوسته، قرائت تجمعی کرنومتر را در پایان هر عنصر وارد کنید؛ مدت هر عنصر به‌صورت خودکار از تفاضل قرائت‌ها محاسبه و زیر سلول نمایش داده می‌شود. قرائت‌ها باید نزولی نباشند.'
-          : 'در روش برگشت به صفر، مدت سپری‌شدهٔ هر عنصر را مستقیم وارد کنید. برای عناصر هم‌زمان، مقدار را به‌صورت «شروع-پایان» (مثل ۳-۹) نسبت به مبدأ چرخه وارد کنید.',
-        example: 'ورودی «۱۲٫۵» یا «12.5» — بازهٔ «۳ تا ۹» یا «3-9» — حرکت با Tab/Enter و جهت‌نما؛ کپی محدوده با Shift+جهت‌نما و Ctrl+C.',
-        note: 'زمان سپری‌شدهٔ چرخه در کارهای هم‌زمان، گستره (دیرترین پایان − زودترین شروع) است نه جمع مدت‌ها. دادهٔ خام هرگز حذف نمی‌شود؛ خروج از محاسبه فقط وضعیت را عوض می‌کند.',
-      }));
+      U.h('span', { class: 'text-xs text-faint' }, 'Tab/Enter حرکت • F2 یا کلیک ویرایش • Ctrl+Z واگردانی'));
     wrap.appendChild(toolbar);
 
-    /* ۴) کارت پیشرفت نمونه */
+    /* ۵) کارت پیشرفت نمونه */
     var valid = stats.activityValidCycles;
     var target = stats.targetSampleCount;
     var thisSessionValid = stats.sessionValidCycles;
@@ -721,7 +837,7 @@
     }
     wrap.appendChild(progressCard);
 
-    /* ۵) جدول برگه */
+    /* ۶) جدول برگه */
     var table = U.h('table');
 
     /* — سربرگ — */
@@ -977,7 +1093,11 @@
           class: 'sheet-cell' + (excluded ? ' excluded' : ''),
           type: 'text', dir: 'ltr', inputmode: 'decimal',
           value: value,
-          'aria-label': 'مقدار ' + el.name + ' چرخهٔ ' + U.formatInt(cycle.cycleNo),
+          'aria-label': part === 'start'
+            ? 'شروع بازهٔ ' + el.name
+            : part === 'end'
+              ? 'پایان بازهٔ ' + el.name
+              : 'مقدار ' + el.name + ' چرخهٔ ' + U.formatInt(cycle.cycleNo),
           disabled: excluded,
           dataset: { cycle: String(rowIdx), el: String(colIdx), part: part },
           style: part === 'seq' ? { width: '100%' } : { width: '44px' },
@@ -1038,6 +1158,11 @@
 
       if (!editable) {
         row.appendChild(U.h('span', { class: 'num text-xs font-medium', text: displayText(obs) || '—' }));
+        /* سلول مشکوک در حالت فقط‌خواندنی → دیالوگ تشخیص — §۱۲.۳ */
+        if (suspect && obs) {
+          td.style.cursor = 'pointer';
+          td.addEventListener('click', function () { openSuspectDialog(cycle, obs, el.name); });
+        }
       } else if (mode === 'INT') {
         startIn = makeInput('start', roundEdit(obs ? obs.startOffset : null));
         endIn = makeInput('end', roundEdit(obs ? obs.endOffset : null));
@@ -1045,8 +1170,16 @@
           inp.addEventListener('input', liveValidate);
           inp.addEventListener('change', commitCell);
         });
-        row.appendChild(startIn);
-        row.appendChild(endIn);
+        /* گروه بصری «از/تا» برای دو ورودی ۴۴px بازه‌ای — §۱۲.۲:
+           برچسب کوچک هر ورودی + قاب واحد گردگوشه؛ ورودی‌ها LTR می‌مانند */
+        row.appendChild(U.h('div', { class: 't2t-int-group', dir: 'ltr', role: 'group', 'aria-label': 'بازهٔ ' + el.name },
+          U.h('label', { class: 't2t-int-part' },
+            U.h('span', { class: 't2t-int-label', 'aria-hidden': 'true', text: 'از' }),
+            startIn),
+          U.h('span', { class: 't2t-int-sep', 'aria-hidden': 'true', text: '–' }),
+          U.h('label', { class: 't2t-int-part' },
+            U.h('span', { class: 't2t-int-label', 'aria-hidden': 'true', text: 'تا' }),
+            endIn)));
       } else {
         var val = obs ? (obs.rawDuration !== null ? obs.rawDuration : obs.cumulativeReading) : null;
         seqIn = makeInput('seq', roundEdit(val));
@@ -1055,10 +1188,21 @@
         row.appendChild(seqIn);
       }
 
-      /* پرچم‌های وضعیت */
+      /* پرچم‌های وضعیت — پرچم مشکوک با کلیک دیالوگ تشخیص را باز می‌کند — §۱۲.۳ */
       var flags = [];
       if (excluded) flags.push(U.h('span', { class: 'cell-flag', title: 'خارج‌شده از محاسبات', style: { color: 'var(--faint)' } }, U.icon('eraser')));
-      if (suspect) flags.push(U.h('span', { class: 'cell-flag', title: 'مشکوک — نیازمند بازبینی', style: { color: 'var(--amber)' } }, U.icon('alertTriangle')));
+      if (suspect && obs) flags.push(U.h('span', {
+        class: 'cell-flag', role: 'button', tabindex: '0',
+        title: 'تشخیص مشاهدهٔ مشکوک', 'aria-label': 'تشخیص مشاهدهٔ مشکوک',
+        style: { color: 'var(--amber)', cursor: 'pointer' },
+        onclick: function (e) { e.stopPropagation(); openSuspectDialog(cycle, obs, el.name); },
+        onkeydown: function (e) {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            openSuspectDialog(cycle, obs, el.name);
+          }
+        },
+      }, U.icon('alertTriangle')));
       flags.forEach(function (f) { td.appendChild(f); });
 
       return td;
@@ -1076,13 +1220,7 @@
         U.h('div', { class: 'spacer' }),
         editable ? U.h('button', {
           class: 't2t-link', type: 'button', title: 'قابل بازگردانی با Undo',
-          onclick: function () {
-            if (withUndo(sessionId, 'حذف چرخه', function () { deleteCycleSafe(sessionId, cycle.id); })) {
-              invalidateSheetCache(sessionId);
-              UI.toast('چرخهٔ ' + U.formatInt(cycle.cycleNo) + ' حذف شد — برای بازگردانی Ctrl+Z');
-              ctx.render();
-            }
-          },
+          onclick: function () { confirmDeleteCycle(cycle); },
         }, 'حذف چرخه') : null));
 
       /* جدول مشاهدات */
@@ -1114,7 +1252,13 @@
               statusTd.appendChild(UI.badge('خارج‌شده', 'red'));
               if (obs.exclusionReason) statusTd.appendChild(U.h('div', { class: 'text-xs text-muted mt-1', text: obs.exclusionReason }));
             } else if (obs.validityStatus === 'SUSPECT') {
-              statusTd.appendChild(UI.badge('مشکوک', 'amber'));
+              /* دکمهٔ تشخیص مشاهدهٔ مشکوک — §۱۲.۳ */
+              statusTd.appendChild(U.h('button', {
+                class: 'btn btn-sm btn-outline', type: 'button',
+                title: 'نمایش جزئیات تشخیص مشاهدهٔ مشکوک',
+                style: { color: 'var(--amber)', borderColor: 'color-mix(in srgb, var(--amber) 45%, var(--border))' },
+                onclick: function () { openSuspectDialog(cycle, obs, el.name); },
+              }, U.icon('alertTriangle'), 'مشکوک — تشخیص'));
               if (obs.outlierScore !== null && obs.outlierScore !== undefined) {
                 statusTd.appendChild(U.h('div', { class: 'text-xs text-muted mt-1' }, 'امتیاز Z: ' + U.formatTimeValue(obs.outlierScore, 2)));
               }
@@ -1300,6 +1444,130 @@
               },
             }, U.icon('ban'), 'خروج از محاسبه'));
         },
+      });
+    }
+
+    /* ── دیالوگ «تشخیص مشاهدهٔ مشکوک» — §۱۲.۳ ═══════════
+       پنل فقط‌خواندنی برای یک مشاهدهٔ SUSPECT: مقدار، روش تشخیص،
+       N/Median/MAD، امتیاز و آستانهٔ واقعی استفاده‌شده، جزئیات IQR در
+       حالت fallback، دلیل پرچم، تاریخ ثبت و وضعیت فعلی.
+       مبنای نمایش snapshot ثبت‌شده در لحظهٔ پرچم‌گذاری است؛ برای
+       داده‌های قدیمی از امتیاز/روش زندهٔ فعلی استفاده و فقدان snapshot
+       اعلام می‌شود. این دیالوگ هیچ داده‌ای را تغییر نمی‌دهد؛ دکمهٔ
+       «خروج از محاسبات» فقط جریان دیالوگ وضعیت موجود را زنجیر می‌کند. */
+    function openSuspectDialog(cycle, obs, elementName) {
+      var snap = readOutlierSnapshot(obs);
+      var st = (snap && snap.statistics) || null;
+      var isIqrFallback = !!(snap && snap.appliedRule === 'IQR_FENCE') || (!snap && obs.outlierRule === 'IQR_FENCE');
+      var isExcluded = obs.validityStatus === 'EXCLUDED';
+      var diagMethodLabel = (snap && snap.methodLabel) ||
+        (obs.outlierRule ? (OUTLIER_RULE_LABELS[obs.outlierRule] || obs.outlierRule) : '—');
+      var thresholdLabel = isIqrFallback ? 'ضریب حصار' : 'آستانهٔ امتیاز Z';
+      var shownScore = snap && snap.score !== null && snap.score !== undefined ? snap.score
+        : (obs.outlierScore !== null && obs.outlierScore !== undefined ? obs.outlierScore : null);
+      var shownThreshold = snap ? snap.threshold : null;
+      var basisValue = snap && snap.value !== null && snap.value !== undefined ? snap.value : obs.derivedDuration;
+
+      function iqrNum(label, v) {
+        return U.h('span', { class: 'num', dir: 'ltr', text: label + fmtCompact(v) });
+      }
+
+      UI.dialog({
+        title: 'تشخیص مشاهدهٔ مشکوک',
+        desc: 'عنصر «' + elementName + '» — چرخهٔ ' + U.formatInt(cycle.cycleNo),
+        bodyBuilder: function (body) {
+          var rows = U.h('div', { class: 'flex flex-col gap-1.5' });
+          rows.appendChild(diagRow('مقدار مشاهده', valueWithUnit(observationValueText(obs))));
+          if (obs.cumulativeReading !== null && obs.startOffset === null) {
+            rows.appendChild(diagRow('قرائت تجمعی ثبت‌شده', valueWithUnit(U.formatTimeValue(obs.cumulativeReading))));
+          }
+          rows.appendChild(diagRow('مدت مبنای تشخیص', valueWithUnit(U.formatTimeValue(basisValue))));
+          rows.appendChild(diagRow('روش تشخیص', U.h('span', { text: diagMethodLabel })));
+          if (snap && snap.n !== null && snap.n !== undefined) {
+            rows.appendChild(diagRow('تعداد مشاهدات مبنای تشخیص (N)', U.h('span', { class: 'num', text: U.formatInt(snap.n) })));
+          }
+          if (st) {
+            rows.appendChild(diagRow('میانه و MAD', U.h('span', {
+              class: 'num', dir: 'ltr',
+              text: U.formatTimeValue(st.median) + ' / ' + U.formatTimeValue(st.mad),
+            })));
+          }
+          rows.appendChild(diagRow(isIqrFallback ? 'فاصلهٔ نرمال‌شده و ضریب حصار' : 'امتیاز Z و آستانه',
+            shownScore !== null
+              ? U.h('span', null,
+                  U.h('b', { class: 'num', dir: 'ltr', text: U.formatTimeValue(shownScore, 2) }),
+                  ' • ' + thresholdLabel + ' = ',
+                  U.h('b', { class: 'num', dir: 'ltr', text: fmtCompact(shownThreshold) }))
+              : U.h('span', { text: '—' })));
+          if (isIqrFallback) {
+            rows.appendChild(U.h('div', { class: 't2t-diag-iqr' },
+              U.h('p', { class: 't2t-diag-iqr-title', text: 'جزئیات حصار IQR — روش تشخیص واقعی در زمان پرچم‌گذاری (fallback از میانه/MAD)' }),
+              U.h('div', { class: 't2t-diag-iqr-grid' },
+                iqrNum('Q1 = ', st ? st.q1 : null),
+                iqrNum('Q3 = ', st ? st.q3 : null),
+                iqrNum('IQR = ', st ? st.iqr : null),
+                iqrNum('حصار پایین = ', st ? st.lowerFence : null),
+                iqrNum('حصار بالا = ', st ? st.upperFence : null))));
+          }
+          if (snap && snap.reason) {
+            rows.appendChild(diagRow('دلیل پرچم', U.h('span', { text: U.displayServerText(String(snap.reason)) })));
+          }
+          rows.appendChild(diagRow('تاریخ/زمان مشاهده', U.h('span', { text: U.formatDateTime(cycle.createdAt) })));
+          rows.appendChild(diagRow('وضعیت فعلی', suspectValidityBadge(obs.validityStatus)));
+          body.appendChild(rows);
+
+          if (!snap) {
+            body.appendChild(U.h('p', {
+              class: 't2t-diag-note',
+              text: 'snapshot تشخیصی در زمان پرچم‌گذاری ثبت نشده (دادهٔ قدیمی)؛ امتیاز و روش نمایش‌داده‌شده از آخرین بازمحاسبهٔ زنده است.',
+            }));
+          }
+          body.appendChild(U.h('p', {
+            class: 't2t-diag-warn',
+            text: 'مشکوک به معنی حذف خودکار نیست؛ داده خام حفظ می‌شود و تصمیم خروج از محاسبات با شماست.',
+          }));
+        },
+        footerBuilder: function (close) {
+          return U.h('div', { class: 'dialog-footer' },
+            U.h('button', { class: 'btn', type: 'button', text: 'بستن', onclick: close }),
+            U.h('div', { class: 'spacer' }),
+            U.h('button', {
+              class: 'btn ' + (isExcluded ? 'btn-brand' : 'btn-destructive'), type: 'button',
+              onclick: function () { close(); openValidityDialog(cycle, obs); },
+            }, U.icon(isExcluded ? 'rotateCcw' : 'ban'), isExcluded ? 'بازگشت به محاسبات' : 'خروج از محاسبات'));
+        },
+      });
+    }
+
+    /* ── تأیید حذف چرخه — §۱۲.۴ ═══════════
+       حذف چرخه با یک کلیک ممکن نیست؛ پیش از فراخوانی جریان حذف
+       موجود (با Undo/Redo)، این تأیید جزئیات و پیامد حذف را نشان
+       می‌دهد: شمارهٔ چرخه، اپراتور/جلسه، تعداد مشاهدات و
+       قابل‌بازگشت‌بودن با Ctrl+Z تا زمانی که پنجره باز است. */
+    function confirmDeleteCycle(cycle) {
+      var obsCount = cycle.observations.length;
+      var opName = sheet.operator.displayName;
+      UI.confirmDialog({
+        title: 'حذف چرخه',
+        body: function (body) {
+          body.appendChild(U.h('p', { class: 'text-sm leading-relaxed' },
+            'چرخهٔ ', U.h('b', { class: 'num' }, U.formatInt(cycle.cycleNo)),
+            ' — اپراتور ', U.h('b', null, '«' + opName + '»'),
+            ' (' + methodLabel + ')'));
+          body.appendChild(U.h('p', { class: 'text-sm leading-relaxed' },
+            'تعداد مشاهدات: ', U.h('b', { class: 'num' }, U.formatInt(obsCount))));
+          body.appendChild(U.h('p', { class: 'text-xs text-muted leading-relaxed' },
+            'حذف چرخه، مشاهدات و خطوط زمانی وابستهٔ آن را نیز حذف می‌کند. با Ctrl+Z قابل بازگردانی است تا پنجرهٔ فعلی باز باشد.'));
+        },
+        confirmLabel: 'حذف چرخه',
+        destructive: true,
+      }).then(function (ok) {
+        if (!ok) return;
+        if (withUndo(sessionId, 'حذف چرخه', function () { deleteCycleSafe(sessionId, cycle.id); })) {
+          invalidateSheetCache(sessionId);
+          UI.toast('چرخهٔ ' + U.formatInt(cycle.cycleNo) + ' حذف شد — برای بازگردانی Ctrl+Z');
+          ctx.render();
+        }
       });
     }
 

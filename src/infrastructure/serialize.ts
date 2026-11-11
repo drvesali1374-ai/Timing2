@@ -7,8 +7,8 @@
 import { db } from '@/lib/db'
 import type { Prisma } from '@prisma/client'
 
-/** نسخه ساختار داده بسته/پشتیبان — v۲: الونس‌های سلسله‌مراتبی (جلسه اول) */
-export const SCHEMA_VERSION = 2
+/** نسخه ساختار داده بسته/پشتیبان — v۳: روابط موازی و مقادیر هم‌پوشانی چرخه‌ای (جلسه دوم) */
+export const SCHEMA_VERSION = 3
 
 /** نام جداول دامنه به ترتیب درج (والد قبل از فرزند) */
 export const DOMAIN_TABLES_INSERT_ORDER = [
@@ -31,6 +31,8 @@ export const DOMAIN_TABLES_INSERT_ORDER = [
   'cycleObservation',
   'timelineLane',
   'elementObservation',
+  'overlapRelation',
+  'observationOverlap',
   'chartNode',
   'chartEdge',
   'calculationRun',

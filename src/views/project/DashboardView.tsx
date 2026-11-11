@@ -178,6 +178,52 @@ const statusChartConfig = {
   count: { label: 'تعداد مشاهده' },
 } satisfies ChartConfig
 
+/** شکستن نام بلند فعالیت به حداکثر ۳ خط کوتاه — برچسب محور «مقایسهٔ فعالیت‌ها» §۱۴ */
+function wrapActivityName(name: string, maxChars = 12, maxLines = 3): string[] {
+  const words = name.split(/\s+/).filter(Boolean)
+  if (words.length === 0) return ['']
+  const lines: string[] = []
+  for (const word of words) {
+    if (lines.length >= maxLines) break
+    const last = lines.length - 1
+    if (last >= 0 && `${lines[last]} ${word}`.length <= maxChars) {
+      lines[last] = `${lines[last]} ${word}`
+    } else {
+      lines.push(word)
+    }
+  }
+  if (lines.join(' ') !== words.join(' ')) {
+    lines[lines.length - 1] = `${lines[lines.length - 1]}…`
+  }
+  return lines
+}
+
+/** تیک چندخطیِ افقی با نام کامل؛ نام کامل در tooltip بومی SVG (title) — §۱۴ */
+function ActivityNameTick({ x, y, payload }: { x?: number; y?: number; payload?: { value?: string } }) {
+  const name = payload?.value ?? ''
+  const lines = wrapActivityName(name)
+  return (
+    <text x={x ?? 0} y={y ?? 0} textAnchor="middle" fontSize={10} fill="var(--muted-foreground)">
+      <title>{name}</title>
+      {lines.map((line, i) => (
+        <tspan key={i} x={x ?? 0} dy={i === 0 ? 0 : 11}>
+          {line}
+        </tspan>
+      ))}
+    </text>
+  )
+}
+
+/** واحد محور عمودی — بالای محور؛ RLM برای جهت درست پرانتز در متن RTL §۱۴ */
+function SecondsUnitLabel({ viewBox }: { viewBox?: { x: number; y: number; width: number; height: number } }) {
+  if (!viewBox) return null
+  return (
+    <text x={viewBox.x + 2} y={viewBox.y + 4} fontSize={9} fill="var(--muted-foreground)" dominantBaseline="hanging">
+      {'\u200F(ثانیه)\u200F'}
+    </text>
+  )
+}
+
 // ═══════════════ کارت خلاصه ═══════════════
 
 function SummaryCard({ card }: { card: ProjectDashboardDto['cards'][number] }) {
@@ -246,19 +292,18 @@ function ActivitiesWidget({ data }: { data: ProjectDashboardDto }) {
   return (
     <div className="space-y-4">
       {chartData.length > 0 ? (
-        <div className="h-64 w-full" dir="ltr">
+        <div className="h-44 w-full" dir="ltr">
           <ChartContainer config={stChartConfig} className="h-full w-full">
             <BarChart data={chartData} margin={{ top: 8, right: 8, left: 8, bottom: 8 }}>
               <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="var(--border)" />
+              {/* نام کامل در چند خط افقی — بدون چرخش؛ interval=0 همهٔ تیک‌ها §۱۴ */}
               <XAxis
                 dataKey="name"
-                tick={{ fontSize: 11 }}
                 interval={0}
-                angle={chartData.length > 4 ? -24 : 0}
-                height={chartData.length > 4 ? 56 : 24}
-                textAnchor={chartData.length > 4 ? 'end' : 'middle'}
+                height={64}
+                tick={<ActivityNameTick />}
               />
-              <YAxis tick={{ fontSize: 11 }} width={48} />
+              <YAxis tick={{ fontSize: 10 }} width={48} label={<SecondsUnitLabel />} />
               <ChartTooltip content={<ChartTooltipContent />} />
               <Bar dataKey="st" fill="var(--brand)" radius={[6, 6, 0, 0]} maxBarSize={48} />
             </BarChart>
@@ -367,8 +412,28 @@ function StatusDonutWidget({ data }: { data: ProjectDashboardDto }) {
   }
 
   return (
-    <div className="flex flex-col items-center gap-4 sm:flex-row sm:items-stretch">
-      <div className="relative mx-auto h-48 w-48 shrink-0" dir="ltr">
+    <div className="flex flex-col items-center gap-4 sm:flex-row sm:items-center sm:gap-5">
+      {/* ستون راهنما — در RTL فرزند order-1 سمت راست قرار می‌گیرد؛ موبایل: دونات بالا §۱۴ */}
+      <ul className="order-2 flex w-full min-w-0 flex-1 flex-col justify-center gap-2 sm:order-1 sm:max-w-80">
+        {slices.map((slice) => (
+          <li key={slice.key} className="flex items-center justify-between gap-3 rounded-lg border px-3 py-1.5">
+            <span className="flex min-w-0 items-center gap-2 text-sm">
+              <span className="size-3 shrink-0 rounded-full" style={{ backgroundColor: slice.color }} aria-hidden />
+              {slice.label}
+            </span>
+            <span className="shrink-0 text-sm font-bold tabular-nums">
+              {formatInt(slice.count, prefs)}
+              <span className="mr-1 font-normal text-muted-foreground">({formatPercent(slice.count / total, prefs)})</span>
+            </span>
+          </li>
+        ))}
+        {s.suspect > 0 && (
+          <li className="rounded-lg bg-amber-soft/60 px-3 py-2 text-xs leading-5 text-amber">
+            مشاهدهٔ مشکوک فقط هشدار است و در محاسبات می‌ماند؛ خروج از محاسبات فقط با تصمیم شما در مرحلهٔ تحلیل.
+          </li>
+        )}
+      </ul>
+      <div className="relative order-1 h-36 w-36 shrink-0 sm:order-2" dir="ltr">
         <ChartContainer config={statusChartConfig} className="h-full w-full">
           <PieChart>
             <ChartTooltip content={<ChartTooltipContent />} />
@@ -376,8 +441,8 @@ function StatusDonutWidget({ data }: { data: ProjectDashboardDto }) {
               data={slices}
               dataKey="count"
               nameKey="label"
-              innerRadius={52}
-              outerRadius={80}
+              innerRadius={42}
+              outerRadius={64}
               paddingAngle={slices.length > 1 ? 3 : 0}
               strokeWidth={2}
             >
@@ -388,31 +453,10 @@ function StatusDonutWidget({ data }: { data: ProjectDashboardDto }) {
           </PieChart>
         </ChartContainer>
         <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-          <span className="text-xl font-black tabular-nums">{formatInt(total, prefs)}</span>
+          <span className="text-lg font-black tabular-nums">{formatInt(total, prefs)}</span>
           <span className="text-[10px] text-muted-foreground">مشاهده</span>
         </div>
       </div>
-      <ul className="w-full flex-1 space-y-2">
-        {slices.map((slice) => (
-          <li key={slice.key} className="flex items-center justify-between gap-2 rounded-lg border px-3 py-2">
-            <span className="flex items-center gap-2 text-sm">
-              <span className="size-3 shrink-0 rounded-full" style={{ backgroundColor: slice.color }} aria-hidden />
-              {slice.label}
-            </span>
-            <span className="text-sm font-bold tabular-nums">
-              {formatInt(slice.count, prefs)}
-              <span className="mr-1 font-normal text-muted-foreground">
-                ({formatPercent(slice.count / total, prefs)})
-              </span>
-            </span>
-          </li>
-        ))}
-        {s.suspect > 0 && (
-          <li className="rounded-lg bg-amber-soft/60 px-3 py-2 text-xs leading-5 text-amber">
-            مشاهدهٔ مشکوک فقط هشدار است و در محاسبات می‌ماند؛ خروج از محاسبات فقط با تصمیم شما در مرحلهٔ تحلیل.
-          </li>
-        )}
-      </ul>
     </div>
   )
 }
@@ -564,24 +608,29 @@ function ReviewNeedsWidget({ data }: { data: ProjectDashboardDto }) {
   }
 
   return (
-    <ul className="space-y-2.5">
+    <ul className="grid items-stretch gap-2.5 sm:grid-cols-2">
       {rn.needsRecalc && (
-        <li className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber/40 bg-amber-soft/40 p-3">
-          <span className="flex items-start gap-2 text-sm">
+        <li className="flex h-full flex-col gap-2 rounded-xl border border-amber/40 bg-amber-soft/40 p-3">
+          <span className="flex items-start gap-2 text-sm leading-6">
             <History className="mt-0.5 size-4 shrink-0 text-amber" aria-hidden />
             <span>
               پس از آخرین تغییر مؤثر، محاسبهٔ رسمی تازه‌سازی نشده است
               {rn.lastCalculationAt ? ` (آخرین اجرا: ${formatDateTime(rn.lastCalculationAt, prefs)})` : ' (هنوز اجرا نشده)'}.
             </span>
           </span>
-          <Button size="sm" variant="outline" onClick={() => navigate({ name: 'project', projectId: data.project.id, stage: 'analysis' })}>
+          <Button
+            size="sm"
+            variant="outline"
+            className="mt-auto self-start"
+            onClick={() => navigate({ name: 'project', projectId: data.project.id, stage: 'analysis' })}
+          >
             رفتن به تحلیل
           </Button>
         </li>
       )}
       {rn.suspectsPending > 0 && (
-        <li className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber/40 bg-amber-soft/40 p-3">
-          <span className="flex items-start gap-2 text-sm">
+        <li className="flex h-full flex-col gap-2 rounded-xl border border-amber/40 bg-amber-soft/40 p-3">
+          <span className="flex items-start gap-2 text-sm leading-6">
             <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber" aria-hidden />
             <span>
               <b>{formatInt(rn.suspectsPending, prefs)}</b> مشاهدهٔ مشکوک بازبینی نشده:{' '}
@@ -589,14 +638,19 @@ function ReviewNeedsWidget({ data }: { data: ProjectDashboardDto }) {
               تا بازبینی، این مقادیر در محاسبات می‌مانند.
             </span>
           </span>
-          <Button size="sm" variant="outline" onClick={() => navigate({ name: 'project', projectId: data.project.id, stage: 'analysis' })}>
+          <Button
+            size="sm"
+            variant="outline"
+            className="mt-auto self-start"
+            onClick={() => navigate({ name: 'project', projectId: data.project.id, stage: 'analysis' })}
+          >
             بازبینی در تحلیل
           </Button>
         </li>
       )}
       {rn.elementsWithoutRating.length > 0 && (
-        <li className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber/40 bg-amber-soft/40 p-3">
-          <span className="flex items-start gap-2 text-sm">
+        <li className="flex h-full flex-col gap-2 rounded-xl border border-amber/40 bg-amber-soft/40 p-3">
+          <span className="flex items-start gap-2 text-sm leading-6">
             <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber" aria-hidden />
             <span>
               <b>{formatInt(rn.elementsWithoutRating.length, prefs)}</b> عنصر ارزیابی وستینگهاوس ندارد؛ NT/ST آن‌ها قابل محاسبه
@@ -604,27 +658,36 @@ function ReviewNeedsWidget({ data }: { data: ProjectDashboardDto }) {
               {rn.elementsWithoutRating.length > 4 ? ' و …' : ''}.
             </span>
           </span>
-          <Button size="sm" variant="outline" onClick={() => navigate({ name: 'project', projectId: data.project.id, stage: 'westinghouse' })}>
+          <Button
+            size="sm"
+            variant="outline"
+            className="mt-auto self-start"
+            onClick={() => navigate({ name: 'project', projectId: data.project.id, stage: 'westinghouse' })}
+          >
             ارزیابی وستینگهاوس
           </Button>
         </li>
       )}
       {rn.activitiesNeedingAggregationRule.length > 0 && (
-        <li className="flex items-start gap-2 rounded-xl border border-amber/40 bg-amber-soft/40 p-3 text-sm">
-          <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber" aria-hidden />
-          <span>
-            فعالیت‌های دارای کار هم‌زمان نیازمند قاعدهٔ تجمیع‌اند؛ زمان استاندارد کل آن‌ها تعیین نشده:{' '}
-            {rn.activitiesNeedingAggregationRule.join('، ')}.
+        <li className="flex h-full flex-col gap-2 rounded-xl border border-amber/40 bg-amber-soft/40 p-3 text-sm leading-6">
+          <span className="flex items-start gap-2">
+            <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber" aria-hidden />
+            <span>
+              فعالیت‌های دارای کار هم‌زمان نیازمند قاعدهٔ تجمیع‌اند؛ زمان استاندارد کل آن‌ها تعیین نشده:{' '}
+              {rn.activitiesNeedingAggregationRule.join('، ')}.
+            </span>
           </span>
         </li>
       )}
       {rn.sampleShortfall.length > 0 && (
-        <li className="flex items-start gap-2 rounded-xl border border-amber/40 bg-amber-soft/40 p-3 text-sm">
-          <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber" aria-hidden />
-          <span>
-            {formatInt(rn.sampleShortfall.length, prefs)} فعالیت به هدف نمونه نرسیده است:{' '}
-            {rn.sampleShortfall.map((x) => `«${x.activityName}» (${formatInt(x.valid, prefs)}/${formatInt(x.target, prefs)})`).join('، ')}.
-            رسیدن به هدف، کفایت آماری را تضمین نمی‌کند.
+        <li className="flex h-full flex-col gap-2 rounded-xl border border-amber/40 bg-amber-soft/40 p-3 text-sm leading-6">
+          <span className="flex items-start gap-2">
+            <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber" aria-hidden />
+            <span>
+              {formatInt(rn.sampleShortfall.length, prefs)} فعالیت به هدف نمونه نرسیده است:{' '}
+              {rn.sampleShortfall.map((x) => `«${x.activityName}» (${formatInt(x.valid, prefs)}/${formatInt(x.target, prefs)})`).join('، ')}.
+              رسیدن به هدف، کفایت آماری را تضمین نمی‌کند.
+            </span>
           </span>
         </li>
       )}

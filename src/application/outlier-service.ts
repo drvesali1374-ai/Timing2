@@ -10,7 +10,8 @@
 //   می‌شود (SUSPECT → VALID) و امتیاز پاک می‌گردد.
 // ═══════════════════════════════════════════════════════════
 import { db } from '@/lib/db'
-import { detectOutliers, type OutlierOptions } from '@/calculation/outlier'
+import { detectOutliers, mad, type OutlierOptions } from '@/calculation/outlier'
+import { descriptiveStats } from '@/calculation/statistics'
 import { getAppSettings } from './settings-service'
 import { markProjectCalculationsStale } from './calc-stale'
 
@@ -56,6 +57,45 @@ export async function refreshOutliersForElement(elementId: string): Promise<Outl
   )
   const flaggedById = new Map(flags.map((f) => [f.ref as string, f]))
 
+  // جلسه ۲ — snapshot تشخیصی در لحظهٔ پرچم‌گذاری (§۱۲.۳):
+  // مقدار، روش، آستانهٔ واقعی استفاده‌شده و آمار مبنای flag ذخیره می‌شود
+  // تا گزارش بعدی همان مبنای واقعی زمان flag را نشان دهد.
+  const basisValues = basis.map((o) => o.derivedDuration as number)
+  const basisStats = descriptiveStats(basisValues)
+  const basisMedian = basisStats.median ?? null
+  const basisMad = basisValues.length > 0 ? mad(basisValues) : null
+
+  function buildSnapshot(flag: { value: number; score: number; rule: string; reason: string }): string {
+    const iqrFallback = flag.rule === 'IQR_FENCE'
+    const snapshot = {
+      value: flag.value,
+      method: config.method === 'iqr' ? 'iqr' : 'mad',
+      methodLabel: config.method === 'iqr' ? 'حصار IQR' : 'امتیاز Z تعدیل‌شده (میانه و MAD)',
+      threshold: config.method === 'iqr' ? 1.5 : config.threshold,
+      thresholdLabel: config.method === 'iqr' ? 'ضریب حصار' : 'آستانهٔ امتیاز Z',
+      score: flag.score,
+      rule: flag.rule,
+      reason: flag.reason,
+      n: basisValues.length,
+      statistics: {
+        median: basisMedian,
+        mad: basisMad,
+        mean: basisStats.mean,
+        sampleSD: basisStats.sampleSD,
+        q1: basisStats.q1,
+        q3: basisStats.q3,
+        iqr: basisStats.iqr,
+        // حصارهای IQR برای حالت fallback
+        lowerFence: basisStats.q1 != null && basisStats.iqr != null ? basisStats.q1 - 1.5 * basisStats.iqr : null,
+        upperFence: basisStats.q3 != null && basisStats.iqr != null ? basisStats.q3 + 1.5 * basisStats.iqr : null,
+      },
+      // در fallback به IQR این پرچم روش تشخیص واقعی است
+      appliedRule: iqrFallback ? 'IQR_FENCE' : 'MODIFIED_Z_MAD',
+      flaggedAt: new Date().toISOString(),
+    }
+    return JSON.stringify(snapshot)
+  }
+
   let flagged = 0
   let unflagged = 0
 
@@ -73,6 +113,7 @@ export async function refreshOutliersForElement(elementId: string): Promise<Outl
             validityStatus: 'SUSPECT',
             outlierScore: flag.score,
             outlierRule: flag.rule,
+            outlierSnapshot: buildSnapshot(flag),
           },
         })
         flagged++
@@ -81,7 +122,7 @@ export async function refreshOutliersForElement(elementId: string): Promise<Outl
       // دیگر پرت نیست → برداشتن برچسب مشکوک به‌صورت شفاف
       await db.elementObservation.update({
         where: { id: o.id },
-        data: { validityStatus: 'VALID', outlierScore: null, outlierRule: null },
+        data: { validityStatus: 'VALID', outlierScore: null, outlierRule: null, outlierSnapshot: null },
       })
       unflagged++
     }

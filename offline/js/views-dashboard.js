@@ -148,6 +148,93 @@
   /* متن سرور (ارقام) → نمایش با ترجیحات کاربر */
   function dstext(s) { return s ? U.displayServerText(s) : ''; }
 
+  /* ── شکستن نام بلند فعالیت به حداکثر ۳ خط کوتاه — برچسب محور «مقایسهٔ فعالیت‌ها» §۱۴ ── */
+  function wrapActivityName(name, maxChars, maxLines) {
+    maxChars = maxChars || 12;
+    maxLines = maxLines || 3;
+    var words = String(name || '').split(/\s+/).filter(Boolean);
+    if (words.length === 0) return [''];
+    var lines = [];
+    for (var i = 0; i < words.length; i++) {
+      if (lines.length >= maxLines) break;
+      var word = words[i];
+      var last = lines.length - 1;
+      if (last >= 0 && (lines[last] + ' ' + word).length <= maxChars) lines[last] = lines[last] + ' ' + word;
+      else lines.push(word);
+    }
+    if (lines.join(' ') !== words.join(' ')) lines[lines.length - 1] = lines[lines.length - 1] + '…';
+    return lines;
+  }
+
+  /* ── نمودار ستونی سفارشی «مقایسهٔ فعالیت‌ها» — §۱۴ ──
+     ارتفاع کاهش‌یافته (۲۴۰ ← ۱۵۰)، بدون هیچ چرخش برچسب، نام کامل
+     فعالیت در حداکثر ۳ خط ~۱۲ نویسه‌ای با ellipsis + tooltip بومی SVG،
+     واحد «(ثانیه)» بالای محور عمودی، میله‌های --brand با سر گرد. */
+  function activitiesChartSvg(acts) {
+    var NS = 'http://www.w3.org/2000/svg';
+    function sv(tag, attrs) {
+      var el = document.createElementNS(NS, tag);
+      for (var k in attrs) el.setAttribute(k, attrs[k]);
+      return el;
+    }
+    var W = 560, H = 150;
+    var padT = 16, padB = 52, padL = 44, padR = 10;
+    var svg = sv('svg', { class: 'stat-chart', viewBox: '0 0 ' + W + ' ' + H, role: 'img', 'aria-label': 'مقایسهٔ زمان استاندارد فعالیت‌ها' });
+    svg.setAttribute('style', 'direction:ltr');
+    if (acts.length === 0) return svg;
+    var maxRaw = Math.max.apply(null, acts.map(function (a) { return a.st; }));
+    var maxV = maxRaw * 1.12 || 1;
+    var innerW = W - padL - padR, innerH = H - padT - padB;
+    var slot = innerW / acts.length;
+    var barW = Math.min(48, slot * 0.6);
+
+    /* خطوط راهنما + تیک‌های محور عمودی */
+    for (var g = 0; g <= 2; g++) {
+      var v = (maxV / 2) * g;
+      var gy = padT + innerH - (v / maxV) * innerH;
+      svg.appendChild(sv('line', { x1: padL, y1: gy, x2: W - padR, y2: gy, stroke: 'var(--border)', 'stroke-width': g === 0 ? 1 : 0.6, 'stroke-dasharray': g === 0 ? 'none' : '2 3' }));
+      var yt = sv('text', { x: padL - 5, y: gy + 3, 'text-anchor': 'end', 'font-size': 9, fill: 'var(--muted-foreground)', direction: 'ltr' });
+      yt.textContent = U.toPersianDigits(U.formatTimeValue(v, 1));
+      svg.appendChild(yt);
+    }
+    /* واحد محور عمودی — بالای محور (RLM برای جهت درست پرانتز) */
+    var unit = sv('text', { x: padL - 2, y: padT - 5, 'text-anchor': 'end', 'font-size': 9, fill: 'var(--muted-foreground)' });
+    unit.textContent = '\u200F(ثانیه)\u200F';
+    svg.appendChild(unit);
+
+    acts.forEach(function (a, i) {
+      var bh = Math.max(2, (a.st / maxV) * innerH);
+      var x = padL + slot * i + (slot - barW) / 2;
+      var y = padT + innerH - bh;
+      var bar = sv('rect', { x: x, y: y, width: barW, height: bh, rx: 6, fill: 'var(--brand)' });
+      var ttl = sv('title');
+      ttl.textContent = a.activityName + ': ' + U.formatTimeValue(a.st) + ' ثانیه';
+      bar.appendChild(ttl);
+      svg.appendChild(bar);
+
+      /* مقدار روی میله — فقط با تعداد کم برای پرهیز از هم‌پوشانی */
+      if (acts.length <= 8) {
+        var val = sv('text', { x: x + barW / 2, y: y - 4, 'text-anchor': 'middle', 'font-size': 9.5, 'font-weight': 600, fill: 'var(--foreground)', direction: 'ltr' });
+        val.textContent = U.toPersianDigits(U.formatTimeValue(a.st, 1));
+        svg.appendChild(val);
+      }
+
+      /* نام فعالیت — چند خط افقی، بدون چرخش؛ نام کامل در tooltip بومی SVG */
+      var lines = wrapActivityName(a.activityName);
+      var lbl = sv('text', { x: padL + slot * i + slot / 2, y: padT + innerH + 14, 'text-anchor': 'middle', 'font-size': 10, fill: 'var(--muted-foreground)' });
+      var lt = sv('title');
+      lt.textContent = a.activityName;
+      lbl.appendChild(lt);
+      lines.forEach(function (line, li) {
+        var ts = sv('tspan', { x: padL + slot * i + slot / 2, dy: li === 0 ? 0 : 11 });
+        ts.textContent = line;
+        lbl.appendChild(ts);
+      });
+      svg.appendChild(lbl);
+    });
+    return svg;
+  }
+
   g.T2VIEWS.dashboard = function (container, projectId) {
     ensureStyles();
     U.clear(container);
@@ -194,13 +281,14 @@
     /* ── نمودار ۱: مقایسهٔ فعالیت‌ها ── */
     function buildActivities(body) {
       var withSt = dash.activities.filter(function (a) { return a.st !== null && a.st !== undefined; });
-      body.appendChild(UI.barChart({
-        data: withSt.map(function (a) {
-          return { label: a.activityName, value: a.st, tooltip: a.activityName + ': ' + U.formatTimeValue(a.st) + ' ثانیه' };
-        }),
-        height: 240,
-        formatValue: function (v) { return U.formatTimeValue(v, 1); },
-      }));
+      if (withSt.length > 0) {
+        body.appendChild(activitiesChartSvg(withSt));
+      } else {
+        body.appendChild(U.h('p', {
+          class: 'text-sm text-muted rounded-lg border border-dashed p-3',
+          text: 'هنوز فعالیتی زمان استاندارد قابل نمایش ندارد.',
+        }));
+      }
       var noSt = dash.activities.filter(function (a) { return a.st === null || a.st === undefined; });
       if (noSt.length > 0) {
         body.appendChild(U.h('p', { class: 'text-xs text-muted mt-3' },
@@ -249,27 +337,36 @@
     /* ── نمودار ۲: توزیع وضعیت مشاهدات ── */
     function buildStatusDonut(body) {
       var s = dash.observationStatus;
+      var total = s.valid + s.suspect + s.excluded + s.invalid;
       var segs = [
         { label: 'معتبر', value: s.valid, color: 'var(--brand)' },
         { label: 'مشکوک', value: s.suspect, color: 'var(--amber)' },
         { label: 'خارج‌شده', value: s.excluded, color: 'var(--red)' },
         { label: 'نامعتبر', value: s.invalid, color: 'var(--muted-foreground)' },
       ];
-      var legend = U.h('ul', { class: 'flex flex-col gap-2' },
+      /* راهنمای عمودی — فرزند اول (راست در RTL)؛ دونات دوم (چپ) — §۱۴ */
+      var legend = U.h('ul', { class: 'flex flex-col gap-2 t2d-donut-legend' },
         segs.map(function (seg) {
-          return U.h('li', { class: 'flex items-center justify-between gap-2 rounded-lg border px-3 py-2' },
-            U.h('span', { class: 'flex items-center gap-2 text-sm' },
+          return U.h('li', { class: 'flex items-center justify-between gap-2 rounded-lg border px-3 py-1.5' },
+            U.h('span', { class: 'flex items-center gap-2 text-sm min-w-0' },
               U.h('span', { class: 't2d-dot', style: { background: seg.color } }),
               U.h('span', { text: seg.label })),
-            U.h('span', { class: 'num font-bold', text: U.formatInt(seg.value) }));
+            U.h('span', { class: 'num font-bold shrink-0' },
+              U.formatInt(seg.value),
+              U.h('span', {
+                class: 'text-xs font-normal',
+                style: { color: 'var(--muted-foreground)' },
+                text: ' (' + U.formatPercent(total ? seg.value / total : 0) + ')',
+              })));
         }),
         s.suspect > 0 ? U.h('li', { class: 'banner plain' }, U.icon('info'),
           U.h('div', {
             text: 'مشاهدهٔ مشکوک فقط هشدار است و در محاسبات می‌ماند؛ خروج از محاسبات فقط با تصمیم شما در مرحلهٔ تحلیل.',
           })) : null);
-      body.appendChild(U.h('div', { class: 'flex flex-wrap items-center gap-4' },
-        UI.donutChart({ segments: segs, centerLabel: 'مشاهده' }),
-        U.h('div', { class: 'flex-1 min-w-0', style: { minWidth: '230px' } }, legend)));
+      /* دونات کمی کوچک‌تر — §۱۴؛ موبایل: دونات بالا/راهنما پایین (CSS) */
+      body.appendChild(U.h('div', { class: 't2d-donut-row' },
+        legend,
+        U.h('div', { class: 't2d-donut-wrap' }, UI.donutChart({ segments: segs, centerLabel: 'مشاهده', size: 150 }))));
     }
 
     /* ── نمودار ۳: مقایسهٔ اپراتورها ── */
@@ -362,23 +459,19 @@
             }))));
         return;
       }
+      /* کارت‌های هم‌ارتفاع — گرید دو ستونه در ≥۶۴۰px؛ دکمهٔ اقدام با
+         mt-auto به کف کارت سنجاق می‌شود — §۱۴ */
       function row(textNode, actionLabel, onAction) {
-        return U.h('li', {
-          class: 'flex flex-wrap items-center justify-between gap-2 rounded-lg border p-2.5',
-          style: {
-            borderColor: 'color-mix(in srgb, var(--amber) 45%, transparent)',
-            background: 'color-mix(in srgb, var(--amber-soft) 45%, transparent)',
-          },
-        },
-          U.h('div', { class: 'flex items-start gap-2 min-w-0 flex-1' },
+        return U.h('li', { class: 't2d-review-card' },
+          U.h('div', { class: 'flex items-start gap-2 min-w-0' },
             U.h('span', { class: 't2d-dot', style: { background: 'var(--amber)', marginTop: '6px' } }),
             textNode),
           actionLabel ? U.h('button', {
-            class: 'btn btn-sm btn-outline shrink-0', type: 'button',
+            class: 'btn btn-sm btn-outline t2d-review-btn', type: 'button',
             text: actionLabel, onclick: onAction,
           }) : null);
       }
-      var list = U.h('ul', { class: 'flex flex-col gap-2 list-none p-0' });
+      var list = U.h('ul', { class: 't2d-review-grid' });
       (rn.suspectsByActivity || []).forEach(function (x) {
         list.appendChild(row(
           U.h('span', { class: 'text-sm' },

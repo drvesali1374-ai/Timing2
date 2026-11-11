@@ -73,6 +73,60 @@ function TrendDot({ cx, cy, payload }: { cx?: number; cy?: number; payload?: { s
   return <circle cx={cx} cy={cy} r={3.5} fill={color} />
 }
 
+/**
+ * عنوان محور افقی — همیشه افقی، زیر تیک‌ها (تیک‌ها تا y+20 می‌رسند؛
+ * عنوان با فاصله در y+34). viewBox = نوار محور — §۱۳
+ */
+function HorizontalAxisTitle({
+  viewBox,
+  value,
+}: {
+  viewBox?: { x: number; y: number; width: number; height: number }
+  value: string
+}) {
+  if (!viewBox) return null
+  return (
+    <text
+      x={viewBox.x + viewBox.width / 2}
+      y={viewBox.y + 34}
+      textAnchor="middle"
+      fontSize={10}
+      fill="var(--muted-foreground)"
+    >
+      {value}
+    </text>
+  )
+}
+
+/**
+ * عنوان محور عمودی — چرخش ۹۰ درجه (خوانش بالا→پایین، مناسب RTL)؛
+ * نزدیک لبهٔ چپ نوار محور تا با اعداد تیک تداخل نکند — §۱۳
+ */
+function VerticalAxisTitle({
+  viewBox,
+  value,
+}: {
+  viewBox?: { x: number; y: number; width: number; height: number }
+  value: string
+}) {
+  if (!viewBox) return null
+  const cx = viewBox.x + 9
+  const cy = viewBox.y + viewBox.height / 2
+  return (
+    <text
+      x={cx}
+      y={cy}
+      transform={`rotate(90 ${cx} ${cy})`}
+      textAnchor="middle"
+      dominantBaseline="central"
+      fontSize={10}
+      fill="var(--muted-foreground)"
+    >
+      {value}
+    </text>
+  )
+}
+
 export default function AnalysisContent({ activityId }: { activityId: string }) {
   const prefs = useDisplayPrefs()
   const qc = useQueryClient()
@@ -159,6 +213,16 @@ export default function AnalysisContent({ activityId }: { activityId: string }) 
   const suspectCount = analysis.elements.reduce((s, e) => s + e.counts.suspect, 0)
   const excludedCount = analysis.elements.reduce((s, e) => s + e.counts.excluded, 0)
   const calcCount = analysis.elements.reduce((s, e) => s + e.counts.calcBasis, 0)
+
+  // هیستوگرام عنصر منتخب: برچسب بازه‌ای «شروع–پایان» + گام تیک برای حداکثر ~۸ برچسب افقی — §۱۳
+  const histDecimals =
+    selectedElement?.histogram.some((b) => !Number.isInteger(b.binStart) || !Number.isInteger(b.binEnd)) ? 1 : 0
+  const histTickInterval = selectedElement ? Math.max(0, Math.ceil(selectedElement.histogram.length / 8) - 1) : 0
+  const histData =
+    selectedElement?.histogram.map((b) => ({
+      ...b,
+      label: `${formatTimeValue(b.binStart, prefs, histDecimals)}–${formatTimeValue(b.binEnd, prefs, histDecimals)}`,
+    })) ?? []
 
   return (
     <div className="space-y-5">
@@ -378,19 +442,19 @@ export default function AnalysisContent({ activityId }: { activityId: string }) 
             />
           ) : (
             <>
-              {/* دسکتاپ: جدول */}
+              {/* دسکتاپ: جدول — سیاست alignment مشترک «tbl» (هدر/داده کوتاه center، متن بلند right) — §۸.۳ */}
               <div className="hidden overflow-x-auto lg:block">
-                <Table>
+                <Table className="tbl">
                   <TableHeader>
                     <TableRow>
-                      <TableHead className="text-right">عنصر</TableHead>
-                      <TableHead className="text-right">نوع</TableHead>
-                      <TableHead className="text-center">در محاسبات</TableHead>
-                      <TableHead className="text-center">مشکوک / خارج</TableHead>
-                      <TableHead className="text-left">OT (ثانیه)</TableHead>
-                      <TableHead className="text-center">R</TableHead>
-                      <TableHead className="text-left">NT (ثانیه)</TableHead>
-                      <TableHead className="text-left">ST (ثانیه)</TableHead>
+                      <TableHead className="tbl-text">عنصر</TableHead>
+                      <TableHead>نوع</TableHead>
+                      <TableHead>در محاسبات</TableHead>
+                      <TableHead>مشکوک / خارج</TableHead>
+                      <TableHead>OT (ثانیه)</TableHead>
+                      <TableHead>R</TableHead>
+                      <TableHead>NT (ثانیه)</TableHead>
+                      <TableHead>ST (ثانیه)</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -494,9 +558,18 @@ export default function AnalysisContent({ activityId }: { activityId: string }) 
 
         <Card className="rounded-2xl">
           <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-base">
+            <CardTitle className="flex flex-wrap items-center gap-2 text-base">
               <ActivityIcon className="size-5 text-brand" aria-hidden />
               آمار زمان سپری‌شدهٔ چرخه
+              <HelpDot
+                label="زمان سپری‌شدهٔ چرخه"
+                content={{
+                  what: '«سپری‌شده» یعنی زمان واقعی گذر یک چرخه؛ برای دادهٔ بازه‌ای برابر است با دیرترین پایان منهای زودترین شروع همان چرخه و در غیر این صورت با جمع مدت عناصر ترتیبی همان چرخه.',
+                  input: 'به‌صورت خودکار از داده‌های زمان‌سنجی محاسبه می‌شود؛ فقط چرخه‌های کامل و قابل استفاده وارد آمار می‌شوند.',
+                  example: 'اگر زودترین شروع عناصر چرخه ثانیهٔ ۱۰۰ و دیرترین پایان آن‌ها ثانیهٔ ۱۴۵ باشد، زمان سپری‌شدهٔ چرخه ۴۵ ثانیه است.',
+                  note: 'کاربرد: ارزیابی زمان واقعی چرخه در شرایط میدانی؛ برای زمان استاندارد، ملاک ST عناصر است.',
+                }}
+              />
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-2 text-sm">
@@ -524,9 +597,18 @@ export default function AnalysisContent({ activityId }: { activityId: string }) 
         <Card className="rounded-2xl">
           <CardHeader className="pb-3">
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <CardTitle className="flex items-center gap-2 text-base">
+              <CardTitle className="flex flex-wrap items-center gap-2 text-base">
                 <BarChart3 className="size-5 text-brand" aria-hidden />
                 بررسی عمیق عنصر
+                <HelpDot
+                  label="بررسی عمیق عنصر"
+                  content={{
+                    what: 'ابزار بررسی تک‌به‌تک عناصر: یک عنصر را انتخاب کنید تا آمار کامل، توزیع (هیستوگرام) و روند مشاهدات آن را در کنار مقایسهٔ اپراتورها ببینید.',
+                    input: 'از فهرست کنار عنوان، یک عنصر کاری انتخاب کنید؛ همهٔ آمارها و نمودارهای همین بخش برای همان عنصر به‌روز می‌شوند.',
+                    example: 'اگر پراکندگی یک عنصر بالا باشد، در هیستوگرام می‌بینید مشاهدات در دو خوشهٔ جدا افتاده‌اند — مثلاً دو روش کار متفاوت.',
+                    note: 'این بخش تغییری در داده ایجاد نمی‌کند؛ تصمیم‌های نگه‌داشتن/خروج مشاهده در «بازبینی مشاهدات مشکوک» گرفته می‌شود.',
+                  }}
+                />
               </CardTitle>
               <Select value={selectedElement.id} onValueChange={(v) => setSelectedElementId(v)} dir="rtl">
                 <SelectTrigger className="w-full max-w-72">
@@ -572,31 +654,46 @@ export default function AnalysisContent({ activityId }: { activityId: string }) 
             {/* نمودارها */}
             <div className="grid gap-4 xl:grid-cols-2">
               <div className="rounded-xl border p-3">
-                <p className="mb-2 flex items-center gap-1.5 text-sm font-bold">
+                <p className="mb-1 flex items-center gap-1.5 text-sm font-bold">
                   <BarChart3 className="size-4 text-brand" aria-hidden />
                   توزیع (هیستوگرام)
+                </p>
+                <p className="mb-2 text-xs leading-5 text-muted-foreground">
+                  هر ستون نشان می‌دهد چند مشاهده در آن بازهٔ زمانی قرار گرفته است.
                 </p>
                 {selectedElement.histogram.length === 0 ? (
                   <p className="py-8 text-center text-sm text-muted-foreground">دادهٔ کافی برای هیستوگرام وجود ندارد.</p>
                 ) : (
-                  <ChartContainer config={chartConfig} className="h-56 w-full">
-                    <BarChart data={selectedElement.histogram} margin={{ top: 8, right: 8, bottom: 0, left: 8 }}>
+                  <ChartContainer config={chartConfig} className="h-64 w-full">
+                    <BarChart data={histData} margin={{ top: 8, right: 8, bottom: 24, left: 16 }}>
                       <CartesianGrid vertical={false} strokeDasharray="3 3" />
                       <XAxis
-                        dataKey="binStart"
-                        tickFormatter={(v: number) => formatTimeValue(v, prefs, 1)}
-                        tick={{ fontSize: 11 }}
+                        dataKey="label"
+                        interval={histTickInterval}
+                        angle={0}
+                        textAnchor="middle"
+                        tick={{ fontSize: 10 }}
+                        height={56}
+                        label={<HorizontalAxisTitle value="مدت (ثانیه)" />}
                       />
-                      <YAxis tick={{ fontSize: 11 }} allowDecimals={false} width={32} />
+                      <YAxis
+                        tick={{ fontSize: 10 }}
+                        allowDecimals={false}
+                        width={44}
+                        label={<VerticalAxisTitle value="تعداد مشاهدات" />}
+                      />
                       <ChartTooltip
                         content={
                           <ChartTooltipContent
                             hideLabel
-                            formatter={(value) => {
+                            formatter={(value, _name, item) => {
+                              const bin = item?.payload as { binStart: number; binEnd: number } | undefined
                               const total = selectedElement.counts.calcBasis
                               return (
                                 <div className="text-xs">
-                                  فراوانی: {formatInt(Number(value), prefs)} از {formatInt(total, prefs)} مشاهده
+                                  بازه: {formatTimeValue(bin?.binStart ?? null, prefs, histDecimals)} تا{' '}
+                                  {formatTimeValue(bin?.binEnd ?? null, prefs, histDecimals)} ثانیه — تعداد:{' '}
+                                  {formatInt(Number(value), prefs)} از {formatInt(total, prefs)} مشاهده
                                 </div>
                               )
                             }}
@@ -610,18 +707,34 @@ export default function AnalysisContent({ activityId }: { activityId: string }) 
               </div>
 
               <div className="rounded-xl border p-3">
-                <p className="mb-2 flex items-center gap-1.5 text-sm font-bold">
+                <p className="mb-1 flex items-center gap-1.5 text-sm font-bold">
                   <LineChartIcon className="size-4 text-brand" aria-hidden />
                   روند مشاهدات به ترتیب چرخه
+                </p>
+                <p className="mb-2 text-xs leading-5 text-muted-foreground">
+                  روند مقدار ثبت‌شده در چرخه‌های متوالی؛ رنگ‌ها وضعیت هر مشاهده را نشان می‌دهد.
                 </p>
                 {selectedElement.trend.length === 0 ? (
                   <p className="py-8 text-center text-sm text-muted-foreground">داده‌ای برای نمایش روند وجود ندارد.</p>
                 ) : (
-                  <ChartContainer config={chartConfig} className="h-56 w-full">
-                    <LineChart data={selectedElement.trend} margin={{ top: 8, right: 8, bottom: 0, left: 8 }}>
+                  <ChartContainer config={chartConfig} className="h-64 w-full">
+                    <LineChart data={selectedElement.trend} margin={{ top: 8, right: 8, bottom: 24, left: 16 }}>
                       <CartesianGrid vertical={false} strokeDasharray="3 3" />
-                      <XAxis dataKey="cycleNo" tick={{ fontSize: 11 }} tickFormatter={(v: number) => formatInt(v, prefs)} />
-                      <YAxis tick={{ fontSize: 11 }} tickFormatter={(v: number) => formatTimeValue(v, prefs, 1)} width={40} />
+                      <XAxis
+                        dataKey="cycleNo"
+                        tick={{ fontSize: 10 }}
+                        tickFormatter={(v: number) => formatInt(v, prefs)}
+                        angle={0}
+                        textAnchor="middle"
+                        height={56}
+                        label={<HorizontalAxisTitle value="شمارهٔ چرخه" />}
+                      />
+                      <YAxis
+                        tick={{ fontSize: 10 }}
+                        tickFormatter={(v: number) => formatTimeValue(v, prefs, 1)}
+                        width={48}
+                        label={<VerticalAxisTitle value="مدت (ثانیه)" />}
+                      />
                       <ChartTooltip
                         content={
                           <ChartTooltipContent
@@ -634,8 +747,9 @@ export default function AnalysisContent({ activityId }: { activityId: string }) 
                                 p?.status === 'SUSPECT' ? 'مشکوک' : p?.status === 'EXCLUDED' ? 'خارج‌شده' : 'معتبر'
                               return (
                                 <div className="text-xs">
-                                  چرخهٔ {formatInt(Number(p?.cycleNo ?? 0), prefs)} ({opName}): {formatTimeValue(Number(value), prefs, 3)}{' '}
-                                  ثانیه — {statusLabel}
+                                  چرخهٔ {formatInt(Number(p?.cycleNo ?? 0), prefs)}
+                                  {opName ? ` (${opName})` : ''} — مقدار: {formatTimeValue(Number(value), prefs, 3)} ثانیه —{' '}
+                                  {statusLabel}
                                 </div>
                               )
                             }}
@@ -689,34 +803,34 @@ export default function AnalysisContent({ activityId }: { activityId: string }) 
                 <p className="text-sm text-muted-foreground">هیچ اپراتوری دادهٔ درون محاسبات برای این عنصر ندارد.</p>
               ) : (
                 <div className="overflow-x-auto rounded-xl border">
-                  <Table>
+                  <Table className="tbl">
                     <TableHeader>
                       <TableRow>
-                        <TableHead className="text-right">اپراتور</TableHead>
-                        <TableHead className="text-center">تعداد</TableHead>
-                        <TableHead className="text-left">میانگین (ثانیه)</TableHead>
-                        <TableHead className="text-left">انحراف معیار</TableHead>
-                        <TableHead className="text-left">CV</TableHead>
-                        <TableHead className="text-center">R (مشترک)</TableHead>
-                        <TableHead className="text-left">NT</TableHead>
-                        <TableHead className="text-left">ST</TableHead>
-                        <TableHead className="text-center">مشکوک / خارج</TableHead>
+                        <TableHead className="tbl-text">اپراتور</TableHead>
+                        <TableHead>تعداد</TableHead>
+                        <TableHead>میانگین (ثانیه)</TableHead>
+                        <TableHead>انحراف معیار</TableHead>
+                        <TableHead>CV</TableHead>
+                        <TableHead>R (مشترک)</TableHead>
+                        <TableHead>NT</TableHead>
+                        <TableHead>ST</TableHead>
+                        <TableHead>مشکوک / خارج</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {selectedElement.operators.map((op) => (
                         <TableRow key={op.operatorId}>
-                          <TableCell className="font-bold">{op.operatorName}</TableCell>
-                          <TableCell className="text-center">{formatInt(op.count, prefs)}</TableCell>
-                          <TableCell className="font-mono">{formatTimeValue(op.mean, prefs)}</TableCell>
-                          <TableCell className="font-mono">{op.sampleSD === null ? NOT_COMPUTABLE : formatTimeValue(op.sampleSD, prefs)}</TableCell>
+                          <TableCell className="tbl-text font-bold">{op.operatorName}</TableCell>
+                          <TableCell className="tbl-num">{formatInt(op.count, prefs)}</TableCell>
+                          <TableCell className="tbl-num font-mono">{formatTimeValue(op.mean, prefs)}</TableCell>
+                          <TableCell className="tbl-num font-mono">{op.sampleSD === null ? NOT_COMPUTABLE : formatTimeValue(op.sampleSD, prefs)}</TableCell>
                           <TableCell className="font-mono">{op.cvPercent === null ? NOT_COMPUTABLE : `${formatTimeValue(op.cvPercent, prefs)}٪`}</TableCell>
-                          <TableCell className="text-center font-mono">
+                          <TableCell className="tbl-num font-mono">
                             {selectedElement.rating ? formatTimeValue(selectedElement.rating.totalFactor, prefs, 3) : '—'}
                           </TableCell>
-                          <TableCell className="font-mono">{formatTimeValue(op.nt, prefs)}</TableCell>
-                          <TableCell className="font-mono">{formatTimeValue(op.st, prefs)}</TableCell>
-                          <TableCell className="text-center">
+                          <TableCell className="tbl-num font-mono">{formatTimeValue(op.nt, prefs)}</TableCell>
+                          <TableCell className="tbl-num font-mono">{formatTimeValue(op.st, prefs)}</TableCell>
+                          <TableCell>
                             <span className={op.suspectCount > 0 ? 'font-bold text-amber' : ''}>{formatInt(op.suspectCount, prefs)}</span>
                             {' / '}
                             <span className={op.excludedCount > 0 ? 'font-bold text-red' : ''}>{formatInt(op.excludedCount, prefs)}</span>
@@ -937,22 +1051,22 @@ function SummaryCard({
 function ElementRow({ el, prefs }: { el: ElementAnalysisItemDto; prefs: ReturnType<typeof useDisplayPrefs> }) {
   return (
     <TableRow>
-      <TableCell className="max-w-48 font-bold">
+      <TableCell className="tbl-text max-w-48 font-bold">
         <span className="line-clamp-1">{el.name}</span>
       </TableCell>
       <TableCell>
         <Badge variant="outline">{ELEMENT_TYPE_LABELS[el.elementType as ElementType] ?? el.elementType}</Badge>
       </TableCell>
-      <TableCell className="text-center">{formatInt(el.counts.calcBasis, prefs)}</TableCell>
-      <TableCell className="text-center">
+      <TableCell className="tbl-num">{formatInt(el.counts.calcBasis, prefs)}</TableCell>
+      <TableCell>
         <span className={el.counts.suspect > 0 ? 'font-bold text-amber' : ''}>{formatInt(el.counts.suspect, prefs)}</span>
         {' / '}
         <span className={el.counts.excluded > 0 ? 'font-bold text-red' : ''}>{formatInt(el.counts.excluded, prefs)}</span>
       </TableCell>
-      <TableCell className="font-mono">{formatTimeValue(el.ot, prefs)}</TableCell>
-      <TableCell className="text-center font-mono">{el.rating ? formatTimeValue(el.rating.totalFactor, prefs, 3) : '—'}</TableCell>
-      <TableCell className="font-mono">{formatTimeValue(el.nt, prefs)}</TableCell>
-      <TableCell className="font-mono">
+      <TableCell className="tbl-num font-mono">{formatTimeValue(el.ot, prefs)}</TableCell>
+      <TableCell className="tbl-num font-mono">{el.rating ? formatTimeValue(el.rating.totalFactor, prefs, 3) : '—'}</TableCell>
+      <TableCell className="tbl-num font-mono">{formatTimeValue(el.nt, prefs)}</TableCell>
+      <TableCell className="tbl-num font-mono">
         {el.stError ? (
           <span className="text-xs font-bold text-red" title={el.stError}>
             خطا

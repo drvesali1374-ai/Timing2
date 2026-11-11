@@ -22,6 +22,8 @@ import {
   type ElementColumn,
 } from './shared'
 import { CycleTimeline } from './CycleTimeline'
+import { SuspectDiagnosticDialog, type SuspectDiagTarget } from './SuspectDiagnosticDialog'
+import { DeleteCycleConfirm } from './DeleteCycleConfirm'
 
 interface MobileSheetProps {
   sheet: SessionSheetDto
@@ -49,6 +51,10 @@ export function MobileSheet({
   adding,
 }: MobileSheetProps) {
   const [expanded, setExpanded] = useState<string | null>(null)
+  // هدف دیالوگ تشخیص مشاهدهٔ مشکوک — §۱۲.۳
+  const [diagTarget, setDiagTarget] = useState<SuspectDiagTarget | null>(null)
+  // چرخهٔ در انتظار تأیید حذف — §۱۲.۴
+  const [deleteTarget, setDeleteTarget] = useState<CycleRowDto | null>(null)
   const method = sheet.session.timingMethod
 
   return (
@@ -71,6 +77,7 @@ export function MobileSheet({
           commitCell={commitCell}
           onDeleteCycle={onDeleteCycle}
           onSetValidity={onSetValidity}
+          onDiagnose={(obs, elementName) => setDiagTarget({ cycle, obs, elementName })}
           onUpdateNotes={onUpdateNotes}
         />
       ))}
@@ -80,6 +87,32 @@ export function MobileSheet({
           افزودن چرخه
         </Button>
       )}
+
+      {/* دیالوگ تشخیص مشاهدهٔ مشکوک — §۱۲.۳ */}
+      <SuspectDiagnosticDialog
+        target={diagTarget}
+        prefs={prefs}
+        onClose={() => setDiagTarget(null)}
+        onExclude={(t) => {
+          setDiagTarget(null)
+          onSetValidity(t.cycle, t.obs)
+        }}
+      />
+
+      {/* تأیید حذف چرخه — §۱۲.۴ (حذف یک‌کلیکی غیرممکن است) */}
+      <DeleteCycleConfirm
+        cycle={deleteTarget}
+        sheet={sheet}
+        prefs={prefs}
+        onOpenChange={(open) => {
+          if (!open) setDeleteTarget(null)
+        }}
+        onConfirm={() => {
+          const c = deleteTarget
+          setDeleteTarget(null)
+          if (c) onDeleteCycle(c)
+        }}
+      />
     </div>
   )
 }
@@ -95,6 +128,7 @@ function MobileCycleCard({
   commitCell,
   onDeleteCycle,
   onSetValidity,
+  onDiagnose,
   onUpdateNotes,
 }: {
   cycle: CycleRowDto
@@ -107,6 +141,8 @@ function MobileCycleCard({
   commitCell: (cycle: CycleRowDto, column: ElementColumn, payload: CellPayload) => void
   onDeleteCycle: (cycle: CycleRowDto) => void
   onSetValidity: (cycle: CycleRowDto, obs: ObservationCellDto) => void
+  /** بازکردن دیالوگ تشخیص برای مشاهدهٔ مشکوک — §۱۲.۳ */
+  onDiagnose: (obs: ObservationCellDto, elementName: string) => void
   onUpdateNotes: (cycle: CycleRowDto, notes: string) => void
 }) {
   const method = sheet.session.timingMethod
@@ -184,6 +220,7 @@ function MobileCycleCard({
                   editable={editable && !excluded}
                   commitCell={commitCell}
                   onSetValidity={() => obs && onSetValidity(cycle, obs)}
+                  onDiagnose={() => obs && onDiagnose(obs, col.name)}
                 />
               )
             })}
@@ -222,7 +259,7 @@ function MobileCycleCard({
                 className="gap-1.5 text-red hover:text-red"
               >
                 <Trash2 className="size-3.5" aria-hidden />
-                حذف چرخه
+                حذف چرخه…
               </Button>
               <span className="text-[10px] text-faint">حذف با Undo قابل بازگردانی است</span>
             </div>
@@ -242,6 +279,7 @@ function MobileElementField({
   editable,
   commitCell,
   onSetValidity,
+  onDiagnose,
 }: {
   cycle: CycleRowDto
   column: ElementColumn
@@ -251,6 +289,8 @@ function MobileElementField({
   editable: boolean
   commitCell: (cycle: CycleRowDto, column: ElementColumn, payload: CellPayload) => void
   onSetValidity: () => void
+  /** بازکردن دیالوگ تشخیص مشاهدهٔ مشکوک — §۱۲.۳ */
+  onDiagnose: () => void
 }) {
   const init = cellEditValue(obs, method)
   const [seq, setSeq] = useState(init.seq)
@@ -305,28 +345,46 @@ function MobileElementField({
       </div>
 
       {column.entryMode === 'INT' ? (
-        <div className="flex items-center gap-1.5" dir="ltr">
-          <input
-            value={start}
-            onChange={(e) => setStart(e.target.value)}
-            onBlur={commit}
-            disabled={!editable}
-            inputMode="decimal"
-            aria-label={`شروع بازهٔ ${column.name}`}
-            placeholder="شروع"
-            className="num w-full rounded-lg border bg-background px-2 py-1.5 text-center text-xs focus-visible:outline-2 focus-visible:outline-ring"
-          />
-          <span className="text-faint">–</span>
-          <input
-            value={end}
-            onChange={(e) => setEnd(e.target.value)}
-            onBlur={commit}
-            disabled={!editable}
-            inputMode="decimal"
-            aria-label={`پایان بازهٔ ${column.name}`}
-            placeholder="پایان"
-            className="num w-full rounded-lg border bg-background px-2 py-1.5 text-center text-xs focus-visible:outline-2 focus-visible:outline-ring"
-          />
+        // گروه بصری «از/تا» برای ورودی بازه‌ای — §۱۲.۲
+        <div
+          dir="ltr"
+          className="grid grid-cols-[1fr_auto_1fr] items-end gap-1 rounded-lg border bg-background p-1 focus-within:border-brand focus-within:ring-1 focus-within:ring-brand"
+        >
+          <label className="flex min-w-0 flex-col items-center gap-0.5">
+            <span className="text-[10px] font-bold leading-none text-muted-foreground" aria-hidden>
+              از
+            </span>
+            <input
+              value={start}
+              onChange={(e) => setStart(e.target.value)}
+              onBlur={commit}
+              disabled={!editable}
+              inputMode="decimal"
+              aria-label={`شروع بازهٔ ${column.name}`}
+              placeholder="شروع"
+              dir="ltr"
+              className="num w-full rounded-md bg-muted/50 px-2 py-1.5 text-center text-xs focus-visible:bg-brand-soft/40 focus-visible:outline-none"
+            />
+          </label>
+          <span className="self-end pb-2.5 text-faint" aria-hidden>
+            –
+          </span>
+          <label className="flex min-w-0 flex-col items-center gap-0.5">
+            <span className="text-[10px] font-bold leading-none text-muted-foreground" aria-hidden>
+              تا
+            </span>
+            <input
+              value={end}
+              onChange={(e) => setEnd(e.target.value)}
+              onBlur={commit}
+              disabled={!editable}
+              inputMode="decimal"
+              aria-label={`پایان بازهٔ ${column.name}`}
+              placeholder="پایان"
+              dir="ltr"
+              className="num w-full rounded-md bg-muted/50 px-2 py-1.5 text-center text-xs focus-visible:bg-brand-soft/40 focus-visible:outline-none"
+            />
+          </label>
         </div>
       ) : (
         <input
@@ -346,11 +404,24 @@ function MobileElementField({
           <XCircle className="size-3" aria-hidden /> {error}
         </p>
       )}
-      {excluded && (
-        <button type="button" onClick={onSetValidity} className="text-[10px] font-bold text-green">
-          خارج‌شده از محاسبات — بازگشت به محاسبات
-        </button>
-      )}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        {excluded && (
+          <button type="button" onClick={onSetValidity} className="text-[10px] font-bold text-green">
+            خارج‌شده از محاسبات — بازگشت به محاسبات
+          </button>
+        )}
+        {obs?.validityStatus === 'SUSPECT' && (
+          // دکمهٔ تشخیص مشاهدهٔ مشکوک — §۱۲.۳
+          <button
+            type="button"
+            onClick={onDiagnose}
+            className="flex items-center gap-1 text-[10px] font-bold text-amber"
+          >
+            <AlertTriangle className="size-3" aria-hidden />
+            مشاهدهٔ مشکوک — نمایش تشخیص
+          </button>
+        )}
+      </div>
     </div>
   )
 }

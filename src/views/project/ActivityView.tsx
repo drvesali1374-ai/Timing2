@@ -72,7 +72,6 @@ import {
   ELEMENT_TYPE_LABELS,
   PROCESS_TYPES,
   PROCESS_TYPE_LABELS,
-  PROCESS_TYPE_SYMBOLS,
   type ElementType,
   type ProcessType,
 } from '@/domain/types'
@@ -83,6 +82,8 @@ import { cn } from '@/lib/utils'
 import TimingView from './TimingView'
 import AnalysisContent from './analysis/AnalysisContent'
 import { AllowanceSection } from './allowances/AllowanceSection'
+import ParallelRelationsSection from './matrix/ParallelRelationsSection'
+import { ProcessSymbol } from '@/components/common/ProcessSymbol'
 
 type Prefs = ReturnType<typeof useDisplayPrefs>
 type TabKey = 'info' | 'elements' | 'timing' | 'analysis'
@@ -170,10 +171,6 @@ const ELEMENT_TYPE_HELP = {
 // ── کمک‌تابع‌ها ──
 function processLabelOf(pt: string): string {
   return PROCESS_TYPE_LABELS[pt as ProcessType] ?? pt
-}
-
-function processSymbolOf(pt: string): string {
-  return PROCESS_TYPE_SYMBOLS[pt as ProcessType] ?? '○'
 }
 
 function elementTypeLabelOf(et: string): string {
@@ -335,7 +332,7 @@ function ActivityScreen({ projectId, activityId }: { projectId: string; activity
               className="shrink-0 border-0 bg-brand-soft text-brand"
               title={`نوع رویداد فرایندی: ${processLabelOf(activity.processType)}`}
             >
-              <span className="num font-bold">{processSymbolOf(activity.processType)}</span>
+              <span className="num font-bold"><ProcessSymbol type={activity.processType} size="sm" /></span>
               {processLabelOf(activity.processType)}
             </Badge>
           ) : (
@@ -605,7 +602,7 @@ function ActivityInfoForm({
               <SelectContent>
                 {PROCESS_TYPES.map((pt) => (
                   <SelectItem key={pt} value={pt}>
-                    <span className="num">{PROCESS_TYPE_SYMBOLS[pt]}</span> {PROCESS_TYPE_LABELS[pt]}
+                    <ProcessSymbol type={pt} size="sm" /> {PROCESS_TYPE_LABELS[pt]}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -1116,6 +1113,14 @@ function ElementEditForm({
 
         {/* الونس‌ها و زمان‌های مجاز — سطح عنصر کاری (§۶) */}
         <AllowanceSection projectId={projectId} scopeType="WORK_ELEMENT" scopeId={element.id} compact />
+
+        {/* عناصر موازی و اطلاعات هم‌پوشانی — جلسه ۲ §۴.۱ */}
+        <ParallelRelationsSection
+          projectId={projectId}
+          elementId={element.id}
+          elementName={element.name}
+          compact
+        />
       </div>
       <DialogFooter className="flex-row justify-between gap-2">
         <SaveIndicator status={status} onRetry={retry} error={lastError} />

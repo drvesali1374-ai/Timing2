@@ -231,6 +231,17 @@
     );
     border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
   }
+  /* جلسه ۲ — قطر ماتریس هم‌پوشانی: خط‌دار و غیرقابل ویرایش (§۱۱) */
+  .matrix-diagonal {
+    background-image: repeating-linear-gradient(
+      45deg,
+      color-mix(in srgb, var(--muted-foreground) 22%, transparent),
+      color-mix(in srgb, var(--muted-foreground) 22%, transparent) 2px,
+      transparent 2px,
+      transparent 7px
+    );
+    cursor: default;
+  }
   .chip-icon {
     display: inline-flex;
     align-items: center;
@@ -339,14 +350,21 @@
   }
 }
 
-/* ═══════════ چاپ گزارش رسمی — FR-22 (فاز ۶) ═══════════
+/* ═══════════ چاپ گزارش رسمی — FR-22 (فاز ۶) + §۱۶.۲/§۱۵.۷ جلسه ۲ ═══════════
    رویکرد: مرورگر با HarfBuzz متن فارسی را کامل شکل‌دهی می‌کند؛
    «چاپ / ذخیره PDF» خروجی PDF بومی و کاملاً آفلاین می‌سازد.
-   فقط ناحیهٔ .print-report چاپ می‌شود و بقیهٔ برنامه مخفی است. */
+   فقط ناحیهٔ .print-report چاپ می‌شود و بقیهٔ برنامه مخفی است.
+   • اندازهٔ کاغذ/جهت پویاست: ReportsView هنگام چاپ یک
+     <style id="print-page-style"> با @page مناسب به head تزریق و
+     پس از چاپ حذف می‌کند — @page داخل کلاس یا با CSS var
+     پشتیبانی نمی‌شود؛ پیش‌فرض همین‌جا A4 عمودی است.
+   • .print-report در جریان «استاتیک» صفحه‌بندی می‌شود (بدون
+     position:absolute) تا حاشیهٔ امن @page در همهٔ صفحات اعمال
+     شود و متن در نقاط شکست صفحه به لبه نچسبد. */
 @media print {
   @page {
     size: A4;
-    margin: 12mm 10mm;
+    margin: 14mm 12mm;
   }
   html,
   body {
@@ -361,10 +379,10 @@
   .print-report * {
     visibility: visible;
   }
+  /* جریان استاتیک با عرض کامل — تنها حاشیه، حاشیهٔ امن @page است
+     (۱۴mm بالا/پایین، ۱۲mm طرفین) که در هر صفحه اعمال می‌شود. */
   .print-report {
-    position: absolute !important;
-    inset-inline-start: 0 !important;
-    inset-block-start: 0 !important;
+    position: static !important;
     width: 100% !important;
     max-width: none !important;
     margin: 0 !important;
@@ -387,9 +405,69 @@
   }
   .print-report table {
     break-inside: auto;
+    /* جدول عناصر روی کاغذ فشرده می‌شود، نه بریده — min-w عرضی
+       مخصوص صفحه‌نمایش در چاپ برداشته می‌شود. */
+    min-width: 0 !important;
+  }
+  .print-report .overflow-x-auto {
+    overflow: visible !important;
+  }
+  /* تکرار سرستون جدول‌ها در هر صفحهٔ چاپی */
+  .print-report thead {
+    display: table-header-group;
+  }
+  /* عنوان‌ها یتیم نمی‌مانند — با اولین محتوایشان به صفحهٔ بعد می‌روند */
+  .print-report h1,
+  .print-report h2,
+  .print-report h3,
+  .print-report h4 {
+    break-after: avoid;
+    page-break-after: avoid;
+  }
+  /* همهٔ جدول‌های گزارش در چاپ وسط‌چین؛ سلول‌های متن بلند (.long)
+     مثل عنصر/عنوان/دلیل، راست‌چین RTL می‌مانند. */
+  .print-report table th,
+  .print-report table td {
+    text-align: center !important;
+  }
+  .print-report table th.long,
+  .print-report table td.long {
+    text-align: right !important;
   }
   * {
     print-color-adjust: exact;
     -webkit-print-color-adjust: exact;
+  }
+}
+
+/* ═══════════ §۱۶.۲ — صفحه‌بندی چاپ: پاورقی تکرارشونده + خنثی‌سازی پوسته ═══════════
+   پاورقی چاپ: عنصر .print-running-footer فقط در چاپ دیده می‌شود؛ در
+   Chrome عناصر position:fixed روی «همهٔ صفحات» چاپ تکرار می‌شوند.
+   شماره‌گذاری صفحات عمداً جعل نمی‌شود — بر عهدهٔ تنظیمات
+   «Headers and footers» پنجرهٔ چاپ مرورگر است (در ReportsView هم
+   یادآوری شده است). */
+.print-running-footer {
+  display: none;
+}
+@media print {
+  .print-running-footer {
+    display: block;
+    position: fixed;
+    bottom: 4mm;
+    inset-inline: 0;
+    text-align: center;
+    font-size: 9px;
+    color: #666;
+  }
+  /* فقط هنگام چاپ گزارش: اجداد ناحیهٔ چاپ جعبهٔ چیدمانی نمی‌سازند
+     (display:contents) تا جریان استاتیک .print-report از حاشیهٔ امن
+     @page آغاز شود و padding پوسته اضافه نشود؛ سایدبار مراحل
+     (aside پوسته) نیز در چاپ مخفی می‌شود. وقتی .print-report در
+     DOM نیست، این قواعد بی‌اثرند و چاپ سایر صفحات دست‌نخورده می‌ماند. */
+  body:has(.print-report) :has(.print-report) {
+    display: contents;
+  }
+  body:has(.print-report) aside {
+    display: none !important;
   }
 }

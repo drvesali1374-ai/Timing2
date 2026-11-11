@@ -40,6 +40,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { HelpDot } from '@/components/common/HelpDot'
 import { ConfirmDeleteDialog, EmptyState } from '@/components/common/Feedback'
 import { SheetPanel } from './timing/SheetPanel'
+import { TimingSubheader } from './timing/TimingSubheader'
 import { structureApi, operatorsApi, timingApi, type SessionListItemDto } from '@/lib/api/endpoints'
 import { qk } from '@/lib/api/keys'
 import { useDisplayPrefs } from '@/store/display-store'
@@ -104,13 +105,20 @@ export default function TimingView({
   const operators = operatorsData?.items ?? []
   const sessions = sessionsData?.sessions ?? []
   const filteredSessions = operatorFilter === 'ALL' ? sessions : sessions.filter((s) => s.operatorId === operatorFilter)
-  const operatorsWithSessions = Array.from(new Set(sessions.map((s) => s.operatorId)))
 
   const invalidate = () => {
     if (activityId) void qc.invalidateQueries({ queryKey: qk.sessions(activityId) })
     void qc.invalidateQueries({ queryKey: qk.operators(projectId) })
     void qc.invalidateQueries({ queryKey: qk.projectSummary(projectId) })
   }
+
+  // ── بازگشت به فهرست فعالیت‌ها از زیرهدر چسبان — §۱۲.۱ ──
+  const openPicker = () => {
+    setActiveSessionId(null)
+    setShowPicker(true)
+  }
+
+  const hasElements = (selectedActivity?._count?.workElements ?? 0) > 0
 
   // ── حذف جلسه — FR-26 ──
   const deleteMutation = useMutation({
@@ -137,13 +145,39 @@ export default function TimingView({
   })
 
   // ═══════════════ برگهٔ فعال ═══════════════
-  if (activeSessionId) {
+  // زیرهدر چسبان بالای برگه — §۱۲.۱ (اطلاعات فعالیت/ایستگاه/اپراتور فقط همین‌جا)
+  if (activeSessionId && activityId && selectedActivity) {
+    const activeSession = sessions.find((s) => s.id === activeSessionId)
     return (
-      <SheetPanel
-        sessionId={activeSessionId}
-        prefs={prefs}
-        onBack={() => setActiveSessionId(null)}
-      />
+      <div className="mx-auto max-w-5xl">
+        <TimingSubheader
+          variant="sheet"
+          prefs={prefs}
+          activityName={selectedActivity.name}
+          stationName={selectedActivity.stationName}
+          onOpenPicker={openPicker}
+          canCreateSession={hasElements && operators.length > 0}
+          onCreateSession={() => setCreateOpen(true)}
+          activeOperatorName={activeSession?.operatorName ?? null}
+        />
+        <SheetPanel
+          sessionId={activeSessionId}
+          prefs={prefs}
+          onBack={() => setActiveSessionId(null)}
+        />
+        {/* جلسهٔ جدید از زیرهدر برگه نیز در دسترس است */}
+        <CreateSessionDialog
+          open={createOpen}
+          onOpenChange={setCreateOpen}
+          activityId={activityId}
+          operators={operators}
+          onCreated={(sessionId) => {
+            invalidate()
+            setCreateOpen(false)
+            setActiveSessionId(sessionId)
+          }}
+        />
+      </div>
     )
   }
 
@@ -176,11 +210,11 @@ export default function TimingView({
           title="زمان‌سنجی"
           subtitle="انتخاب فعالیت برای ثبت برگهٔ چرخه‌محور"
           right={
-            initialActivityId && (
+            activityId ? (
               <Button variant="outline" size="sm" onClick={() => setShowPicker(false)}>
                 بازگشت
               </Button>
-            )
+            ) : undefined
           }
         />
         <div className="space-y-4">
@@ -231,177 +265,180 @@ export default function TimingView({
   }
 
   // ═══════════════ جلسات فعالیت ═══════════════
-  const hasElements = (selectedActivity?._count?.workElements ?? 0) > 0
 
   return (
-    <div className="animate-view-in mx-auto max-w-5xl space-y-4">
-      <Header
-        title="زمان‌سنجی"
-        subtitle={selectedActivity ? `فعالیت «${selectedActivity.name}» — ایستگاه ${selectedActivity.stationName}` : undefined}
-        right={
-          <div className="flex gap-2">
-            <Button variant="outline" size="sm" onClick={() => setShowPicker(true)} className="gap-1.5">
-              <Factory className="size-4" aria-hidden />
-              تغییر فعالیت
-            </Button>
-            {hasElements && operators.length > 0 && (
-              <Button onClick={() => setCreateOpen(true)} className="btn-brand gap-1.5 border-0">
-                <Plus className="size-4" aria-hidden />
-                جلسهٔ جدید
-              </Button>
-            )}
-          </div>
-        }
-      />
-
-      {/* گاردهای آمادگی */}
-      {!hasElements && (
-        <EmptyState
-          icon={<ClipboardList className="size-7" aria-hidden />}
-          title="این فعالیت عنصر کاری ندارد"
-          description="برگهٔ زمان‌سنجی ستون‌هایش را از عناصر کاری فعالیت می‌سازد؛ ابتدا عناصر را در ساختار تولید تعریف کنید."
-        />
-      )}
-      {hasElements && operators.length === 0 && (
-        <EmptyState
-          icon={<UserRound className="size-7" aria-hidden />}
-          title="اپراتوری ثبت نشده است"
-          description="هر جلسه ترکیبی از فعالیت × اپراتور × روش اندازه‌گیری است؛ ابتدا اپراتورها را ثبت کنید."
+    <div className="mx-auto max-w-5xl">
+      {/* زیرهدر چسبان — §۱۲.۱: عنوان فعالیت/ایستگاه، فهرست فعالیت‌ها،
+          چیپ‌های فیلتر اپراتور و جلسهٔ جدید؛ کارت‌های جلسه چسبان نیستند */}
+      {selectedActivity && (
+        <TimingSubheader
+          variant="list"
+          prefs={prefs}
+          activityName={selectedActivity.name}
+          stationName={selectedActivity.stationName}
+          onOpenPicker={openPicker}
+          canCreateSession={hasElements && operators.length > 0}
+          onCreateSession={() => setCreateOpen(true)}
+          operatorFilter={operatorFilter}
+          onOperatorFilter={setOperatorFilter}
+          operators={operators}
+          sessions={sessions}
         />
       )}
 
-      {/* فیلتر اپراتور — برگهٔ مستقل هر اپراتور — FR-07 */}
-      {hasElements && sessions.length > 0 && (
-        <div className="card-premium flex flex-wrap items-center gap-1.5 p-2.5">
-          <span className="text-xs font-bold text-muted-foreground">اپراتور:</span>
-          <OperatorChip
-            label="همه"
-            active={operatorFilter === 'ALL'}
-            onClick={() => setOperatorFilter('ALL')}
-            count={sessions.length}
-            prefs={prefs}
-          />
-          {operators
-            .filter((op) => operatorsWithSessions.includes(op.id))
-            .map((op) => (
-              <OperatorChip
-                key={op.id}
-                label={op.displayName}
-                active={operatorFilter === op.id}
-                onClick={() => setOperatorFilter(op.id)}
-                count={sessions.filter((s) => s.operatorId === op.id).length}
-                prefs={prefs}
-              />
-            ))}
-        </div>
-      )}
-
-      {/* جلسات */}
-      {sessionsLoading ? (
-        <div className="space-y-2">
-          {Array.from({ length: 2 }).map((_, i) => (
-            <Skeleton key={i} className="h-28 w-full rounded-2xl" />
-          ))}
-        </div>
-      ) : sessionsError ? (
-        <EmptyState
-          title="بارگذاری جلسات ناموفق بود"
-          description={sessionsError instanceof Error ? sessionsError.message : 'خطای نامشخص'}
-        />
-      ) : filteredSessions.length === 0 && hasElements && operators.length > 0 ? (
-        <EmptyState
-          icon={<Timer className="size-7" aria-hidden />}
-          title="هنوز جلسه‌ای برای این فعالیت ثبت نشده است"
-          description="برای شروع زمان‌سنجی، جلسه‌ای با انتخاب اپراتور و روش اندازه‌گیری (برگشت به صفر یا پیوسته) ایجاد کنید. هر جلسه برگهٔ مستقلی دارد و جلسهٔ جدید مستقل از جلسهٔ قبلی است."
-          action={
-            <Button onClick={() => setCreateOpen(true)} className="btn-brand gap-1.5 border-0">
-              <Plus className="size-4" aria-hidden />
-              ایجاد اولین جلسه
-            </Button>
-          }
-        />
-      ) : (
-        <div className="grid gap-3 md:grid-cols-2">
-          {filteredSessions.map((s) => (
-            <SessionCard
-              key={s.id}
-              session={s}
-              prefs={prefs}
-              onOpen={() => setActiveSessionId(s.id)}
-              onDelete={() => setDeleting(s)}
-              onEdit={() => {
-                setEditingSession(s)
-                setEditNotes(s.notes ?? '')
+      <div className="animate-view-in space-y-4">
+        {/* سربرگ لاغر مرحله — اطلاعات فعالیت/ایستگاه در زیرهدر چسبان است — §۱۲.۱ */}
+        <Header
+          title="زمان‌سنجی"
+          help={
+            <HelpDot
+              label="مرحلهٔ زمان‌سنجی"
+              content={{
+                what: 'ثبت چرخه‌های زمان‌سنجی فعالیت منتخب؛ هر ردیف برگه یک چرخهٔ کامل و هر ستون یک عنصر کاری است.',
+                input:
+                  'فعالیت را از فهرست انتخاب کنید و برای هر اپراتور جلسه‌ای با روش اندازه‌گیری (برگشت به صفر یا پیوسته) بسازید؛ سپس مقادیر را در برگه وارد کنید.',
+                example:
+                  'برای فعالیت «مونتاژ بدنه» دو جلسه مستقل برای اپراتور ۱ (برگشت به صفر) و اپراتور ۲ (پیوسته) ثبت می‌شود.',
+                note: 'مشاهدات مشکوک فقط به‌صورت آماری پرچم‌گذاری می‌شوند؛ حذف خودکار وجود ندارد و تصمیم خروج از محاسبات با شماست.',
               }}
             />
-          ))}
-        </div>
-      )}
+          }
+        />
 
-      {/* دیالوگ ایجاد جلسه — FR-06 */}
-      <CreateSessionDialog
-        open={createOpen}
-        onOpenChange={setCreateOpen}
-        activityId={activityId}
-        operators={operators}
-        onCreated={(sessionId) => {
-          invalidate()
-          setCreateOpen(false)
-          setActiveSessionId(sessionId)
-        }}
-      />
-
-      {/* ویرایش یادداشت جلسه */}
-      <Dialog open={editingSession !== null} onOpenChange={(open) => !open && setEditingSession(null)}>
-        <DialogContent dir="rtl" className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>یادداشت جلسه</DialogTitle>
-            <DialogDescription>
-              جلسهٔ {editingSession ? TIMING_METHOD_LABELS[editingSession.timingMethod] : ''} —{' '}
-              {editingSession?.operatorName}
-            </DialogDescription>
-          </DialogHeader>
-          <Textarea
-            value={editNotes}
-            onChange={(e) => setEditNotes(e.target.value)}
-            placeholder="مثلاً: نوبت صبح، شرایط عادی کارگاه"
-            className="min-h-24"
+        {/* گاردهای آمادگی */}
+        {!hasElements && (
+          <EmptyState
+            icon={<ClipboardList className="size-7" aria-hidden />}
+            title="این فعالیت عنصر کاری ندارد"
+            description="برگهٔ زمان‌سنجی ستون‌هایش را از عناصر کاری فعالیت می‌سازد؛ ابتدا عناصر را در ساختار تولید تعریف کنید."
           />
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setEditingSession(null)}>
-              انصراف
-            </Button>
-            <Button
-              className="btn-brand border-0"
-              disabled={notesMutation.isPending}
-              onClick={() => editingSession && notesMutation.mutate({ id: editingSession.id, notes: editNotes.trim() || null })}
-            >
-              {notesMutation.isPending && <Loader2 className="size-4 animate-spin" aria-hidden />}
-              ذخیره
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        )}
+        {hasElements && operators.length === 0 && (
+          <EmptyState
+            icon={<UserRound className="size-7" aria-hidden />}
+            title="اپراتوری ثبت نشده است"
+            description="هر جلسه ترکیبی از فعالیت × اپراتور × روش اندازه‌گیری است؛ ابتدا اپراتورها را ثبت کنید."
+          />
+        )}
 
-      {/* تأیید حذف دائمی جلسه — FR-26 */}
-      <ConfirmDeleteDialog
-        open={deleting !== null}
-        onOpenChange={(open) => !open && setDeleting(null)}
-        title="حذف دائمی جلسهٔ زمان‌سنجی"
-        entityName={deleting ? `${deleting.operatorName} — ${TIMING_METHOD_LABELS[deleting.timingMethod]}` : ''}
-        dependencies={{
-          'چرخه‌های ثبت‌شده': deleting?.cyclesCount ?? 0,
-        }}
-        onConfirm={() => deleting && deleteMutation.mutate(deleting.id)}
-        loading={deleteMutation.isPending}
-      />
+        {/* جلسات */}
+        {sessionsLoading ? (
+          <div className="space-y-2">
+            {Array.from({ length: 2 }).map((_, i) => (
+              <Skeleton key={i} className="h-28 w-full rounded-2xl" />
+            ))}
+          </div>
+        ) : sessionsError ? (
+          <EmptyState
+            title="بارگذاری جلسات ناموفق بود"
+            description={sessionsError instanceof Error ? sessionsError.message : 'خطای نامشخص'}
+          />
+        ) : filteredSessions.length === 0 && hasElements && operators.length > 0 ? (
+          <EmptyState
+            icon={<Timer className="size-7" aria-hidden />}
+            title="هنوز جلسه‌ای برای این فعالیت ثبت نشده است"
+            description="برای شروع زمان‌سنجی، جلسه‌ای با انتخاب اپراتور و روش اندازه‌گیری (برگشت به صفر یا پیوسته) ایجاد کنید. هر جلسه برگهٔ مستقلی دارد و جلسهٔ جدید مستقل از جلسهٔ قبلی است."
+            action={
+              <Button onClick={() => setCreateOpen(true)} className="btn-brand gap-1.5 border-0">
+                <Plus className="size-4" aria-hidden />
+                ایجاد اولین جلسه
+              </Button>
+            }
+          />
+        ) : (
+          <div className="grid gap-3 md:grid-cols-2">
+            {filteredSessions.map((s) => (
+              <SessionCard
+                key={s.id}
+                session={s}
+                prefs={prefs}
+                onOpen={() => setActiveSessionId(s.id)}
+                onDelete={() => setDeleting(s)}
+                onEdit={() => {
+                  setEditingSession(s)
+                  setEditNotes(s.notes ?? '')
+                }}
+              />
+            ))}
+          </div>
+        )}
+
+        {/* دیالوگ ایجاد جلسه — FR-06 */}
+        <CreateSessionDialog
+          open={createOpen}
+          onOpenChange={setCreateOpen}
+          activityId={activityId}
+          operators={operators}
+          onCreated={(sessionId) => {
+            invalidate()
+            setCreateOpen(false)
+            setActiveSessionId(sessionId)
+          }}
+        />
+
+        {/* ویرایش یادداشت جلسه */}
+        <Dialog open={editingSession !== null} onOpenChange={(open) => !open && setEditingSession(null)}>
+          <DialogContent dir="rtl" className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>یادداشت جلسه</DialogTitle>
+              <DialogDescription>
+                جلسهٔ {editingSession ? TIMING_METHOD_LABELS[editingSession.timingMethod] : ''} —{' '}
+                {editingSession?.operatorName}
+              </DialogDescription>
+            </DialogHeader>
+            <Textarea
+              value={editNotes}
+              onChange={(e) => setEditNotes(e.target.value)}
+              placeholder="مثلاً: نوبت صبح، شرایط عادی کارگاه"
+              className="min-h-24"
+            />
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setEditingSession(null)}>
+                انصراف
+              </Button>
+              <Button
+                className="btn-brand border-0"
+                disabled={notesMutation.isPending}
+                onClick={() => editingSession && notesMutation.mutate({ id: editingSession.id, notes: editNotes.trim() || null })}
+              >
+                {notesMutation.isPending && <Loader2 className="size-4 animate-spin" aria-hidden />}
+                ذخیره
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* تأیید حذف دائمی جلسه — FR-26 */}
+        <ConfirmDeleteDialog
+          open={deleting !== null}
+          onOpenChange={(open) => !open && setDeleting(null)}
+          title="حذف دائمی جلسهٔ زمان‌سنجی"
+          entityName={deleting ? `${deleting.operatorName} — ${TIMING_METHOD_LABELS[deleting.timingMethod]}` : ''}
+          dependencies={{
+            'چرخه‌های ثبت‌شده': deleting?.cyclesCount ?? 0,
+          }}
+          onConfirm={() => deleting && deleteMutation.mutate(deleting.id)}
+          loading={deleteMutation.isPending}
+        />
+      </div>
     </div>
   )
 }
 
 // ═══════════════ اجزای کوچک ═══════════════
 
-function Header({ title, subtitle, right }: { title: string; subtitle?: string; right?: React.ReactNode }) {
+function Header({
+  title,
+  subtitle,
+  right,
+  help,
+}: {
+  title: string
+  subtitle?: string
+  right?: React.ReactNode
+  /** راهنمای کنار عنوان — HelpDot */
+  help?: React.ReactNode
+}) {
   return (
     <div className="flex flex-wrap items-center justify-between gap-3">
       <div className="flex items-center gap-3">
@@ -409,41 +446,15 @@ function Header({ title, subtitle, right }: { title: string; subtitle?: string; 
           <Timer className="size-6" aria-hidden />
         </div>
         <div>
-          <h1 className="text-xl font-extrabold">{title}</h1>
+          <h1 className="flex items-center gap-1 text-xl font-extrabold">
+            {title}
+            {help}
+          </h1>
           {subtitle && <p className="text-xs text-muted-foreground">{subtitle}</p>}
         </div>
       </div>
       {right}
     </div>
-  )
-}
-
-function OperatorChip({
-  label,
-  active,
-  onClick,
-  count,
-  prefs,
-}: {
-  label: string
-  active: boolean
-  onClick: () => void
-  count: number
-  prefs: ReturnType<typeof useDisplayPrefs>
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`num flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-bold transition-colors ${
-        active ? 'bg-brand text-white' : 'bg-muted text-muted-foreground hover:bg-brand-soft hover:text-brand'
-      }`}
-    >
-      {label}
-      <span className={`num rounded-full px-1.5 text-[10px] ${active ? 'bg-white/20' : 'bg-background/70'}`}>
-        {formatInt(count, prefs)}
-      </span>
-    </button>
   )
 }
 

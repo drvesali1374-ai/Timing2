@@ -1,32 +1,43 @@
 'use client'
 
 // ═══════════════════════════════════════════════════════════
-// مرکز گزارش‌ها و خروجی‌ها — فاز ۶ / FR-22
+// مرکز گزارش‌ها و خروجی‌ها — فاز ۶ / FR-22 + جلسه ۲ §۱۶
 //
 // • انتخاب پروژه (زمینهٔ جاری)، ایستگاه/فعالیت، اپراتور و نوع گزارش
 // • خروجی Excel برای تحلیل داده‌ها (۴ نوع گزارش)
 // • خروجی PDF/چاپ برای گزارش رسمی — نمای کاغذ A4 با چیدمان چاپ
+// • §۱۶: کارت «مرکز گزارش‌ها» — سه حالت نمایش عوامل وستینگهاوس
+//   (رتبهٔ حروفی / مقدار عددی / هر دو) + اندازهٔ کاغذ و جهت چاپ؛
+//   تنظیمات پروژه‌محور است و خوش‌بینانه ذخیره می‌شود.
+// • §۱۶.۱: حالت نمایش فقط ظاهر ستون وستینگهاوس را عوض می‌کند؛
+//   محاسبات، R و ترتیب/نام چهار عامل ثابت می‌مانند.
+// • §۱۶.۲: چاپ با تزریق پویای @page (کاغذ/جهت) + پاورقی
+//   تکرارشوندهٔ هر صفحه؛ شماره‌گذاری صفحات بر عهدهٔ مرورگر است.
 // • گزارش شامل: پارامترها و فرض‌های محاسبات، روش کرنومتر، تعداد
 //   نمونه، داده‌های خارج‌شده، جدول وستینگهاوس، دسته‌های مجاز و
 //   فرمول زمان استاندارد
 // • گزارش نتیجهٔ نیازمند بازبینی را استاندارد قطعی معرفی نمی‌کند
 // ═══════════════════════════════════════════════════════════
-import { useEffect, useMemo, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { Fragment, useEffect, useMemo, useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
   AlertTriangle,
   BadgeCheck,
+  ChevronDown,
   FileSpreadsheet,
   FileText,
   Loader2,
   Printer,
   RefreshCw,
+  Settings2,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { Label } from '@/components/ui/label'
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import {
   Select,
   SelectContent,
@@ -43,24 +54,113 @@ import { HelpDot } from '@/components/common/HelpDot'
 import {
   EXCEL_REPORT_LABELS,
   reportsApi,
+  reportSettingsApi,
   type ExcelReportTypeValue,
+  type ReportElementRowDto,
+  type ReportRatingFactorDto,
+  type ReportSettingsDto,
   type StudyReportInfoDto,
 } from '@/lib/api/endpoints'
 import { qk } from '@/lib/api/keys'
 import { useDisplayPrefs } from '@/store/display-store'
 import { useAppStore } from '@/store/app-store'
-import { displayServerText, formatDate, formatDateTime, formatInt, formatPercent, formatTimeValue } from '@/lib/format'
+import {
+  displayServerText,
+  formatDate,
+  formatDateTime,
+  formatInt,
+  formatPercent,
+  formatTimeValue,
+  type DisplayPrefs,
+} from '@/lib/format'
+import { cn } from '@/lib/utils'
 
 const NOT_COMPUTABLE = 'قابل محاسبه نیست'
 
+// ═══════════════ تنظیمات مرکز گزارش‌ها — §۱۶ ═══════════════
+
+/** کلید TanStack Query برای تنظیمات گزارش (پروژه‌محور) */
+const reportSettingsKey = (projectId: string) => ['report-settings', projectId] as const
+
+/** پیش‌فرض‌ها هنگام نبود پاسخ سرور — §۱۶ */
+const DEFAULT_REPORT_SETTINGS: ReportSettingsDto = {
+  westinghouseMode: 'BOTH',
+  paperSize: 'A4',
+  orientation: 'portrait',
+}
+
+/** ترتیب ثابت چهار عامل وستینگهاوس: مهارت/تلاش/شرایط/ثبات */
+const WESTINGHOUSE_FACTOR_KEYS = ['skill', 'effort', 'conditions', 'consistency'] as const
+
+/** مقدار عددی عامل وستینگهاوس با علامت — ‎+0.02‎ / ‎−0.13‎ / ‎0.06‎
+ *  علامت فقط برای مقادیر ناصفر؛ ارقام فارسی مجاز است اما جهت رندر
+ *  همیشه LTR می‌ماند (فراخواننده span dir="ltr" می‌گذارد). */
+function formatSignedFactor(value: number, prefs: DisplayPrefs): string {
+  const mag = Math.round((Math.abs(value) + Number.EPSILON) * 100) / 100
+  const sign = mag === 0 ? '' : value > 0 ? '+' : value < 0 ? '−' : ''
+  return sign + formatTimeValue(mag, prefs, 2)
+}
+
+// ═══════════════ عوامل وستینگهاوس در سه حالت نمایش — §۱۶.۱ ═══════════════
+// ترتیب و نام چهار عامل (مهارت/تلاش/شرایط/ثبات) همیشه ثابت است و
+// ستون پنجمی وجود ندارد؛ حالت فقط «نحوهٔ نمایش» را عوض می‌کند و روی
+// محاسبات/R اثری ندارد. پیش‌نمایش و چاپ از همین DOM می‌آیند.
+function WestinghouseFactors({
+  rating,
+  mode,
+  prefs,
+}: {
+  rating: NonNullable<ReportElementRowDto['rating']>
+  mode: ReportSettingsDto['westinghouseMode']
+  prefs: DisplayPrefs
+}) {
+  const factors: ReportRatingFactorDto[] = [
+    rating.skill,
+    rating.effort,
+    rating.conditions,
+    rating.consistency,
+  ]
+  return (
+    <span className="tabular-nums" dir="rtl">
+      {factors.map((f, i) => (
+        <Fragment key={WESTINGHOUSE_FACTOR_KEYS[i]}>
+          {i > 0 && ' · '}
+          {mode === 'GRADE' ? (
+            f.grade ?? '—'
+          ) : mode === 'NUMERIC' ? (
+            <span dir="ltr">{formatSignedFactor(f.value, prefs)}</span>
+          ) : (
+            <span dir="ltr">
+              {f.grade ?? '—'} ({formatSignedFactor(f.value, prefs)})
+            </span>
+          )}
+        </Fragment>
+      ))}
+      <span className="block text-[9px] text-slate-500">جدول: {rating.tableName}</span>
+    </span>
+  )
+}
+
 // ═══════════════ پیش‌نمایش گزارش رسمی (کاغذ A4) ═══════════════
 
-function ReportPaper({ report }: { report: StudyReportInfoDto }) {
+function ReportPaper({
+  report,
+  westinghouseMode,
+  paperSize,
+  orientation,
+}: {
+  report: StudyReportInfoDto
+  westinghouseMode: ReportSettingsDto['westinghouseMode']
+  paperSize: ReportSettingsDto['paperSize']
+  orientation: ReportSettingsDto['orientation']
+}) {
   const prefs = useDisplayPrefs()
 
   return (
     <div
       id="print-area"
+      data-paper={paperSize}
+      data-orientation={orientation}
       className="print-report mx-auto w-full max-w-[820px] space-y-6 rounded-2xl border bg-white p-6 text-slate-900 shadow-sm sm:p-8"
       style={{ colorScheme: 'light' }}
     >
@@ -138,10 +238,10 @@ function ReportPaper({ report }: { report: StudyReportInfoDto }) {
               ['قاعدهٔ وستینگهاوس', displayServerText(report.assumptions.westinghouseNote, prefs)],
             ].map(([label, value]) => (
               <tr key={label} className="border-b border-slate-100 align-top">
-                <th scope="row" className="w-44 py-1.5 pl-2 text-right font-bold">
+                <th scope="row" className="long w-44 py-1.5 pl-2 text-right font-bold">
                   {label}
                 </th>
-                <td className="py-1.5 leading-6">{value}</td>
+                <td className="long py-1.5 leading-6">{value}</td>
               </tr>
             ))}
           </tbody>
@@ -243,7 +343,7 @@ function ReportPaper({ report }: { report: StudyReportInfoDto }) {
               <table className="w-full text-[11px]">
                 <thead>
                   <tr className="border-b border-slate-300 text-center">
-                    <th className="py-1 pl-1 text-right font-bold">عنوان الونس</th>
+                    <th className="long py-1 pl-1 text-right font-bold">عنوان الونس</th>
                     <th className="py-1 font-bold">نوع / مبنا</th>
                     <th className="py-1 font-bold">مقدار مؤثر</th>
                     <th className="py-1 font-bold">مبدأ</th>
@@ -253,7 +353,7 @@ function ReportPaper({ report }: { report: StudyReportInfoDto }) {
                 <tbody>
                   {sec.allowances.rows.map((row) => (
                     <tr key={row.definitionId} className="border-b border-slate-100">
-                      <td className="py-1 pl-1 text-right">
+                      <td className="long py-1 pl-1 text-right">
                         {row.title}
                         {row.code ? ` (${row.code})` : ''}
                       </td>
@@ -295,7 +395,7 @@ function ReportPaper({ report }: { report: StudyReportInfoDto }) {
               <table className="w-full min-w-[760px] text-[11px]">
                 <thead>
                   <tr className="border-b border-slate-300 text-right">
-                    <th className="py-1 pl-1 font-bold">عنصر</th>
+                    <th className="long py-1 pl-1 font-bold">عنصر</th>
                     <th className="py-1 font-bold">نوع</th>
                     <th className="py-1 font-bold">n</th>
                     <th className="py-1 font-bold">میانگین</th>
@@ -318,7 +418,7 @@ function ReportPaper({ report }: { report: StudyReportInfoDto }) {
                   ) : (
                     sec.elements.map((el, i) => (
                       <tr key={`${sec.activity.id}-${i}`} className="border-b border-slate-100">
-                        <td className="py-1 pl-1">{el.name}</td>
+                        <td className="long py-1 pl-1">{el.name}</td>
                         <td className="py-1 text-center">{el.elementTypeLabel}</td>
                         <td className="py-1 text-center tabular-nums">{formatInt(el.stats.count, prefs)}</td>
                         <td className="py-1 text-center tabular-nums">
@@ -335,13 +435,7 @@ function ReportPaper({ report }: { report: StudyReportInfoDto }) {
                         </td>
                         <td className="py-1 text-center">
                           {el.rating ? (
-                            <span className="tabular-nums" dir="rtl">
-                              {el.rating.skill.grade ?? '—'}/{formatTimeValue(el.rating.skill.value, prefs)} ·{' '}
-                              {el.rating.effort.grade ?? '—'}/{formatTimeValue(el.rating.effort.value, prefs)} ·{' '}
-                              {el.rating.conditions.grade ?? '—'}/{formatTimeValue(el.rating.conditions.value, prefs)} ·{' '}
-                              {el.rating.consistency.grade ?? '—'}/{formatTimeValue(el.rating.consistency.value, prefs)}
-                              <span className="block text-[9px] text-slate-500">جدول: {el.rating.tableName}</span>
-                            </span>
+                            <WestinghouseFactors rating={el.rating} mode={westinghouseMode} prefs={prefs} />
                           ) : (
                             <span className="text-amber-700">ارزیابی نشده</span>
                           )}
@@ -400,19 +494,19 @@ function ReportPaper({ report }: { report: StudyReportInfoDto }) {
               <table className="w-full text-[11px]">
                 <thead>
                   <tr className="border-b border-slate-300 text-right">
-                    <th className="py-1 pl-1 font-bold">عنصر</th>
+                    <th className="long py-1 pl-1 font-bold">عنصر</th>
                     <th className="py-1 font-bold">چرخه</th>
                     <th className="py-1 font-bold">اپراتور</th>
                     <th className="py-1 font-bold">مقدار (ثانیه)</th>
                     <th className="py-1 font-bold">وضعیت</th>
                     <th className="py-1 font-bold">امتیاز / قاعده</th>
-                    <th className="py-1 font-bold">دلیل خروج</th>
+                    <th className="long py-1 font-bold">دلیل خروج</th>
                   </tr>
                 </thead>
                 <tbody>
                   {sec.suspects.map((s) => (
                     <tr key={s.observationId} className="border-b border-slate-100">
-                      <td className="py-1 pl-1">{s.elementName}</td>
+                      <td className="long py-1 pl-1">{s.elementName}</td>
                       <td className="py-1 text-center tabular-nums">{formatInt(s.cycleNo, prefs)}</td>
                       <td className="py-1 text-center">{s.operatorName}</td>
                       <td className="py-1 text-center tabular-nums">{formatTimeValue(s.value, prefs)}</td>
@@ -422,7 +516,7 @@ function ReportPaper({ report }: { report: StudyReportInfoDto }) {
                       <td className="py-1 text-center tabular-nums">
                         {s.score === null ? '—' : formatTimeValue(s.score, prefs, 2)} / {s.rule ?? '—'}
                       </td>
-                      <td className="py-1 text-center">{s.exclusionReason ?? '—'}</td>
+                      <td className="long py-1 text-center">{s.exclusionReason ?? '—'}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -444,6 +538,13 @@ function ReportPaper({ report }: { report: StudyReportInfoDto }) {
           تولیدشده توسط نرم‌افزار زمان‌سنجی صنعتی — {formatDateTime(report.reportMeta.generatedAt, prefs)}
         </p>
       </footer>
+
+      {/* پاورقی تکرارشوندهٔ چاپ — §۱۶.۲: در Chrome عناصر position:fixed
+          روی همهٔ صفحات چاپ تکرار می‌شوند؛ شماره‌گذاری صفحات عمداً جعل
+          نمی‌شود و بر عهدهٔ تنظیمات «Headers and footers» مرورگر است. */}
+      <div className="print-running-footer">
+        {report.project.name} — گزارش مطالعهٔ زمان — صفحه‌بندی خودکار
+      </div>
     </div>
   )
 }
@@ -452,10 +553,13 @@ function ReportPaper({ report }: { report: StudyReportInfoDto }) {
 
 export default function ReportsView({ projectId }: { projectId: string }) {
   const prefs = useDisplayPrefs()
+  const qc = useQueryClient()
   const [excelType, setExcelType] = useState<ExcelReportTypeValue>('overview')
   const [operatorId, setOperatorId] = useState<string>('all')
   // انتخاب صریح کاربر مقدم بر پیش‌انتخاب یک‌باره است (الگوی پیش‌فرض بدون Effect)
   const [userActivityId, setUserActivityId] = useState<string | null>(null)
+  // کارت «مرکز گزارش‌ها» به‌طور پیش‌فرض باز است — §۱۶
+  const [centerOpen, setCenterOpen] = useState(true)
 
   const selectionQuery = useQuery({
     queryKey: qk.reportSelection(projectId),
@@ -491,6 +595,54 @@ export default function ReportsView({ projectId }: { projectId: string }) {
     queryFn: () => reportsApi.study(projectId, filterOpts),
     enabled: (selectionQuery.data?.sessionsCount ?? 0) > 0,
   })
+
+  // ── تنظیمات مرکز گزارش‌ها — §۱۶ (پروژه‌محور؛ پیش‌فرض BOTH/A4/عمودی) ──
+  const settingsQuery = useQuery({
+    queryKey: reportSettingsKey(projectId),
+    queryFn: () => reportSettingsApi.get(projectId),
+  })
+  // به‌روزرسانی خوش‌بینانهٔ محلی؛ در خطا به مقدار سرور برمی‌گردد
+  const [settingsOverride, setSettingsOverride] = useState<Partial<ReportSettingsDto> | null>(null)
+  const settings: ReportSettingsDto = {
+    ...DEFAULT_REPORT_SETTINGS,
+    ...settingsQuery.data,
+    ...settingsOverride,
+  }
+
+  const applySetting = async (patch: Partial<ReportSettingsDto>) => {
+    setSettingsOverride((o) => ({ ...(o ?? {}), ...patch }))
+    try {
+      await reportSettingsApi.put(projectId, patch)
+      setSettingsOverride(null)
+      void qc.invalidateQueries({ queryKey: reportSettingsKey(projectId) })
+      toast.success('تنظیمات گزارش ذخیره شد')
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'ذخیرهٔ تنظیمات گزارش ناموفق بود')
+      setSettingsOverride(null)
+      void qc.invalidateQueries({ queryKey: reportSettingsKey(projectId) })
+    }
+  }
+
+  /** چاپ با تزریق پویای @page — §۱۶.۲: اندازهٔ کاغذ/جهت در CSS
+   *  پارامتری‌شدنی نیست (نه در کلاس، نه با CSS var)؛ بنابراین درست پیش از
+   *  window.print یک <style> موقت به head اضافه و پس از چاپ حذف می‌شود.
+   *  پیش‌فرض (A4 عمودی) در globals.css می‌ماند. */
+  const handlePrint = () => {
+    const styleId = 'print-page-style'
+    document.getElementById(styleId)?.remove()
+    const el = document.createElement('style')
+    el.id = styleId
+    el.textContent = `@page { size: ${settings.paperSize} ${settings.orientation}; margin: 14mm 12mm; }`
+    document.head.appendChild(el)
+    const cleanup = () => {
+      el.remove()
+      window.removeEventListener('afterprint', cleanup)
+    }
+    window.addEventListener('afterprint', cleanup)
+    window.print()
+    // پشتیبان مرورگرهایی که afterprint را پخش نمی‌کنند
+    window.setTimeout(cleanup, 60_000)
+  }
 
   const downloadExcel = () => {
     const url = reportsApi.excelUrl(projectId, excelType, filterOpts)
@@ -530,7 +682,7 @@ export default function ReportsView({ projectId }: { projectId: string }) {
   return (
     <div className="space-y-5">
       {/* ── سربرگ ── */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="print:hidden flex flex-wrap items-center justify-between gap-3">
         <h2 className="flex flex-wrap items-center gap-2 text-lg font-black">
           <FileText className="size-5 text-brand" aria-hidden />
           مرکز گزارش‌ها و خروجی‌ها
@@ -545,7 +697,7 @@ export default function ReportsView({ projectId }: { projectId: string }) {
           />
         </h2>
         {hasData && (
-          <Button variant="outline" size="sm" className="gap-1.5 print:hidden" onClick={() => window.print()}>
+          <Button variant="outline" size="sm" className="gap-1.5 print:hidden" onClick={handlePrint}>
             <Printer className="size-4" aria-hidden />
             چاپ / ذخیره PDF
           </Button>
@@ -560,6 +712,154 @@ export default function ReportsView({ projectId }: { projectId: string }) {
         />
       ) : (
         <>
+          {/* ── مرکز گزارش‌ها و خروجی‌ها — §۱۶ ── */}
+          <Card className="print:hidden rounded-2xl">
+            <Collapsible open={centerOpen} onOpenChange={setCenterOpen}>
+              <CardHeader className="card-head pb-3">
+                <CollapsibleTrigger asChild>
+                  <CardTitle className="flex w-full cursor-pointer flex-wrap items-center justify-between gap-2 text-base">
+                    <span className="flex flex-wrap items-center gap-2">
+                      <Settings2 className="size-5 text-brand" aria-hidden />
+                      مرکز گزارش‌ها و خروجی‌ها
+                      <HelpDot
+                        label="مرکز گزارش‌ها"
+                        content={{
+                          what: 'تنظیمات نمایش و چاپ گزارش رسمی این پروژه: حالت نمایش عوامل وستینگهاوس، اندازهٔ کاغذ و جهت چاپ. تنظیمات به ازای هر پروژه ذخیره می‌شود.',
+                          input: 'یکی از سه حالت نمایش عوامل را انتخاب کنید و برای چاپ، اندازهٔ کاغذ (A4 یا A3) و جهت (عمودی یا افقی) را تعیین کنید.',
+                          example: 'برای گزارش خلاصهٔ مدیریتی، «فقط رتبهٔ حروفی» جدول را خواناتر می‌کند؛ برای بررسی دقیق، «رتبه و مقدار عددی با هم».',
+                          note: 'این تنظیم فقط نحوهٔ نمایش عوامل را عوض می‌کند؛ محاسبات و R تغییر نمی‌کنند.',
+                        }}
+                      />
+                    </span>
+                    <ChevronDown
+                      className={cn(
+                        'size-4 shrink-0 text-muted-foreground transition-transform',
+                        centerOpen && 'rotate-180'
+                      )}
+                      aria-hidden
+                    />
+                  </CardTitle>
+                </CollapsibleTrigger>
+              </CardHeader>
+              <CollapsibleContent>
+                <CardContent className="space-y-5 pt-4">
+                  {/* حالت نمایش عوامل وستینگهاوس — §۱۶.۱ */}
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-1">
+                      <Label>نمایش عوامل وستینگهاوس در گزارش</Label>
+                      <HelpDot
+                        label="حالت نمایش وستینگهاوس"
+                        content={{
+                          what: 'چهار عامل مهارت، تلاش، شرایط و ثبات در ستون «وستینگهاوس» جدول عناصر به سه شکل نمایش داده می‌شوند؛ ستون R جدا و دست‌نخورده می‌ماند.',
+                          input: 'حالت دلخواه را انتخاب کنید؛ انتخاب برای این پروژه ذخیره می‌شود و هم در پیش‌نمایش و هم در چاپ یکسان اعمال می‌شود.',
+                          example: 'حالت عددی هر عامل را با علامت نشان می‌دهد؛ مثل ‎+0.02‎ یا ‎−0.13‎.',
+                          note: 'این تنظیم فقط نحوهٔ نمایش عوامل را عوض می‌کند؛ محاسبات و R تغییر نمی‌کنند.',
+                        }}
+                      />
+                    </div>
+                    <RadioGroup
+                      dir="rtl"
+                      value={settings.westinghouseMode}
+                      onValueChange={(v) =>
+                        void applySetting({ westinghouseMode: v as ReportSettingsDto['westinghouseMode'] })
+                      }
+                      className="gap-2 sm:grid-cols-3"
+                    >
+                      <label
+                        htmlFor="wm-grade"
+                        className={cn(
+                          'flex cursor-pointer items-start gap-2.5 rounded-xl border p-3 transition-colors hover:bg-muted/50',
+                          settings.westinghouseMode === 'GRADE' && 'border-brand bg-brand-soft/40'
+                        )}
+                      >
+                        <RadioGroupItem value="GRADE" id="wm-grade" className="mt-0.5" />
+                        <span className="min-w-0 space-y-1">
+                          <span className="block text-sm font-bold">فقط رتبهٔ حروفی</span>
+                          <span className="block text-xs leading-5 text-muted-foreground">
+                            مثل <span dir="ltr">A1</span>، <span dir="ltr">B2</span>، <span dir="ltr">C</span>
+                          </span>
+                        </span>
+                      </label>
+                      <label
+                        htmlFor="wm-numeric"
+                        className={cn(
+                          'flex cursor-pointer items-start gap-2.5 rounded-xl border p-3 transition-colors hover:bg-muted/50',
+                          settings.westinghouseMode === 'NUMERIC' && 'border-brand bg-brand-soft/40'
+                        )}
+                      >
+                        <RadioGroupItem value="NUMERIC" id="wm-numeric" className="mt-0.5" />
+                        <span className="min-w-0 space-y-1">
+                          <span className="block text-sm font-bold">فقط مقدار عددی اثر</span>
+                          <span className="block text-xs leading-5 text-muted-foreground">
+                            مثل <span dir="ltr">+0.02</span> یا <span dir="ltr">−0.13</span>
+                          </span>
+                        </span>
+                      </label>
+                      <label
+                        htmlFor="wm-both"
+                        className={cn(
+                          'flex cursor-pointer items-start gap-2.5 rounded-xl border p-3 transition-colors hover:bg-muted/50',
+                          settings.westinghouseMode === 'BOTH' && 'border-brand bg-brand-soft/40'
+                        )}
+                      >
+                        <RadioGroupItem value="BOTH" id="wm-both" className="mt-0.5" />
+                        <span className="min-w-0 space-y-1">
+                          <span className="block text-sm font-bold">رتبه و مقدار عددی با هم</span>
+                          <span className="block text-xs leading-5 text-muted-foreground">
+                            مثل <span dir="ltr">A1 (+0.02)</span> — پیش‌فرض
+                          </span>
+                        </span>
+                      </label>
+                    </RadioGroup>
+                    <p className="text-xs leading-5 text-muted-foreground">
+                      این تنظیم فقط نحوهٔ نمایش عوامل را عوض می‌کند؛ محاسبات و R تغییر نمی‌کنند.
+                    </p>
+                  </div>
+
+                  {/* اندازه و جهت کاغذ چاپ — §۱۶.۲ */}
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="rp-paper">اندازهٔ کاغذ چاپ</Label>
+                      <Select
+                        value={settings.paperSize}
+                        onValueChange={(v) => void applySetting({ paperSize: v as ReportSettingsDto['paperSize'] })}
+                      >
+                        <SelectTrigger id="rp-paper">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="A4">A4 (پیش‌فرض)</SelectItem>
+                          <SelectItem value="A3">A3</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="rp-orientation">جهت کاغذ</Label>
+                      <Select
+                        value={settings.orientation}
+                        onValueChange={(v) =>
+                          void applySetting({ orientation: v as ReportSettingsDto['orientation'] })
+                        }
+                      >
+                        <SelectTrigger id="rp-orientation">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="portrait">عمودی (پیش‌فرض)</SelectItem>
+                          <SelectItem value="landscape">افقی</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  <p className="text-xs leading-5 text-muted-foreground">
+                    اندازه و جهت کاغذ هنگام «چاپ / ذخیره PDF» اعمال می‌شود. شماره‌گذاری صفحات بر عهدهٔ تنظیمات چاپ
+                    مرورگر است (در پنجرهٔ چاپ، Headers and footers را فعال کنید).
+                  </p>
+                </CardContent>
+              </CollapsibleContent>
+            </Collapsible>
+          </Card>
+
           {/* ── فیلترها و Excel ── */}
           <Card className="print:hidden rounded-2xl">
             <CardHeader className="pb-3">
@@ -670,7 +970,8 @@ export default function ReportsView({ projectId }: { projectId: string }) {
               <div className="print:hidden mx-auto flex w-full max-w-[820px] flex-wrap items-center justify-between gap-2">
                 <p className="flex items-center gap-1.5 text-sm font-bold">
                   <FileText className="size-4 text-brand" aria-hidden />
-                  پیش‌نمایش گزارش رسمی (کاغذ A4)
+                  پیش‌نمایش گزارش رسمی (چاپ روی {settings.paperSize}{' '}
+                  {settings.orientation === 'landscape' ? 'افقی' : 'عمودی'})
                 </p>
                 <Badge variant="secondary" className="gap-1">
                   {reportQuery.isFetching ? (
@@ -683,7 +984,12 @@ export default function ReportsView({ projectId }: { projectId: string }) {
                   )}
                 </Badge>
               </div>
-              <ReportPaper report={reportQuery.data} />
+              <ReportPaper
+                report={reportQuery.data}
+                westinghouseMode={settings.westinghouseMode}
+                paperSize={settings.paperSize}
+                orientation={settings.orientation}
+              />
             </div>
           ) : null}
         </>

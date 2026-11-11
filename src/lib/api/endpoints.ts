@@ -805,6 +805,8 @@ export interface ChartEdgeDto {
   id: string
   sourceNodeId: string
   targetNodeId: string
+  sourceAnchor: 'top' | 'bottom' | 'left' | 'right' | null
+  targetAnchor: 'top' | 'bottom' | 'left' | 'right' | null
   isChain: boolean
   sortOrder: number
 }
@@ -822,6 +824,8 @@ export interface ChartDto {
     activitiesTotal: number
   }
   canvas: { width: number; height: number }
+  /** جلسه ۲ — OPC دارای گره ورودی مواد/انبار → نمایش «OPC توسعه‌یافته» */
+  isExtendedOpc?: boolean
 }
 
 export const chartsApi = {
@@ -836,9 +840,159 @@ export const chartsApi = {
   updateNode: (nodeId: string, body: { label?: string; nodeType?: string; positionX?: number; positionY?: number }) =>
     api.patch<{ node: { id: string } }>(`/api/chart-nodes/${nodeId}`, body),
   deleteNode: (nodeId: string) => api.del<{ deleted: boolean }>(`/api/chart-nodes/${nodeId}`),
-  createEdge: (projectId: string, body: { sourceNodeId: string; targetNodeId: string }) =>
-    api.post<{ edge: { id: string } }>(`/api/chart-edges?projectId=${projectId}`, body),
+  createEdge: (
+    projectId: string,
+    body: {
+      sourceNodeId: string
+      targetNodeId: string
+      sourceAnchor?: 'top' | 'bottom' | 'left' | 'right'
+      targetAnchor?: 'top' | 'bottom' | 'left' | 'right'
+    }
+  ) => api.post<{ edge: { id: string } }>(`/api/chart-edges?projectId=${projectId}`, body),
   deleteEdge: (edgeId: string) => api.del<{ deleted: boolean }>(`/api/chart-edges/${edgeId}`),
+  // جلسه ۲ — ابعاد بوم (§۱۵.۶) و snapshot چیدمان دستی (§۱۵.۵)
+  getCanvas: (projectId: string, chartType: ChartTypeValue) =>
+    api.get<{ width: number; height: number } | null>(`/api/projects/${projectId}/charts/${chartType}/canvas`),
+  putCanvas: (projectId: string, chartType: ChartTypeValue, body: { width: number; height: number }) =>
+    api.put<{ width: number; height: number }>(`/api/projects/${projectId}/charts/${chartType}/canvas`, body),
+  resetCanvas: (projectId: string, chartType: ChartTypeValue) =>
+    api.del<{ reset: boolean }>(`/api/projects/${projectId}/charts/${chartType}/canvas`),
+  getLayoutSnapshot: (projectId: string, chartType: ChartTypeValue) =>
+    api.get<
+      | {
+          nodes: Array<{ id: string; positionX: number; positionY: number }>
+          canvas: { width: number; height: number }
+          savedAt: string | null
+        }
+      | null
+    >(`/api/projects/${projectId}/charts/${chartType}/layout-snapshot`),
+  saveLayoutSnapshot: (
+    projectId: string,
+    chartType: ChartTypeValue,
+    body: { nodes: Array<{ id: string; positionX: number; positionY: number }>; canvas: { width: number; height: number } }
+  ) => api.post<{ saved: boolean }>(`/api/projects/${projectId}/charts/${chartType}/layout-snapshot`, body),
+}
+
+// ── ماتریس هم‌پوشانی عناصر کاری — جلسه ۲ ──
+
+export type OverlapStatusValue = 'UNREVIEWED' | 'NO_OVERLAP' | 'OVERLAP'
+
+export interface MatrixMemberDto {
+  elementId: string
+  name: string
+  activityId: string
+  activityName: string
+  stationId: string
+  stationName: string
+  stationSort: number
+  activitySort: number
+  elementSort: number
+}
+
+export interface OverlapRelationDto {
+  id: string
+  elementLowId: string
+  elementHighId: string
+  isActive: boolean
+  version: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface OverlapCellDto {
+  relationId: string
+  status: OverlapStatusValue
+  overlapDuration: number | null
+  version: number
+  updatedAt: string
+}
+
+export interface OverlapCycleOptionDto {
+  cycleId: string
+  cycleNo: number
+  sessionId: string
+  operatorId: string
+  operatorName: string
+  timingMethod: string
+  sessionStatus: string
+  activityId: string
+  activityName: string
+  createdAt: string
+}
+
+export interface OverlapCatalogEntryDto {
+  elementId: string
+  name: string
+  activityId: string
+  activityName: string
+  stationId: string
+  stationName: string
+}
+
+export interface OverlapValidationDto {
+  verdict: 'VALID' | 'INVALID' | 'INDETERMINATE'
+  localFailures: Array<{ pair: [string, string]; failures: Array<{ code: string; message: string }> }>
+  tripleIssues: Array<{ message: string; responsibleElementIds?: string[] }>
+  globalIssues: Array<{ message: string; responsibleElementIds?: string[] }>
+  provisionalWarnings: Array<{ message: string; responsiblePairs?: Array<[string, string]> }>
+  multiOverlaps: Array<{ members: string[]; value: number | null; provisional: boolean }>
+  unions: Array<{ members: string[]; value: number | null; source: string }>
+}
+
+export interface OverlapMatrixDto {
+  projectId: string
+  members: MatrixMemberDto[]
+  relations: OverlapRelationDto[]
+  cells: Record<string, OverlapCellDto>
+  selectedCycle: OverlapCycleOptionDto | null
+  cycles: OverlapCycleOptionDto[]
+  elementsCatalog: OverlapCatalogEntryDto[]
+  validation: OverlapValidationDto | null
+}
+
+export interface ElementRelationRowDto {
+  relationId: string
+  otherElementId: string
+  otherElementName: string
+  otherActivityName: string
+  otherStationName: string
+  isActive: boolean
+  latest: {
+    cycleNo: number
+    operatorName: string
+    activityName: string
+    status: OverlapStatusValue
+    overlapDuration: number | null
+    cycleId: string
+  } | null
+}
+
+export const overlapApi = {
+  matrix: (projectId: string, cycleId?: string | null) =>
+    api.get<OverlapMatrixDto>(`/api/projects/${projectId}/overlap/matrix${cycleId ? `?cycleId=${cycleId}` : ''}`),
+  createRelation: (projectId: string, body: { elementAId: string; elementBId: string }) =>
+    api.post<{ relation: OverlapRelationDto; matrix: OverlapMatrixDto }>(`/api/projects/${projectId}/overlap/relations`, body),
+  archiveRelation: (relationId: string) =>
+    api.patch<{ relation: OverlapRelationDto }>(`/api/overlap-relations/${relationId}`, { action: 'archive' }),
+  restoreRelation: (relationId: string) =>
+    api.patch<{ relation: OverlapRelationDto }>(`/api/overlap-relations/${relationId}`, { action: 'restore' }),
+  setCycleOverlaps: (
+    cycleId: string,
+    body: {
+      updates: Array<{
+        relationId: string
+        status: OverlapStatusValue
+        overlapDuration?: number | null
+        expectedVersion?: number
+      }>
+    }
+  ) =>
+    api.put<{ cells: Record<string, OverlapCellDto>; validation: OverlapValidationDto; warnings: string[] }>(
+      `/api/cycles/${cycleId}/overlaps`,
+      body
+    ),
+  elementRelations: (elementId: string) =>
+    api.get<{ elementId: string; elementName: string; rows: ElementRelationRowDto[] }>(`/api/elements/${elementId}/relations`),
 }
 
 
@@ -1110,6 +1264,20 @@ export const reportsApi = {
 export const settingsApi = {
   get: () => api.get<AppSettingsDto>('/api/settings'),
   put: (values: Record<string, string>) => api.put<AppSettingsDto>('/api/settings', values),
+}
+
+// ── مرکز گزارش‌ها و خروجی‌ها — جلسه ۲ §۱۶ ──
+
+export interface ReportSettingsDto {
+  westinghouseMode: 'GRADE' | 'NUMERIC' | 'BOTH'
+  paperSize: 'A4' | 'A3'
+  orientation: 'portrait' | 'landscape'
+}
+
+export const reportSettingsApi = {
+  get: (projectId: string) => api.get<ReportSettingsDto>(`/api/projects/${projectId}/report-settings`),
+  put: (projectId: string, body: Partial<Omit<ReportSettingsDto, never>>) =>
+    api.put<ReportSettingsDto>(`/api/projects/${projectId}/report-settings`, body),
 }
 
 export const auditApi = {

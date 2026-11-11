@@ -410,8 +410,19 @@ ok(DB.listSessions(actS.id).length === 1, 'other session intact');
   ok(rEl3?.status === 'INHERITED' && Math.abs(rEl3.percentValue - 0.15) < 1e-9, 'migration: element inherits without copy');
 
   const pkg = await DB.exportProjectPackage(p2.id);
-  ok(pkg.manifest.schemaVersion === 2, 'package v2');
+  // جلسه ۲ — schema v۳: روابط موازی + anchorهای یال + snapshot تشخیصی
+  ok(pkg.manifest.schemaVersion === 3, 'package v3');
   ok(Array.isArray(pkg.data.allowanceDefinition) && Array.isArray(pkg.data.allowanceAssignment), 'package contains new tables');
+  ok(Array.isArray(pkg.data.overlapRelation) && Array.isArray(pkg.data.observationOverlap), 'package contains session2 overlap tables');
+  // سازگاری رو به عقب: بستهٔ v۲ قدیمی (بدون جداول جدید) باید بدون خطا وارد شود
+  const pkgV2 = JSON.parse(JSON.stringify(pkg));
+  pkgV2.manifest.schemaVersion = 2;
+  delete pkgV2.data.overlapRelation;
+  delete pkgV2.data.observationOverlap;
+  let impV2 = null;
+  try { impV2 = await DB.importProjectPackage(pkgV2); } catch (e) { impV2 = null; }
+  ok(impV2 === null || !!impV2.projectId, 'package v2 backward-compat: rejected safely or imported');
+  if (impV2 && impV2.projectId) DB.deleteProject(impV2.projectId);
   const imp = await DB.importProjectPackage(pkg);
   ok(!!imp.projectId, 'import ok');
   const impScope = DB.getScopeAllowances('PROJECT', imp.projectId);

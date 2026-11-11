@@ -505,6 +505,24 @@
     return barChart({ data: data, ariaLabel: ariaLabel || 'هیستوگرام توزیع', formatValue: function (v) { return String(Math.round(v)); }, maxBarSize: 64 });
   }
 
+  // ── نماد فرایندی (ProcessSymbol) — جلسه ۲ §۱۵.۲ ──
+  // renderer واحد در همهٔ نماها (ساختار، فعالیت، ماتریس، نمودار)؛ CSS patch پراکنده ممنوع.
+  // رشتهٔ HTML برمی‌گرداند — با U.h('span', { html: UI.processSymbol(...) }) استفاده کنید.
+  var PROCESS_SYMBOL_META = {
+    OPERATION: { glyph: '○', label: 'عملیات' },
+    INSPECTION: { glyph: '□', label: 'بازرسی' },
+    TRANSPORT: { glyph: '⇨', label: 'حمل‌ونقل' },
+    DELAY: { glyph: 'D', label: 'تأخیر' },
+    STORAGE: { glyph: '▽', label: 'انبارش' },
+    MATERIAL_INPUT: { glyph: '⬡', label: 'ورودی مواد/قطعات' },
+  };
+  function processSymbol(nodeType, size, titleOverride) {
+    var s = size === 'sm' || size === 'md' || size === 'lg' ? size : 'md';
+    var m = PROCESS_SYMBOL_META[nodeType] || PROCESS_SYMBOL_META.OPERATION;
+    return '<span class="psym psym-' + s + ' psym-' + (PROCESS_SYMBOL_META[nodeType] ? nodeType : 'OPERATION') +
+      '" title="' + U.escapeHtml(titleOverride || m.label) + '" aria-hidden="true">' + m.glyph + '</span>';
+  }
+
   // ── جدول کمکی ──
   function table(headers, rowsHtml) {
     var thead = U.h('thead', null, U.h('tr', null, headers.map(function (hd) {
@@ -528,6 +546,6 @@
     field: field, metric: metric, saveIndicator: saveIndicator, dropdownMenu: dropdownMenu,
     collapsibleCard: collapsibleCard, projectStatusBadge: projectStatusBadge, stageStatusBadge: stageStatusBadge,
     barChart: barChart, lineChart: lineChart, donutChart: donutChart, histogramChart: histogramChart,
-    table: table,
+    table: table, processSymbol: processSymbol,
   };
 })(typeof window !== 'undefined' ? window : globalThis);

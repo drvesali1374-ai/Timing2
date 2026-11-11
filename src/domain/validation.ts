@@ -404,19 +404,25 @@ export const restoreSchema = z.object({
 export const CHART_TYPES = ['OPC', 'FPC'] as const
 export type ChartTypeValue = (typeof CHART_TYPES)[number]
 
-/** انواع گره مجاز در هر نوع نمودار — OPC فقط عملیات/بازرسی، FPC هر پنج نوع — FR-20.3/4 */
+/** انواع گره مجاز در هر نوع نمودار — FR-20.3/4 + جلسه ۲ §۱۵.۱
+ *  OPC کلاسیک: فقط OPERATION/INSPECTION.
+ *  OPC توسعه‌یافته: + MATERIAL_INPUT (ورودی مواد/قطعه/نیم‌ساخته — node مستقل) و STORAGE (انبار، مثلث وارونه).
+ *  FPC: هر پنج نوع استاندارد + MATERIAL_INPUT به‌عنوان node مجزا (نه event). */
 export const OPC_NODE_TYPES = ['OPERATION', 'INSPECTION'] as const
-export const FPC_NODE_TYPES = ['OPERATION', 'INSPECTION', 'TRANSPORT', 'DELAY', 'STORAGE'] as const
+export const OPC_EXTENSION_NODE_TYPES = ['OPERATION', 'INSPECTION', 'MATERIAL_INPUT', 'STORAGE'] as const
+export const FPC_NODE_TYPES = ['OPERATION', 'INSPECTION', 'TRANSPORT', 'DELAY', 'STORAGE', 'MATERIAL_INPUT'] as const
+/** انواع مجاز برای گره دستی — سرویس بر اساس chartType محدود می‌کند */
+export const CHART_MANUAL_NODE_TYPES = FPC_NODE_TYPES
 
 export const chartManualNodeCreateSchema = z.object({
   label: trimmed(200),
-  nodeType: z.enum(FPC_NODE_TYPES, { message: 'نوع گره معتبر نیست' }),
+  nodeType: z.enum(CHART_MANUAL_NODE_TYPES, { message: 'نوع گره معتبر نیست' }),
 })
 
 export const chartNodeUpdateSchema = z
   .object({
     label: trimmed(200).optional(),
-    nodeType: z.enum(FPC_NODE_TYPES, { message: 'نوع گره معتبر نیست' }).optional(),
+    nodeType: z.enum(CHART_MANUAL_NODE_TYPES, { message: 'نوع گره معتبر نیست' }).optional(),
     positionX: numberFromString({ min: -100000, max: 100000 }).optional(),
     positionY: numberFromString({ min: -100000, max: 100000 }).optional(),
   })
@@ -425,6 +431,9 @@ export const chartNodeUpdateSchema = z
 export const chartEdgeCreateSchema = z.object({
   sourceNodeId: z.string().uuid('گره مبدأ معتبر نیست'),
   targetNodeId: z.string().uuid('گره مقصد معتبر نیست'),
+  // جلسه ۲ §۱۵.۴ — anchorهای اتصال (اختیاری؛ تهی = خودکار)
+  sourceAnchor: z.enum(['top', 'bottom', 'left', 'right']).optional(),
+  targetAnchor: z.enum(['top', 'bottom', 'left', 'right']).optional(),
 })
 
 export const chartOrderMoveSchema = z.object({

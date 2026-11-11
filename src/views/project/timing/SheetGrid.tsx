@@ -33,7 +33,10 @@ import {
   type ElementColumn,
 } from './shared'
 import { CycleTimeline } from './CycleTimeline'
+import ElementParallelPopover from '../matrix/ElementParallelPopover'
 import type { SheetHistory } from './useSheetHistory'
+import { SuspectDiagnosticDialog, type SuspectDiagTarget } from './SuspectDiagnosticDialog'
+import { DeleteCycleConfirm } from './DeleteCycleConfirm'
 
 export interface GridSelection {
   rowIdx: number
@@ -75,25 +78,65 @@ export function SheetGrid({
   const [rangeEnd, setRangeEnd] = useState<GridSelection | null>(null)
   const [editing, setEditing] = useState<{ rowIdx: number; colIdx: number; seq: string; start: string; end: string } | null>(null)
   const [expanded, setExpanded] = useState<string | null>(null)
+  // هدف دیالوگ تشخیص مشاهدهٔ مشکوک — §۱۲.۳
+  const [diagTarget, setDiagTarget] = useState<SuspectDiagTarget | null>(null)
+  // چرخهٔ در انتظار تأیید حذف — §۱۲.۴
+  const [deleteTarget, setDeleteTarget] = useState<CycleRowDto | null>(null)
   const gridRef = useRef<HTMLDivElement>(null)
   const cellRefs = useRef<Map<string, HTMLDivElement>>(new Map())
   const seqInputRef = useRef<HTMLInputElement>(null)
   const startInputRef = useRef<HTMLInputElement>(null)
   const endInputRef = useRef<HTMLInputElement>(null)
+  // فاصلهٔ کوتاه برای تفکیک کلیک از دابل‌کلیک روی سلول مشکوک — §۱۲.۳
+  const diagTimerRef = useRef<number | null>(null)
 
   const cycles = sheet.cycles
   const method = sheet.session.timingMethod
 
+  // ── دیالوگ تشخیص: بازکردن فوری/زمان‌بندی‌شده و لغو ──
+  const cancelDiag = useCallback(() => {
+    if (diagTimerRef.current !== null) {
+      window.clearTimeout(diagTimerRef.current)
+      diagTimerRef.current = null
+    }
+  }, [])
+
+  const openDiag = useCallback(
+    (cycle: CycleRowDto, obs: ObservationCellDto, elementName: string) => {
+      cancelDiag()
+      setDiagTarget({ cycle, obs, elementName })
+    },
+    [cancelDiag]
+  )
+
+  const scheduleDiag = useCallback(
+    (cycle: CycleRowDto, obs: ObservationCellDto, elementName: string) => {
+      cancelDiag()
+      diagTimerRef.current = window.setTimeout(() => {
+        diagTimerRef.current = null
+        setDiagTarget({ cycle, obs, elementName })
+      }, 220)
+    },
+    [cancelDiag]
+  )
+
+  // لغو تایمر معلق هنگام خروج از جدول
+  useEffect(() => cancelDiag, [cancelDiag])
+
   // ── ناوبری ──
-  const focusCell = useCallback((rowIdx: number, colIdx: number) => {
-    const r = Math.max(0, Math.min(rowIdx, cycles.length - 1))
-    const c = Math.max(0, Math.min(colIdx, columns.length - 1))
-    setActive({ rowIdx: r, colIdx: c })
-    setRangeEnd(null)
-    const el = cellRefs.current.get(`${r}:${c}`)
-    el?.focus()
-    el?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
-  }, [cycles.length, columns.length])
+  const focusCell = useCallback(
+    (rowIdx: number, colIdx: number) => {
+      cancelDiag()
+      const r = Math.max(0, Math.min(rowIdx, cycles.length - 1))
+      const c = Math.max(0, Math.min(colIdx, columns.length - 1))
+      setActive({ rowIdx: r, colIdx: c })
+      setRangeEnd(null)
+      const el = cellRefs.current.get(`${r}:${c}`)
+      el?.focus()
+      el?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+    },
+    [cycles.length, columns.length, cancelDiag]
+  )
 
   useEffect(() => {
     if (editing) {
@@ -106,6 +149,7 @@ export function SheetGrid({
   const startEdit = useCallback(
     (rowIdx: number, colIdx: number, initial?: string) => {
       if (!editable) return
+      cancelDiag()
       const cycle = cycles[rowIdx]
       const column = columns[colIdx]
       if (!cycle || !column) return
@@ -119,7 +163,7 @@ export function SheetGrid({
         end: initial ? '' : v.end,
       })
     },
-    [cycles, columns, editable, method]
+    [cycles, columns, editable, method, cancelDiag]
   )
 
   const finishEdit = useCallback(
@@ -339,12 +383,32 @@ export function SheetGrid({
                           <button
                             type="button"
                             onClick={() => onToggleEntryMode(col.id)}
-                            className="rounded-full bg-muted px-1.5 py-px text-[10px] font-bold text-muted-foreground transition-colors hover:bg-brand-soft hover:text-brand"
-                            title={col.entryMode === 'SEQ' ? 'ورودی ترتیبی — برای بازه‌ای تغییر دهید' : 'ورودی بازه‌ای — برای ترتیبی تغییر دهید'}
+                            className={`rounded-full border px-1.5 py-px text-[10px] font-bold transition-colors ${
+                              col.entryMode === 'INT'
+                                ? 'border-brand/40 bg-brand-soft text-brand'
+                                : 'border-border bg-muted text-muted-foreground hover:border-brand/40 hover:bg-brand-soft hover:text-brand'
+                            }`}
+                            title={
+                              col.entryMode === 'SEQ'
+                                ? 'ورودی ترتیبی — برای ورودی بازه‌ای (از/تا) کلیک کنید'
+                                : 'ورودی بازه‌ای (از/تا) — برای ترتیبی کلیک کنید'
+                            }
+                            aria-label={`حالت ورود عنصر ${col.name}: ${col.entryMode === 'SEQ' ? 'ترتیبی' : 'بازه‌ای'}`}
                           >
-                            {col.entryMode === 'SEQ' ? (method === 'CONTINUOUS' ? 'قرائت' : 'مدت') : 'شروع/پایان'}
+                            {col.entryMode === 'SEQ' ? (method === 'CONTINUOUS' ? 'قرائت' : 'مدت') : 'از/تا'}
                           </button>
                         )}
+                        <ElementParallelPopover
+                          projectId={sheet.activity.projectId}
+                          elementId={col.id}
+                          elementName={col.name}
+                          cycleOptions={sheet.cycles.map((c) => ({
+                            cycleId: c.id,
+                            cycleNo: c.cycleNo,
+                            label: `چرخهٔ ${c.cycleNo}`,
+                          }))}
+                          defaultCycleId={sheet.cycles.at(-1)?.id ?? null}
+                        />
                       </div>
                     </div>
                     {stats && stats.calcCount > 0 && (
@@ -414,61 +478,83 @@ export function SheetGrid({
                             else cellRefs.current.delete(`${rowIdx}:${colIdx}`)
                           }}
                           role="gridcell"
-                          aria-label={`چرخهٔ ${cycle.cycleNo}، ${col.name}${obs?.derivedDuration != null ? `، مدت ${obs.derivedDuration}` : ''}${excluded ? '، خارج‌شده از محاسبات' : ''}`}
+                          aria-label={`چرخهٔ ${cycle.cycleNo}، ${col.name}${obs?.derivedDuration != null ? `، مدت ${obs.derivedDuration}` : ''}${suspect ? '، مشاهدهٔ مشکوک' : ''}${excluded ? '، خارج‌شده از محاسبات' : ''}`}
                           tabIndex={isActive ? 0 : -1}
                           onClick={(e) => {
                             if (e.shiftKey) setRangeEnd({ rowIdx, colIdx })
                             else focusCell(rowIdx, colIdx)
+                            // کلیک روی سلول مشکوک → دیالوگ تشخیص — §۱۲.۳
+                            // (با تأخیر کوتاه تا دابل‌کلیک برای ویرایش ممکن بماند)
+                            if (suspect && obs && !e.shiftKey && !excluded) scheduleDiag(cycle, obs, col.name)
                           }}
-                          onDoubleClick={() => startEdit(rowIdx, colIdx)}
+                          onDoubleClick={() => {
+                            cancelDiag()
+                            startEdit(rowIdx, colIdx)
+                          }}
                           className={`num relative min-h-10 px-2 py-1.5 text-center outline-none transition-colors focus-visible:z-10 focus-visible:ring-2 focus-visible:ring-brand ${
                             isActive ? 'bg-brand-soft/70 ring-2 ring-brand' : inRange(rowIdx, colIdx) ? 'bg-brand-soft/30' : 'hover:bg-muted/40'
                           } ${excluded ? 'text-faint line-through' : ''} ${suspect ? 'bg-amber-soft/50' : ''} ${invalid || err ? 'bg-red-soft/60' : ''} ${partialInterval ? 'ring-1 ring-inset ring-amber/60' : ''}`}
                         >
                           {isEditing ? (
                             col.entryMode === 'INT' ? (
-                              <span className="flex items-center justify-center gap-1" dir="ltr">
-                                <input
-                                  ref={startInputRef}
-                                  value={editing.start}
-                                  onChange={(e) => setEditing({ ...editing, start: e.target.value })}
-                                  onKeyDown={(e) => {
-                                    if (e.key === 'Escape') setEditing(null)
-                                    if (e.key === 'Tab') {
-                                      e.preventDefault()
-                                      endInputRef.current?.focus()
-                                    }
-                                    if (e.key === 'Enter') {
-                                      e.preventDefault()
-                                      finishEdit('down')
-                                    }
-                                  }}
-                                  aria-label={`شروع بازهٔ ${col.name}`}
-                                  className="num w-14 rounded-md border bg-background px-1 py-0.5 text-center text-xs focus-visible:outline-2 focus-visible:outline-ring"
-                                  inputMode="decimal"
-                                  dir="ltr"
-                                />
-                                <span className="text-faint">–</span>
-                                <input
-                                  ref={endInputRef}
-                                  value={editing.end}
-                                  onChange={(e) => setEditing({ ...editing, end: e.target.value })}
-                                  onKeyDown={(e) => {
-                                    if (e.key === 'Escape') setEditing(null)
-                                    if (e.key === 'Tab') {
-                                      e.preventDefault()
-                                      finishEdit('next')
-                                    }
-                                    if (e.key === 'Enter') {
-                                      e.preventDefault()
-                                      finishEdit('down')
-                                    }
-                                  }}
-                                  aria-label={`پایان بازهٔ ${col.name}`}
-                                  className="num w-14 rounded-md border bg-background px-1 py-0.5 text-center text-xs focus-visible:outline-2 focus-visible:outline-ring"
-                                  inputMode="decimal"
-                                  dir="ltr"
-                                />
+                              // گروه بصری «از/تا» برای ورودی بازه‌ای — §۱۲.۲
+                              <span
+                                dir="ltr"
+                                className="inline-flex items-end justify-center gap-0.5 rounded-md border bg-background px-1 py-0.5 focus-within:border-brand focus-within:ring-1 focus-within:ring-brand"
+                              >
+                                <label className="flex min-w-0 flex-col items-center">
+                                  <span className="text-[9px] font-bold leading-none text-muted-foreground" aria-hidden>
+                                    از
+                                  </span>
+                                  <input
+                                    ref={startInputRef}
+                                    value={editing.start}
+                                    onChange={(e) => setEditing({ ...editing, start: e.target.value })}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Escape') setEditing(null)
+                                      if (e.key === 'Tab') {
+                                        e.preventDefault()
+                                        endInputRef.current?.focus()
+                                      }
+                                      if (e.key === 'Enter') {
+                                        e.preventDefault()
+                                        finishEdit('down')
+                                      }
+                                    }}
+                                    aria-label={`شروع بازهٔ ${col.name}`}
+                                    className="num w-12 rounded-sm border-0 bg-transparent px-0.5 py-0.5 text-center text-xs focus-visible:bg-brand-soft/40 focus-visible:outline-none"
+                                    inputMode="decimal"
+                                    dir="ltr"
+                                  />
+                                </label>
+                                <span className="self-end pb-1.5 text-faint" aria-hidden>
+                                  –
+                                </span>
+                                <label className="flex min-w-0 flex-col items-center">
+                                  <span className="text-[9px] font-bold leading-none text-muted-foreground" aria-hidden>
+                                    تا
+                                  </span>
+                                  <input
+                                    ref={endInputRef}
+                                    value={editing.end}
+                                    onChange={(e) => setEditing({ ...editing, end: e.target.value })}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Escape') setEditing(null)
+                                      if (e.key === 'Tab') {
+                                        e.preventDefault()
+                                        finishEdit('next')
+                                      }
+                                      if (e.key === 'Enter') {
+                                        e.preventDefault()
+                                        finishEdit('down')
+                                      }
+                                    }}
+                                    aria-label={`پایان بازهٔ ${col.name}`}
+                                    className="num w-12 rounded-sm border-0 bg-transparent px-0.5 py-0.5 text-center text-xs focus-visible:bg-brand-soft/40 focus-visible:outline-none"
+                                    inputMode="decimal"
+                                    dir="ltr"
+                                  />
+                                </label>
                               </span>
                             ) : (
                               <input
@@ -510,7 +596,20 @@ export function SheetGrid({
                                 </span>
                               )}
                               {excluded && <Eraser className="absolute left-1 top-1 size-3 text-faint" aria-hidden />}
-                              {suspect && <AlertTriangle className="absolute left-1 top-1 size-3 text-amber" aria-hidden />}
+                              {suspect && obs && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    openDiag(cycle, obs, col.name)
+                                  }}
+                                  className="absolute left-1 top-1 flex size-4 items-center justify-center rounded-sm text-amber transition-colors hover:bg-amber-soft focus-visible:outline-2 focus-visible:outline-ring"
+                                  aria-label="تشخیص مشاهدهٔ مشکوک"
+                                  title="تشخیص مشاهدهٔ مشکوک"
+                                >
+                                  <AlertTriangle className="size-3" aria-hidden />
+                                </button>
+                              )}
                               {(invalid || err) && <XCircle className="absolute left-1 top-1 size-3 text-red" aria-hidden />}
                             </>
                           )}
@@ -549,8 +648,9 @@ export function SheetGrid({
                         columns={columns}
                         prefs={prefs}
                         editable={editable}
-                        onDelete={() => onDeleteCycle(cycle)}
+                        onDelete={() => setDeleteTarget(cycle)}
                         onSetValidity={(obs) => onSetValidity(cycle, obs)}
+                        onDiagnose={(obs) => openDiag(cycle, obs, columns.find((c) => c.id === obs.workElementId)?.name ?? '')}
                         onUpdateNotes={(notes) => onUpdateNotes(cycle, notes)}
                       />
                     </td>
@@ -584,6 +684,32 @@ export function SheetGrid({
           </tfoot>
         )}
       </table>
+
+      {/* دیالوگ تشخیص مشاهدهٔ مشکوک — §۱۲.۳ (فقط خواندنی؛ خروج از محاسبات به دیالوگ وضعیت زنجیر می‌شود) */}
+      <SuspectDiagnosticDialog
+        target={diagTarget}
+        prefs={prefs}
+        onClose={() => setDiagTarget(null)}
+        onExclude={(t) => {
+          setDiagTarget(null)
+          onSetValidity(t.cycle, t.obs)
+        }}
+      />
+
+      {/* تأیید حذف چرخه — §۱۲.۴ (حذف یک‌کلیکی غیرممکن است) */}
+      <DeleteCycleConfirm
+        cycle={deleteTarget}
+        sheet={sheet}
+        prefs={prefs}
+        onOpenChange={(open) => {
+          if (!open) setDeleteTarget(null)
+        }}
+        onConfirm={() => {
+          const c = deleteTarget
+          setDeleteTarget(null)
+          if (c) onDeleteCycle(c)
+        }}
+      />
     </div>
   )
 }
@@ -598,6 +724,7 @@ function ExpandedRow({
   editable,
   onDelete,
   onSetValidity,
+  onDiagnose,
   onUpdateNotes,
 }: {
   cycle: CycleRowDto
@@ -607,6 +734,8 @@ function ExpandedRow({
   editable: boolean
   onDelete: () => void
   onSetValidity: (obs: ObservationCellDto) => void
+  /** بازکردن دیالوگ تشخیص برای مشاهدهٔ مشکوک — §۱۲.۳ */
+  onDiagnose: (obs: ObservationCellDto) => void
   onUpdateNotes: (notes: string) => void
 }) {
   const [notes, setNotes] = useState(cycle.notes ?? '')
@@ -638,7 +767,7 @@ function ExpandedRow({
             className="flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-bold text-red transition-colors hover:bg-red-soft"
           >
             <Trash2 className="size-3.5" aria-hidden />
-            حذف چرخه (قابل بازگردانی با Undo)
+            حذف چرخه…
           </button>
         )}
       </div>
@@ -683,9 +812,15 @@ function ExpandedRow({
                         {obs.exclusionReason && <span className="text-[10px]">({obs.exclusionReason})</span>}
                       </span>
                     ) : obs?.validityStatus === 'SUSPECT' ? (
-                      <span className="flex items-center gap-1 text-amber">
-                        <AlertTriangle className="size-3.5" aria-hidden /> مشکوک
-                      </span>
+                      // دکمهٔ تشخیص مشاهدهٔ مشکوک — §۱۲.۳
+                      <button
+                        type="button"
+                        onClick={() => onDiagnose(obs)}
+                        className="flex items-center gap-1 rounded-lg px-1.5 py-0.5 text-amber transition-colors hover:bg-amber-soft"
+                        title="نمایش جزئیات تشخیص مشاهدهٔ مشکوک"
+                      >
+                        <AlertTriangle className="size-3.5" aria-hidden /> مشکوک — تشخیص
+                      </button>
                     ) : obs?.validityStatus === 'INVALID' ? (
                       <span className="flex items-center gap-1 text-red">
                         <XCircle className="size-3.5" aria-hidden /> نامعتبر

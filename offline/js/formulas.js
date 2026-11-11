@@ -460,6 +460,469 @@
     return { st: st, explanation: explanation };
   }
 
+
+  /* ═══════════════════════════════════════════════════════════
+     جلسه دوم — موتور مرکزی هم‌پوشانی عناصر کاری
+     پورت «دقیق و بدون تغییر» از src/calculation/overlap-matrix.ts
+     مبانی: O(A,B) = max(0, min(E_A,E_B) − max(S_A,S_B))؛ چندتایی = کمینهٔ
+     زوج‌ها؛ union با sweep-line؛ validator محلی/سه‌تایی/سراسری با solver
+     قیود اختلافی + Bellman-Ford + شاخه‌وکران + مؤلفه‌های همبند.
+     ═══════════════════════════════════════════════════════════ */
+
+  function pairKey(a, b) { return a < b ? a + '|' + b : b + '|' + a; }
+
+  function pairwiseOverlap(a, b) {
+    var inter = Math.min(a.endOffset, b.endOffset) - Math.max(a.startOffset, b.startOffset);
+    return round12(Math.max(0, inter));
+  }
+
+  function pairwiseOverlapFromDelta(dA, dB, delta) {
+    var inter = delta >= 0 ? Math.min(dA - delta, dB) : Math.min(dA, dB + delta);
+    return round12(Math.max(0, inter));
+  }
+
+  function multiOverlap(memberIds, pairLookup, durations) {
+    if (memberIds.length === 0) return { value: null, provisional: false, missingPairs: [] };
+    if (memberIds.length === 1) {
+      return { value: durations[memberIds[0]] !== undefined ? durations[memberIds[0]] : null, provisional: false, missingPairs: [] };
+    }
+    var min = null;
+    var missingPairs = [];
+    for (var i = 0; i < memberIds.length; i++) {
+      for (var j = i + 1; j < memberIds.length; j++) {
+        var a = memberIds[i], b = memberIds[j];
+        var p = pairLookup(a, b);
+        if (!p || p.status === 'UNREVIEWED') { missingPairs.push([a, b]); continue; }
+        var v = p.status === 'NO_OVERLAP' ? 0 : (p.overlapDuration != null ? p.overlapDuration : 0);
+        if (min === null || v < min) min = v;
+      }
+    }
+    if (min === null) return { value: null, provisional: missingPairs.length > 0, missingPairs: missingPairs };
+    return { value: min, provisional: missingPairs.length > 0, missingPairs: missingPairs };
+  }
+
+  function unionOfIntervals(intervals) {
+    if (intervals.length === 0) return null;
+    var events = [];
+    for (var k = 0; k < intervals.length; k++) {
+      var iv = intervals[k];
+      if (iv.startOffset == null || iv.endOffset == null || iv.endOffset <= iv.startOffset) return null;
+      events.push({ t: iv.startOffset, delta: 1 });
+      events.push({ t: iv.endOffset, delta: -1 });
+    }
+    events.sort(function (x, y) { return x.t - y.t || y.delta - x.delta; });
+    var active = 0, total = 0, lastT = 0, started = false;
+    for (var e = 0; e < events.length; e++) {
+      if (active > 0 && started) total += events[e].t - lastT;
+      active += events[e].delta;
+      lastT = events[e].t;
+      started = true;
+    }
+    return round12(total);
+  }
+
+  function unionByInclusionExclusion(durations, pairValues, memberIds) {
+    var ds = memberIds.map(function (id) { return durations[id] !== undefined ? durations[id] : null; });
+    for (var q = 0; q < ds.length; q++) if (ds[q] == null) return null;
+    if (memberIds.length < 2 || memberIds.length > 3) return null;
+    var sum = 0;
+    for (var d = 0; d < ds.length; d++) sum += ds[d];
+    var pair = function (a, b) { return pairValues[pairKey(a, b)]; };
+    for (var i = 0; i < memberIds.length; i++) {
+      for (var j = i + 1; j < memberIds.length; j++) {
+        var p = pair(memberIds[i], memberIds[j]);
+        if (!p || p.status === 'UNREVIEWED') return null;
+        sum -= p.status === 'NO_OVERLAP' ? 0 : (p.overlapDuration != null ? p.overlapDuration : 0);
+      }
+    }
+    if (memberIds.length === 3) {
+      var triple = multiOverlap(memberIds, function (x, y) { return pairValues[pairKey(x, y)]; }, durations);
+      if (triple.value == null || triple.provisional) return null;
+      sum += triple.value;
+    }
+    return round12(sum);
+  }
+
+  function validatePairLocally(pair, durations) {
+    var failures = [];
+    if (pair.elementAId === pair.elementBId) {
+      failures.push({ code: 'SELF_RELATION', message: 'عنصر نمی‌تواند با خودش رابطهٔ موازی داشته باشد.' });
+      return failures;
+    }
+    var status = pair.status, overlapDuration = pair.overlapDuration;
+    if (status === 'UNREVIEWED') {
+      if (overlapDuration != null) {
+        failures.push({ code: 'UNREVIEWED_WITH_VALUE', message: 'رابطهٔ بررسی‌نشده نباید مقدار هم‌پوشانی داشته باشد.' });
+      }
+      return failures;
+    }
+    if (status === 'NO_OVERLAP') {
+      if (overlapDuration != null && overlapDuration !== 0) {
+        failures.push({ code: 'NO_OVERLAP_WITH_POSITIVE', message: 'وضعیت «بدون هم‌پوشانی» با مقدار مثبت جمع نمی‌شود؛ مقدار باید صفر باشد.' });
+      }
+      return failures;
+    }
+    if (overlapDuration == null) {
+      failures.push({ code: 'OVERLAP_WITHOUT_VALUE', message: 'وضعیت «دارای هم‌پوشانی» نیاز به مقدار مثبت دارد.' });
+      return failures;
+    }
+    if (!isFinite(overlapDuration)) {
+      failures.push({ code: 'NOT_A_NUMBER', message: 'مقدار هم‌پوشانی عدد معتبری نیست.' });
+      return failures;
+    }
+    if (overlapDuration <= 0) {
+      failures.push({ code: 'NON_POSITIVE_OVERLAP', message: 'مقدار هم‌پوشانی باید مثبت باشد؛ صفر یا منفی در وضعیت «دارای هم‌پوشانی» نامعتبر است.' });
+      return failures;
+    }
+    var dA = durations[pair.elementAId] !== undefined ? durations[pair.elementAId] : null;
+    var dB = durations[pair.elementBId] !== undefined ? durations[pair.elementBId] : null;
+    if (dA != null && dB != null) {
+      if (dA === 0 || dB === 0) {
+        failures.push({ code: 'POSITIVE_FOR_ZERO_DURATION', message: 'عنصر با مدت صفر نمی‌تواند هم‌پوشانی مثبت داشته باشد.' });
+      } else if (overlapDuration > Math.min(dA, dB) + 1e-9) {
+        failures.push({ code: 'EXCEEDS_DURATION', message: 'مقدار هم‌پوشانی (' + overlapDuration + ') از مدت کوتاه‌تر عنصر (' + round12(Math.min(dA, dB)) + ') بیشتر است.' });
+      }
+    }
+    return failures;
+  }
+
+  function tripleConstraintViolations(memberIds, durations, pairLookup, nameOf) {
+    nameOf = nameOf || function (id) { return id; };
+    var issues = [];
+    var confirmed = function (a, b) {
+      var p = pairLookup(a, b);
+      if (!p || p.status === 'UNREVIEWED') return null;
+      return p.status === 'NO_OVERLAP' ? 0 : (p.overlapDuration != null ? p.overlapDuration : 0);
+    };
+    var seen = {};
+    for (var i = 0; i < memberIds.length; i++) {
+      var a = memberIds[i];
+      var dA = durations[a] !== undefined ? durations[a] : null;
+      if (dA == null) continue;
+      for (var j = 0; j < memberIds.length; j++) {
+        for (var k = j + 1; k < memberIds.length; k++) {
+          if (i === j || i === k) continue;
+          var b = memberIds[j], c = memberIds[k];
+          var oAB = confirmed(a, b), oAC = confirmed(a, c), oBC = confirmed(b, c);
+          if (oAB == null || oAC == null || oBC == null) continue;
+          var lowerBound = Math.max(0, oAB + oAC - dA);
+          if (oBC + 1e-9 < lowerBound) {
+            var key = [a, b, c].sort().join('|');
+            if (seen[key]) continue;
+            seen[key] = true;
+            issues.push({
+              message: 'هم‌پوشانی زوج «' + nameOf(b) + '» و «' + nameOf(c) + '» (' + oBC + ') کمتر از حداقل لازم (' + round12(lowerBound) + ') بر اساس مدت «' + nameOf(a) + '» و دو زوج دیگر است.',
+              responsibleElementIds: [a, b, c],
+              responsiblePairs: [[a, b], [a, c], [b, c]],
+              kind: 'DEFINITE',
+            });
+          }
+        }
+      }
+    }
+    return issues;
+  }
+
+  function minimumRequiredOverlap(b, c, memberIds, durations, pairLookup) {
+    var confirmed = function (x, y) {
+      var p = pairLookup(x, y);
+      if (!p || p.status === 'UNREVIEWED') return null;
+      return p.status === 'NO_OVERLAP' ? 0 : (p.overlapDuration != null ? p.overlapDuration : 0);
+    };
+    var min = 0;
+    for (var i = 0; i < memberIds.length; i++) {
+      var a = memberIds[i];
+      if (a === b || a === c) continue;
+      var dA = durations[a] !== undefined ? durations[a] : null;
+      var oAB = confirmed(a, b), oAC = confirmed(a, c);
+      if (dA == null || oAB == null || oAC == null) continue;
+      min = Math.max(min, oAB + oAC - dA);
+    }
+    return round12(Math.max(0, min));
+  }
+
+  function differenceConstraintsFeasible(vars, constraints) {
+    var edges = [];
+    for (var i = 0; i < constraints.length; i++) edges.push([constraints[i].u, constraints[i].v, constraints[i].c]);
+    var dist = {};
+    for (var v = 0; v < vars.length; v++) dist[vars[v]] = 0;
+    var n = vars.length;
+    for (var iter = 0; iter < n; iter++) {
+      var changed = false;
+      for (var e = 0; e < edges.length; e++) {
+        var du = dist[edges[e][0]], dv = dist[edges[e][1]];
+        if (du + edges[e][2] < dv - 1e-9) {
+          dist[edges[e][1]] = du + edges[e][2];
+          changed = true;
+        }
+      }
+      if (!changed) return true;
+      if (iter === n - 1) return false;
+    }
+    return true;
+  }
+
+  function solveComponent(comp, compPairs, durations, budget) {
+    var choices = [];
+    for (var i = 0; i < compPairs.length; i++) {
+      var p = compPairs[i];
+      var dA = durations[p.a] != null ? durations[p.a] : 0;
+      var dB = durations[p.b] != null ? durations[p.b] : 0;
+      var minD = Math.min(dA, dB);
+      if (p.o > minD + 1e-9) return 'INFEASIBLE';
+      if (p.o <= 1e-9) {
+        choices.push({
+          pair: p,
+          options: [
+            [{ u: p.b, v: p.a, c: -dA }],
+            [{ u: p.a, v: p.b, c: -dB }],
+          ],
+        });
+      } else if (Math.abs(p.o - minD) <= 1e-9) {
+        var shortLong = dA <= dB ? [p.a, p.b] : [p.b, p.a];
+        var diff = Math.abs(dA - dB);
+        choices.push({
+          pair: p,
+          options: [[
+            { u: shortLong[1], v: shortLong[0], c: diff },
+            { u: shortLong[0], v: shortLong[1], c: 0 },
+          ]],
+        });
+      } else {
+        choices.push({
+          pair: p,
+          options: [
+            [{ u: p.a, v: p.b, c: dA - p.o }, { u: p.b, v: p.a, c: -(dA - p.o) }],
+            [{ u: p.b, v: p.a, c: dB - p.o }, { u: p.a, v: p.b, c: -(dB - p.o) }],
+          ],
+        });
+      }
+    }
+    choices.sort(function (x, y) { return x.options.length - y.options.length; });
+    var budgetOver = false;
+    function search(idx, acc) {
+      if (idx === choices.length) return differenceConstraintsFeasible(comp, acc);
+      for (var oi = 0; oi < choices[idx].options.length; oi++) {
+        if (!budget()) { budgetOver = true; return false; }
+        var next = acc.concat(choices[idx].options[oi]);
+        if (!differenceConstraintsFeasible(comp, next)) continue;
+        if (search(idx + 1, next)) return true;
+      }
+      return false;
+    }
+    var feasible = search(0, []);
+    if (budgetOver) return 'BUDGET';
+    return feasible ? 'FEASIBLE' : 'INFEASIBLE';
+  }
+
+  function validateIntervalRealizability(memberIds, durations, pairLookup, options) {
+    options = options || {};
+    var searchBudget = options.searchBudget != null ? options.searchBudget : 200000;
+    var nameOf = options.nameOf || function (id) { return id; };
+    var issues = [];
+    var missingDuration = [];
+    var known = [];
+    for (var m = 0; m < memberIds.length; m++) {
+      if (durations[memberIds[m]] == null) missingDuration.push(memberIds[m]);
+      else known.push(memberIds[m]);
+    }
+    var pairs = [];
+    for (var i = 0; i < known.length; i++) {
+      for (var j = i + 1; j < known.length; j++) {
+        var p = pairLookup(known[i], known[j]);
+        if (!p || p.status === 'UNREVIEWED') continue;
+        var o = p.status === 'NO_OVERLAP' ? 0 : (p.overlapDuration != null ? p.overlapDuration : 0);
+        pairs.push({ a: known[i], b: known[j], o: o });
+      }
+    }
+    if (missingDuration.length > 0 && pairs.length > 0) {
+      var names = [];
+      for (var mm = 0; mm < missingDuration.length; mm++) names.push('«' + nameOf(missingDuration[mm]) + '»');
+      issues.push({
+        message: 'مدت عنصرهای ' + names.join(' و ') + ' در این چرخه ثبت نشده؛ اعتبارسنجی سراسری فقط برای عنصرهای دارای داده انجام شد.',
+        responsibleElementIds: missingDuration.slice(),
+        kind: 'INDETERMINATE',
+      });
+    }
+    var comps = connectedComponents(known, function (a, b) {
+      for (var q = 0; q < pairs.length; q++) {
+        if ((pairs[q].a === a && pairs[q].b === b) || (pairs[q].a === b && pairs[q].b === a)) return true;
+      }
+      return false;
+    });
+    var searched = 0;
+    var overflow = false;
+    for (var ci = 0; ci < comps.length; ci++) {
+      var comp = comps[ci];
+      var compSet = {};
+      for (var cc = 0; cc < comp.length; cc++) compSet[comp[cc]] = true;
+      var compPairs = [];
+      for (var pp = 0; pp < pairs.length; pp++) {
+        if (compSet[pairs[pp].a] && compSet[pairs[pp].b]) compPairs.push(pairs[pp]);
+      }
+      if (compPairs.length === 0) continue;
+      var res = solveComponent(comp, compPairs, durations, function () {
+        searched++;
+        return searched <= searchBudget;
+      });
+      if (res === 'BUDGET') {
+        overflow = true;
+        issues.push({
+          message: 'پیچیدگی دادهٔ هم‌پوشانی از حد امن محاسباتی فراتر رفت؛ نتیجهٔ سراسری نامعین است (INDETERMINATE).',
+          responsibleElementIds: comp.slice(),
+          kind: 'INDETERMINATE',
+        });
+        continue;
+      }
+      if (res === 'INFEASIBLE') {
+        var respPairs = [];
+        for (var rp = 0; rp < compPairs.length; rp++) respPairs.push([compPairs[rp].a, compPairs[rp].b]);
+        issues.push({
+          message: 'نمی‌توان بازه‌های پیوسته‌ای روی محور زمانی مشترک یافت که همهٔ هم‌پوشانی‌های تأییدشدهٔ این مجموعه را دقیقاً برآورده کند.',
+          responsibleElementIds: comp.slice(),
+          responsiblePairs: respPairs,
+          kind: 'DEFINITE',
+        });
+      }
+    }
+    var hasDefinite = false;
+    for (var hi = 0; hi < issues.length; hi++) if (issues[hi].kind === 'DEFINITE') { hasDefinite = true; break; }
+    if (hasDefinite) return { verdict: 'INVALID', issues: issues };
+    if (overflow) return { verdict: 'INDETERMINATE', issues: issues };
+    for (var ii = 0; ii < issues.length; ii++) if (issues[ii].kind === 'INDETERMINATE') return { verdict: 'INDETERMINATE', issues: issues };
+    return { verdict: 'VALID', issues: issues };
+  }
+
+  function connectedComponents(memberIds, connected) {
+    var adj = {};
+    for (var i = 0; i < memberIds.length; i++) adj[memberIds[i]] = [];
+    for (var a = 0; a < memberIds.length; a++) {
+      for (var b = a + 1; b < memberIds.length; b++) {
+        if (connected(memberIds[a], memberIds[b])) {
+          adj[memberIds[a]].push(memberIds[b]);
+          adj[memberIds[b]].push(memberIds[a]);
+        }
+      }
+    }
+    var seen = {};
+    var out = [];
+    for (var s = 0; s < memberIds.length; s++) {
+      if (seen[memberIds[s]]) continue;
+      var stack = [memberIds[s]];
+      seen[memberIds[s]] = true;
+      var comp = [];
+      while (stack.length) {
+        var cur = stack.pop();
+        comp.push(cur);
+        var nbs = adj[cur] || [];
+        for (var nb = 0; nb < nbs.length; nb++) {
+          if (!seen[nbs[nb]]) { seen[nbs[nb]] = true; stack.push(nbs[nb]); }
+        }
+      }
+      comp.sort();
+      out.push(comp);
+    }
+    return out;
+  }
+
+  function analyzeProvisional(memberIds, durations, pairLookup, nameOf) {
+    nameOf = nameOf || function (id) { return id; };
+    var warnings = [];
+    for (var i = 0; i < memberIds.length; i++) {
+      for (var j = i + 1; j < memberIds.length; j++) {
+        var a = memberIds[i], b = memberIds[j];
+        var p = pairLookup(a, b);
+        if (p && p.status !== 'UNREVIEWED') continue;
+        var min = minimumRequiredOverlap(a, b, memberIds, durations, pairLookup);
+        if (min > 1e-9) {
+          warnings.push({
+            message: 'رابطهٔ بررسی‌نشده «' + nameOf(a) + '» و «' + nameOf(b) + '» بر اساس سایر داده‌های تأییدشده حداقل ' + min + ' ثانیه هم‌پوشانی لازم دارد؛ نتیجهٔ فعلی موقتی است.',
+            responsiblePairs: [[a, b]],
+            kind: 'PROVISIONAL',
+          });
+        }
+      }
+    }
+    var assumedLookup = function (a, b) {
+      var p = pairLookup(a, b);
+      if (!p) return undefined;
+      if (p.status === 'UNREVIEWED') return { status: 'NO_OVERLAP', overlapDuration: 0 };
+      return p;
+    };
+    var realizability = validateIntervalRealizability(memberIds, durations, assumedLookup, { nameOf: nameOf });
+    if (realizability.verdict === 'INVALID') {
+      for (var w = 0; w < realizability.issues.length; w++) {
+        warnings.push({
+          message: 'با فرض موقت «بدون هم‌پوشانی» برای روابط بررسی‌نشده، داده‌ها قابل تحقق نیستند: ' + realizability.issues[w].message + ' روابط نیازمند بررسی را مشخص و مقداردهی کنید.',
+          responsibleElementIds: realizability.issues[w].responsibleElementIds,
+          responsiblePairs: realizability.issues[w].responsiblePairs,
+          kind: 'PROVISIONAL',
+        });
+      }
+    }
+    var provisionalMultiOverlap = {};
+    var assumed = {};
+    for (var ai = 0; ai < memberIds.length; ai++) {
+      for (var aj = ai + 1; aj < memberIds.length; aj++) {
+        var k = pairKey(memberIds[ai], memberIds[aj]);
+        var v = assumedLookup(memberIds[ai], memberIds[aj]);
+        if (v) assumed[k] = v;
+      }
+    }
+    var comps = connectedComponents(memberIds, function (a, b) { return !!pairLookup(a, b); });
+    for (var ci = 0; ci < comps.length; ci++) {
+      if (comps[ci].length < 3) continue;
+      var key = comps[ci].slice().sort().join('|');
+      provisionalMultiOverlap[key] = multiOverlap(comps[ci], function (a, b) { return assumed[pairKey(a, b)]; }, durations);
+    }
+    return { warnings: warnings, provisionalMultiOverlap: provisionalMultiOverlap };
+  }
+
+  function runFullValidation(memberIds, durations, intervals, pairLookup, nameOf) {
+    nameOf = nameOf || function (id) { return id; };
+    var localFailures = [];
+    for (var i = 0; i < memberIds.length; i++) {
+      for (var j = i + 1; j < memberIds.length; j++) {
+        var a = memberIds[i], b = memberIds[j];
+        var p = pairLookup(a, b);
+        if (!p) continue;
+        var failures = validatePairLocally({ elementAId: a, elementBId: b, status: p.status, overlapDuration: p.overlapDuration }, durations);
+        if (failures.length > 0) localFailures.push({ pair: [a, b], failures: failures });
+      }
+    }
+    var tripleIssues = tripleConstraintViolations(memberIds, durations, pairLookup, nameOf);
+    var confirmed = validateIntervalRealizability(memberIds, durations, pairLookup, { nameOf: nameOf });
+    var provisional = analyzeProvisional(memberIds, durations, pairLookup, nameOf);
+    var multiOverlaps = {};
+    var unions = {};
+    var relComponents = connectedComponents(memberIds, function (a, b) { return !!pairLookup(a, b); });
+    for (var rc = 0; rc < relComponents.length; rc++) {
+      var comp = relComponents[rc];
+      if (comp.length < 2) continue;
+      var key = comp.slice().sort().join('|');
+      multiOverlaps[key] = multiOverlap(comp, pairLookup, durations);
+      var realIntervals = [];
+      for (var ci = 0; ci < comp.length; ci++) {
+        var iv = intervals[comp[ci]];
+        if (iv && iv.endOffset > iv.startOffset) realIntervals.push(iv);
+      }
+      if (realIntervals.length === comp.length) {
+        unions[key] = { value: unionOfIntervals(realIntervals), source: 'INTERVALS' };
+      } else {
+        var pairValues = {};
+        for (var pa = 0; pa < comp.length; pa++) {
+          for (var pb = 0; pb < comp.length; pb++) {
+            if (comp[pa] !== comp[pb]) pairValues[pairKey(comp[pa], comp[pb])] = pairLookup(comp[pa], comp[pb]);
+          }
+        }
+        var byIE = unionByInclusionExclusion(durations, pairValues, comp);
+        if (byIE != null) unions[key] = { value: byIE, source: 'INCLUSION_EXCLUSION' };
+        else unions[key] = { value: null, source: 'NOT_COMPUTABLE' };
+      }
+    }
+    return { confirmed: confirmed, localFailures: localFailures, tripleIssues: tripleIssues, provisional: provisional, multiOverlaps: multiOverlaps, unions: unions };
+  }
+
   g.T2F = {
     round12: round12, computeRatingFactor: computeRatingFactor, computeNormalTime: computeNormalTime,
     sumAllowances: sumAllowances, allowanceError: allowanceError, computeStandardTime: computeStandardTime,
@@ -472,5 +935,11 @@
     // ── جلسه اول: الونس‌های سلسله‌مراتبی ──
     validateAssignmentValue: validateAssignmentValue, AllowanceValueError: AllowanceValueError,
     resolveEffectiveAllowances: resolveEffectiveAllowances, computeElementStandardTime: computeElementStandardTime,
+    // ── جلسه دوم: موتور هم‌پوشانی ──
+    pairKey: pairKey, pairwiseOverlap: pairwiseOverlap, pairwiseOverlapFromDelta: pairwiseOverlapFromDelta,
+    multiOverlap: multiOverlap, unionOfIntervals: unionOfIntervals, unionByInclusionExclusion: unionByInclusionExclusion,
+    validatePairLocally: validatePairLocally, tripleConstraintViolations: tripleConstraintViolations,
+    minimumRequiredOverlap: minimumRequiredOverlap, validateIntervalRealizability: validateIntervalRealizability,
+    connectedComponents: connectedComponents, analyzeProvisional: analyzeProvisional, runFullValidation: runFullValidation,
   };
 })(typeof window !== 'undefined' ? window : globalThis);

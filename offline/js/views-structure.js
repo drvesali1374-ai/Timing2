@@ -133,18 +133,9 @@
     return U.h('span', { class: 'badge ' + (variant || 'muted') + ' num shrink-0', text: text });
   }
 
-  /** کاشی نماد نوع رویداد فرایندی (ASCME) */
+  /** کاشی نماد نوع رویداد فرایندی (ASCME) — رندر واحد از طریق UI.processSymbol (§۱۵.۲) */
   function symbolTile(processType, title) {
-    return U.h('span', {
-      class: 'shrink-0 num',
-      style: {
-        width: '26px', height: '26px', background: 'var(--surface-3)',
-        borderRadius: 'calc(var(--radius) - 4px)', fontWeight: '800', fontSize: '13px',
-        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-      },
-      title: title,
-      text: DB.CONST.PROCESS_TYPE_SYMBOLS[processType] || '○',
-    });
+    return U.h('span', { html: UI.processSymbol(processType, 'sm', title), 'aria-hidden': 'true' });
   }
 
   function dragHandleEl() {
@@ -617,10 +608,9 @@
             ? U.h('span', { class: 't2-activity-meta num', text: U.formatInt(elsCount) + ' عنصر' + (group ? ' · ' + group.name : '') })
             : null),
         U.h('span', {
-          class: 'shrink-0 num', title: 'نوع رویداد فرایندی: ' + processLabelOf(a.processType),
+          class: 'shrink-0',
           'aria-label': 'نوع فرایند: ' + processLabelOf(a.processType),
-          style: { width: '20px', height: '20px', background: 'var(--brand-soft)', borderRadius: '6px', fontSize: '11px', fontWeight: '800', color: 'var(--brand)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
-          text: processSymbolOf(a.processType),
+          html: UI.processSymbol(a.processType, 'sm'),
         }),
         numBadge(U.formatInt(elsCount), 'muted')),
       actionButtons(
@@ -720,10 +710,16 @@
           UI.field('شرح عنصر (اختیاری)', descInput),
           UI.field('نوع عنصر کاری', typeSelect, ELEMENT_TYPE_HELP,
             isEdit ? 'تغییر نوع عنصر بر مدل محاسباتی اثر دارد و وضعیت محاسبات را «نیازمند محاسبه مجدد» می‌کند.' : null),
-          isEdit ? U.h('div', { id: 'tree-element-allowances' }) : null));
+          isEdit ? U.h('div', { id: 'tree-element-allowances' }) : null,
+          isEdit ? U.h('div', { id: 'tree-element-parallel' }) : null));
         if (isEdit && g.T2VIEWS._allowanceSection) {
           var host = body.querySelector('#tree-element-allowances');
           g.T2VIEWS._allowanceSection(host, ctx.projectId, 'WORK_ELEMENT', element.id, { compact: true });
+        }
+        // بخش «عناصر موازی و اطلاعات هم‌پوشانی» — کامپوننت مشترک ماتریس (جلسه ۲ §۴.۲)
+        if (isEdit && g.T2VIEWS._parallelRelationsSection) {
+          var pHost = body.querySelector('#tree-element-parallel');
+          g.T2VIEWS._parallelRelationsSection(pHost, ctx.projectId, element.id, element.name);
         }
       },
       footerBuilder: function (close) {
@@ -1048,9 +1044,11 @@
       }, U.icon('arrowRight')),
       U.h('h1', { class: 'text-xl font-extrabold truncate', text: activity.name }),
       U.h('span', {
-        class: 'badge brand shrink-0 num', title: 'نوع رویداد فرایندی: ' + processLabel,
-        text: processSymbolOf(activity.processType) + ' ' + processLabel,
-      }),
+        class: 'badge brand shrink-0 flex items-center gap-1',
+        title: 'نوع رویداد فرایندی: ' + processLabel,
+      },
+        U.h('span', { class: 'inline-flex', html: UI.processSymbol(activity.processType, 'sm') }),
+        U.h('span', { text: processLabel })),
       spacer(),
       U.h('span', { class: 'text-xs text-muted num shrink-0', text: 'وضعیت: ' + U.formatInt(ratedCount) + ' از ' + U.formatInt(elements.length) + ' عنصر ارزیابی‌شده' })));
 
@@ -1296,10 +1294,16 @@
           UI.field('شرح عنصر (اختیاری)', descInput),
           UI.field('نوع عنصر کاری', typeSelect, ELEMENT_TYPE_HELP,
             isEdit ? 'تغییر نوع عنصر بر مدل محاسباتی اثر دارد و وضعیت محاسبات را «نیازمند محاسبه مجدد» می‌کند.' : null),
-          isEdit && ctx && g.T2VIEWS._allowanceSection ? U.h('div', { id: 'tab-element-allowances' }) : null));
+          isEdit && ctx && g.T2VIEWS._allowanceSection ? U.h('div', { id: 'tab-element-allowances' }) : null,
+          isEdit && ctx && g.T2VIEWS._parallelRelationsSection ? U.h('div', { id: 'tab-element-parallel' }) : null));
         if (isEdit && ctx && g.T2VIEWS._allowanceSection) {
           var host = body.querySelector('#tab-element-allowances');
           g.T2VIEWS._allowanceSection(host, ctx.projectId, 'WORK_ELEMENT', element.id, { compact: true });
+        }
+        // بخش «عناصر موازی و اطلاعات هم‌پوشانی» — کامپوننت مشترک ماتریس (جلسه ۲ §۴.۲)
+        if (isEdit && ctx && g.T2VIEWS._parallelRelationsSection) {
+          var pHost = body.querySelector('#tab-element-parallel');
+          g.T2VIEWS._parallelRelationsSection(pHost, ctx.projectId, element.id, element.name);
         }
       },
       footerBuilder: function (close) {

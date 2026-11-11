@@ -31,7 +31,19 @@ export const CHART_TYPE_LABELS: Record<ChartType, string> = {
 }
 
 const OPC_TYPES = new Set(['OPERATION', 'INSPECTION'])
-const ALL_TYPES = ['OPERATION', 'INSPECTION', 'TRANSPORT', 'DELAY', 'STORAGE'] as const
+// جلسه ۲ §۱۵.۱ — OPC توسعه‌یافته: ورودی مواد (node مستقل) + انبار (مثلث وارونه) به‌صورت اختیاری
+const OPC_EXTENSION_TYPES = new Set(['OPERATION', 'INSPECTION', 'MATERIAL_INPUT', 'STORAGE'])
+const ALL_TYPES = ['OPERATION', 'INSPECTION', 'TRANSPORT', 'DELAY', 'STORAGE', 'MATERIAL_INPUT'] as const
+
+/** آیا نمودار OPC حاوی گره توسعه است؟ → حالت نمایش «OPC توسعه‌یافته» */
+export function isExtendedOpc(nodes: Array<{ nodeType: string }>): boolean {
+  return nodes.some((n) => n.nodeType === 'MATERIAL_INPUT' || n.nodeType === 'STORAGE')
+}
+
+/** پرسش برای پرچم بودن گره توسعه (نماد متفاوت در UI) */
+export function isExtensionNodeType(nodeType: string): boolean {
+  return nodeType === 'MATERIAL_INPUT'
+}
 
 export function assertChartType(v: string): asserts v is ChartType {
   if (v !== 'OPC' && v !== 'FPC') {
@@ -40,7 +52,7 @@ export function assertChartType(v: string): asserts v is ChartType {
 }
 
 function allowedNodeTypes(chartType: ChartType): readonly string[] {
-  return chartType === 'OPC' ? [...OPC_TYPES] : ALL_TYPES
+  return chartType === 'OPC' ? [...OPC_EXTENSION_TYPES] : ALL_TYPES
 }
 
 async function assertProject(projectId: string) {
@@ -85,6 +97,8 @@ export interface ChartDto {
     activitiesTotal: number
   }
   canvas: { width: number; height: number }
+  /** جلسه ۲ — OPC دارای گره ورودی مواد/انبار → نمایش «OPC توسعه‌یافته» */
+  isExtendedOpc: boolean
 }
 
 // ─── سینک تنبل — تولید گره‌ها از فعالیت‌ها — FR-20.2 ───
@@ -393,6 +407,8 @@ export async function getChart(projectId: string, chartTypeInput: string): Promi
       id: e.id,
       sourceNodeId: e.sourceNodeId,
       targetNodeId: e.targetNodeId,
+      sourceAnchor: e.sourceAnchor,
+      targetAnchor: e.targetAnchor,
       isChain: e.isChain,
       sortOrder: e.sortOrder,
     })),
@@ -405,6 +421,7 @@ export async function getChart(projectId: string, chartTypeInput: string): Promi
       activitiesTotal: allActivities.length,
     },
     canvas: { width: maxX, height: maxY },
+    isExtendedOpc: chartTypeInput === "OPC" && isExtendedOpc(nodes),
   }
 }
 
@@ -418,7 +435,7 @@ export async function createManualNode(projectId: string, chartTypeInput: string
     throw new AppError(
       'NODE_TYPE_NOT_ALLOWED',
       chartTypeInput === 'OPC'
-        ? 'در نمودار OPC فقط گره عملیات و بازرسی مجاز است؛ گره سایر انواع را در FPC بسازید.'
+        ? 'در نمودار OPC کلاسیک فقط گره عملیات و بازرسی مجاز است؛ «ورودی مواد» و «انبارش» به‌عنوان توسعهٔ اختیاری قابل افزودن‌اند (نمودار به حالت OPC توسعه‌یافته می‌رود).'
         : 'نوع گره معتبر نیست.',
       422
     )
@@ -485,7 +502,7 @@ export async function updateChartNode(nodeId: string, input: ChartNodeUpdateInpu
         throw new AppError(
           'NODE_TYPE_NOT_ALLOWED',
           existing.chartType === 'OPC'
-            ? 'در نمودار OPC فقط گره عملیات و بازرسی مجاز است.'
+            ? 'در نمودار OPC کلاسیک فقط گره عملیات و بازرسی مجاز است؛ «ورودی مواد» و «انبارش» به‌عنوان توسعهٔ اختیاری قابل افزودن‌اند.'
             : 'نوع گره معتبر نیست.',
           422
         )
@@ -538,7 +555,12 @@ export async function deleteChartNode(nodeId: string) {
 
 // ─── اتصال گره‌ها — FR-20 / فاز ۵ «اتصال و ترتیب» ───
 
-export async function createChartEdge(projectId: string, sourceNodeId: string, targetNodeId: string) {
+export async function createChartEdge(
+  projectId: string,
+  sourceNodeId: string,
+  targetNodeId: string,
+  anchors?: { sourceAnchor?: 'top' | 'bottom' | 'left' | 'right'; targetAnchor?: 'top' | 'bottom' | 'left' | 'right' }
+) {
   await assertProject(projectId)
   if (sourceNodeId === targetNodeId) {
     throw new AppError('SELF_EDGE', 'اتصال یک گره به خودش معنی ندارد.', 422)
@@ -569,6 +591,8 @@ export async function createChartEdge(projectId: string, sourceNodeId: string, t
   const edge = await db.chartEdge.create({
     data: {
       projectId,
+      sourceAnchor: anchors?.sourceAnchor ?? null,
+      targetAnchor: anchors?.targetAnchor ?? null,
       chartType: source.chartType,
       sourceNodeId,
       targetNodeId,

@@ -47,6 +47,8 @@ export const SECTION_TABLES: Record<string, DomainTable[]> = {
   // ارزیابی‌های ثبت‌شدهٔ عناصر نیز بخشی از دادهٔ وستینگهاوس‌اند — FR-25
   ratingTables: ['ratingTable', 'ratingTableGrade', 'ratingAssessment'],
   rawObservations: ['studySession', 'cycleObservation', 'timelineLane', 'elementObservation'],
+  // جلسه ۲ — روابط موازی و مقادیر هم‌پوشانی هر چرخه (بخشی از دادهٔ خام)
+  overlaps: ['overlapRelation', 'observationOverlap'],
   charts: ['chartNode', 'chartEdge'],
   calculations: ['calculationRun'],
 }
@@ -58,6 +60,7 @@ export interface ExportSections {
   groupsAndAllowances: boolean
   ratingTables: boolean
   rawObservations: boolean
+  overlaps: boolean
   charts: boolean
   calculations: boolean
 }
@@ -69,6 +72,7 @@ export const DEFAULT_EXPORT_SECTIONS: ExportSections = {
   groupsAndAllowances: true,
   ratingTables: true,
   rawObservations: true,
+  overlaps: true,
   charts: true,
   calculations: true,
 }
@@ -169,6 +173,9 @@ const FK_MAP: Record<string, string[]> = {
   cycleObservation: ['sessionId'],
   timelineLane: ['cycleId'],
   elementObservation: ['cycleId', 'workElementId', 'laneId'],
+  // جلسه ۲ — روابط موازی: عنصرها با FK نرم (بدون Cascade)؛ در نبود عنصر، سطر حذف می‌شود
+  overlapRelation: ['projectId', 'elementLowId', 'elementHighId'],
+  observationOverlap: ['relationId', 'cycleId'],
   chartNode: ['projectId', 'activityId'],
   chartEdge: ['projectId', 'sourceNodeId', 'targetNodeId'],
   calculationRun: ['projectId'],
@@ -331,6 +338,7 @@ export async function duplicateProject(
     groupsAndAllowances: sections.groupsAndAllowances,
     ratingTables: sections.ratingTables,
     rawObservations: sections.rawObservations,
+    overlaps: sections.rawObservations, // روابط موازی همراه دادهٔ خام معنا دارد
     charts: sections.structure, // نمودار فقط همراه ساختار معنا دارد
     calculations: false, // نتایج محاسبه‌شده هرگز بدون انتخاب صریح کپی نمی‌شوند
   }

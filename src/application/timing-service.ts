@@ -29,6 +29,15 @@ import { refreshOutliersForElement, refreshOutliersForActivity } from './outlier
 import { markProjectCalculationsStale } from './calc-stale'
 import type { Prisma, ElementObservation, CycleObservation, StudySession, WorkElement } from '@prisma/client'
 
+/** parse امن snapshot تشخیصی (بدون throw روی داده قدیمی) */
+function safeJsonParse(v: string): unknown {
+  try {
+    return JSON.parse(v)
+  } catch {
+    return null
+  }
+}
+
 type Tx = Prisma.TransactionClient
 
 // ── خطای سلولی با محل و علت دقیق — FR-07 ──
@@ -486,6 +495,10 @@ async function buildSessionDetail(sessionId: string): Promise<SessionDetailDto> 
         validityStatus: o.validityStatus,
         isUserExcluded: o.isUserExcluded,
         exclusionReason: o.exclusionReason,
+        // جلسه ۲ — snapshot تشخیصی SUSPECT برای پنل تشخیص (§۱۲.۳)
+        outlierScore: o.outlierScore,
+        outlierRule: o.outlierRule,
+        outlierSnapshot: o.outlierSnapshot ? safeJsonParse(o.outlierSnapshot) : null,
       })),
     }
   })

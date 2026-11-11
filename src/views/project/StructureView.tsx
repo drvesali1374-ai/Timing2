@@ -82,7 +82,6 @@ import {
   ELEMENT_TYPE_LABELS,
   PROCESS_TYPES,
   PROCESS_TYPE_LABELS,
-  PROCESS_TYPE_SYMBOLS,
   type ElementType,
   type ProcessType,
 } from '@/domain/types'
@@ -91,6 +90,8 @@ import { useDisplayPrefs } from '@/store/display-store'
 import { formatDate, formatDateTime, formatInt } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { AllowanceSection } from './allowances/AllowanceSection'
+import ParallelRelationsSection from './matrix/ParallelRelationsSection'
+import { ProcessSymbol } from '@/components/common/ProcessSymbol'
 
 type Prefs = ReturnType<typeof useDisplayPrefs>
 
@@ -184,10 +185,6 @@ function activityElementCount(a: ActivityDto): number {
 
 function processLabelOf(pt: string): string {
   return PROCESS_TYPE_LABELS[pt as ProcessType] ?? pt
-}
-
-function processSymbolOf(pt: string): string {
-  return PROCESS_TYPE_SYMBOLS[pt as ProcessType] ?? '○'
 }
 
 /** توضیح فارسی شمارش داده‌های حذف‌شده برای toast — اعداد واقعی Backend */
@@ -896,7 +893,7 @@ export default function StructureView({ projectId }: { projectId: string }) {
                       <SelectContent dir="rtl">
                         {PROCESS_TYPES.map((pt) => (
                           <SelectItem key={pt} value={pt}>
-                            <span className="num">{processSymbolOf(pt)}</span> {processLabelOf(pt)}
+                            <ProcessSymbol type={pt} size="sm" /> {processLabelOf(pt)}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -1554,7 +1551,7 @@ function ActivityNode(p: ActivityNodeProps) {
               title={processLabelOf(activity.processType)}
               aria-label={`نوع فرایند: ${processLabelOf(activity.processType)}`}
             >
-              {processSymbolOf(activity.processType)}
+              <ProcessSymbol type={activity.processType} size="sm" />
             </span>
             <Badge variant="secondary" className="num shrink-0 border-0 bg-surface-3 text-[9.5px]" aria-label="تعداد عنصر">
               {formatInt(elementCount, prefs)}
@@ -1829,7 +1826,7 @@ function StationDetailsPanel({
                     title={processLabelOf(a.processType)}
                     aria-hidden
                   >
-                    {processSymbolOf(a.processType)}
+                    <ProcessSymbol type={a.processType} size="sm" />
                   </span>
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-sm font-bold">{a.name}</span>
@@ -1952,7 +1949,7 @@ function ActivityEditForm({
               <SelectContent dir="rtl">
                 {PROCESS_TYPES.map((pt) => (
                   <SelectItem key={pt} value={pt}>
-                    <span className="num">{processSymbolOf(pt)}</span> {processLabelOf(pt)}
+                    <ProcessSymbol type={pt} size="sm" /> {processLabelOf(pt)}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -2091,6 +2088,14 @@ function ElementEditDialog({
 
           {/* الونس‌ها و زمان‌های مجاز — سطح عنصر کاری (§۶) */}
           <AllowanceSection projectId={projectId} scopeType="WORK_ELEMENT" scopeId={element.id} compact />
+
+          {/* عناصر موازی و اطلاعات هم‌پوشانی — جلسه ۲ §۴.۱ */}
+          <ParallelRelationsSection
+            projectId={projectId}
+            elementId={element.id}
+            elementName={element.name}
+            compact
+          />
         </div>
         <DialogFooter className="flex-row justify-between gap-2">
           <SaveIndicator status={status} onRetry={retry} error={lastError} />

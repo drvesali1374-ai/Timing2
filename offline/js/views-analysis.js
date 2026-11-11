@@ -61,6 +61,20 @@
     example: 'اگر یک چرخه به‌دلیل قطع نوار نقاله عدد بزرگ‌تری دارد، با دلیل «اختلال در حین مشاهده» خارجش کنید.',
     note: 'هشدار آماری به‌تنهایی دلیل حذف نیست؛ شرایط واقعی مشاهده را بررسی کنید.',
   };
+  /* راهنمای «زمان سپری‌شدهٔ چرخه» — عیناً از نسخهٔ وب (§۱۳) */
+  var HELP_CYCLE_STATS = {
+    what: '«سپری‌شده» یعنی زمان واقعی گذر یک چرخه؛ برای دادهٔ بازه‌ای برابر است با دیرترین پایان منهای زودترین شروع همان چرخه و در غیر این صورت با جمع مدت عناصر ترتیبی همان چرخه.',
+    input: 'به‌صورت خودکار از داده‌های زمان‌سنجی محاسبه می‌شود؛ فقط چرخه‌های کامل و قابل استفاده وارد آمار می‌شوند.',
+    example: 'اگر زودترین شروع عناصر چرخه ثانیهٔ ۱۰۰ و دیرترین پایان آن‌ها ثانیهٔ ۱۴۵ باشد، زمان سپری‌شدهٔ چرخه ۴۵ ثانیه است.',
+    note: 'کاربرد: ارزیابی زمان واقعی چرخه در شرایط میدانی؛ برای زمان استاندارد، ملاک ST عناصر است.',
+  };
+  /* راهنمای «بررسی عمیق عنصر» — عیناً از نسخهٔ وب (§۱۳) */
+  var HELP_DEEP_DIVE = {
+    what: 'ابزار بررسی تک‌به‌تک عناصر: یک عنصر را انتخاب کنید تا آمار کامل، توزیع (هیستوگرام) و روند مشاهدات آن را در کنار مقایسهٔ اپراتورها ببینید.',
+    input: 'از فهرست کنار عنوان، یک عنصر کاری انتخاب کنید؛ همهٔ آمارها و نمودارهای همین بخش برای همان عنصر به‌روز می‌شوند.',
+    example: 'اگر پراکندگی یک عنصر بالا باشد، در هیستوگرام می‌بینید مشاهدات در دو خوشهٔ جدا افتاده‌اند — مثلاً دو روش کار متفاوت.',
+    note: 'این بخش تغییری در داده ایجاد نمی‌کند؛ تصمیم‌های نگه‌داشتن/خروج مشاهده در «بازبینی مشاهدات مشکوک» گرفته می‌شود.',
+  };
 
   /* ═══════════ استایل‌های اختصاصی ماژول ═══════════ */
   function ensureStyles() {
@@ -565,7 +579,8 @@
     var card = U.h('section', { class: 'card p-4', 'aria-label': 'آمار زمان سپری‌شدهٔ چرخه' },
       U.h('div', { class: 'flex items-center gap-2' },
         U.h('span', { class: 'chip-icon' }, U.icon('clock')),
-        U.h('h2', { class: 'font-bold', text: 'آمار زمان سپری‌شدهٔ چرخه' })));
+        U.h('h2', { class: 'font-bold', text: 'آمار زمان سپری‌شدهٔ چرخه' }),
+        UI.helpDot('زمان سپری‌شدهٔ چرخه', HELP_CYCLE_STATS)));
 
     if (!cs.count || cs.count === 0) {
       card.appendChild(U.h('p', { class: 'text-sm text-muted mt-3', text: 'چرخهٔ قابل استفاده‌ای برای آمار وجود ندارد.' }));
@@ -587,7 +602,8 @@
     var card = U.h('section', { class: 'card p-4', 'aria-label': 'بررسی عمیق عنصر' },
       U.h('div', { class: 'flex flex-wrap items-center gap-2' },
         U.h('span', { class: 'chip-icon' }, U.icon('barChart')),
-        U.h('h2', { class: 'font-bold', text: 'بررسی عمیق عنصر' })));
+        U.h('h2', { class: 'font-bold', text: 'بررسی عمیق عنصر' }),
+        UI.helpDot('بررسی عمیق عنصر', HELP_DEEP_DIVE)));
 
     var bodyEl = U.h('div');
     card.appendChild(bodyEl);
@@ -649,18 +665,91 @@
     return card;
   }
 
+  /* ── هیستوگرام با برچسب بازه‌ای «شروع–پایان» — §۱۳ ──
+     نمودار دست‌ساز SVG در همین فایل (دستیار UI.histogramChart برچسب
+     بازه‌ای و زیرنویس محور ندارد): تیک‌های افقی بدون چرخش با گام
+     محدود (حداکثر ~۸ برچسب)، tooltip «بازه … — تعداد …» و عنوان
+     محورها به‌صورت زیرنویس متنی زیر نمودار. */
+  function histogramSvg(el) {
+    var bins = el.histogram;
+    var total = el.counts ? el.counts.calcBasis : null;
+    var NS = 'http://www.w3.org/2000/svg';
+    function sv(tag, attrs) {
+      var e = document.createElementNS(NS, tag);
+      for (var k in attrs) e.setAttribute(k, attrs[k]);
+      return e;
+    }
+    var W = 560, H = 240;
+    var padT = 14, padB = 40, padL = 34, padR = 10;
+    var svg = sv('svg', { class: 'stat-chart', viewBox: '0 0 ' + W + ' ' + H, role: 'img', 'aria-label': 'هیستوگرام توزیع مدت عنصر' });
+    svg.setAttribute('style', 'direction:ltr');
+    var maxCount = Math.max.apply(null, bins.map(function (b) { return b.count; })) || 1;
+    var yMax = Math.max(1, Math.ceil(maxCount * 1.12));
+    var innerW = W - padL - padR, innerH = H - padT - padB;
+    var slot = innerW / bins.length;
+    var barW = Math.min(64, slot * 0.62);
+    /* اعشار برچسب‌ها: ۰ برای بازه‌های صحیح، ۱ در غیر این صورت */
+    var hasFrac = bins.some(function (b) { return !Number.isInteger(b.binStart) || !Number.isInteger(b.binEnd); });
+    var dec = hasFrac ? 1 : 0;
+    /* گام تیک افقی — حداکثر ~۸ برچسب بازه‌ای */
+    var step = Math.max(1, Math.ceil(bins.length / 8));
+
+    /* خطوط راهنما + تیک‌های محور عمودی (تعداد) */
+    for (var g = 0; g <= 3; g++) {
+      var v = (yMax / 3) * g;
+      var gy = padT + innerH - (v / yMax) * innerH;
+      svg.appendChild(sv('line', { x1: padL, y1: gy, x2: W - padR, y2: gy, stroke: 'var(--border)', 'stroke-width': g === 0 ? 1 : 0.6, 'stroke-dasharray': g === 0 ? 'none' : '2 3' }));
+      var yt = sv('text', { x: padL - 5, y: gy + 3, 'text-anchor': 'end', 'font-size': 9, fill: 'var(--muted-foreground)', direction: 'ltr' });
+      yt.textContent = U.toPersianDigits(String(Math.round(v)));
+      svg.appendChild(yt);
+    }
+
+    bins.forEach(function (b, i) {
+      var bh = Math.max(2, (b.count / yMax) * innerH);
+      var x = padL + slot * i + (slot - barW) / 2;
+      var y = padT + innerH - bh;
+      var bar = sv('rect', { x: x, y: y, width: barW, height: bh, rx: 6, fill: 'var(--brand)' });
+      var ttl = sv('title');
+      ttl.textContent = 'بازه: ' + U.formatTimeValue(b.binStart, dec) + ' تا ' + U.formatTimeValue(b.binEnd, dec) +
+        ' ثانیه — تعداد: ' + U.formatInt(b.count) + ' از ' + U.formatInt(total || b.count) + ' مشاهده';
+      bar.appendChild(ttl);
+      svg.appendChild(bar);
+
+      /* فراوانی روی ستون */
+      if (b.count > 0) {
+        var val = sv('text', { x: x + barW / 2, y: y - 4, 'text-anchor': 'middle', 'font-size': 9.5, 'font-weight': 600, fill: 'var(--foreground)', direction: 'ltr' });
+        val.textContent = U.toPersianDigits(String(b.count));
+        svg.appendChild(val);
+      }
+
+      /* برچسب بازه‌ای «شروع–پایان» — افقی، هر گام-اُمین بازه + آخری */
+      if (i % step === 0 || i === bins.length - 1) {
+        var lbl = sv('text', { x: padL + slot * i + slot / 2, y: padT + innerH + 14, 'text-anchor': 'middle', 'font-size': 9, fill: 'var(--muted-foreground)', direction: 'ltr' });
+        lbl.textContent = U.formatTimeValue(b.binStart, dec) + '–' + U.formatTimeValue(b.binEnd, dec);
+        svg.appendChild(lbl);
+      }
+    });
+    return svg;
+  }
+
   function histogramBlock(el) {
-    var block = U.h('div', null, U.h('h3', { class: 'text-sm font-bold mb-2', text: 'توزیع (هیستوگرام)' }));
+    var block = U.h('div', null, U.h('h3', { class: 'text-sm font-bold mb-1', text: 'توزیع (هیستوگرام)' }));
+    /* توضیح کوتاه برای کاربر تازه‌کار — §۱۳ */
+    block.appendChild(U.h('p', { class: 't2a-chart-desc', text: 'هر ستون نشان می‌دهد چند مشاهده در آن بازهٔ زمانی قرار گرفته است.' }));
     if (!el.histogram || el.histogram.length === 0) {
       block.appendChild(U.h('p', { class: 'text-xs text-muted', text: 'دادهٔ کافی برای هیستوگرام وجود ندارد.' }));
     } else {
-      block.appendChild(UI.histogramChart(el.histogram));
+      block.appendChild(histogramSvg(el));
+      /* عنوان محورها — زیرنویس متنی (دستیار مشترک عنوان محور نمی‌کشد) */
+      block.appendChild(U.h('p', { class: 't2a-axis-caption', text: 'محور افقی: مدت (ثانیه) — محور عمودی: تعداد مشاهدات' }));
     }
     return block;
   }
 
   function trendBlock(el) {
-    var block = U.h('div', null, U.h('h3', { class: 'text-sm font-bold mb-2', text: 'روند مشاهدات به ترتیب چرخه' }));
+    var block = U.h('div', null, U.h('h3', { class: 'text-sm font-bold mb-1', text: 'روند مشاهدات به ترتیب چرخه' }));
+    /* توضیح کوتاه برای کاربر تازه‌کار — §۱۳ */
+    block.appendChild(U.h('p', { class: 't2a-chart-desc', text: 'روند مقدار ثبت‌شده در چرخه‌های متوالی؛ رنگ‌ها وضعیت هر مشاهده را نشان می‌دهد.' }));
     if (!el.trend || el.trend.length === 0) {
       block.appendChild(U.h('p', { class: 'text-xs text-muted', text: 'داده‌ای برای نمایش روند وجود ندارد.' }));
       return block;
@@ -683,10 +772,12 @@
         value: t.value,
         status: t.status,
         tooltip: 'چرخهٔ ' + U.formatInt(t.cycleNo) + (opName ? ' (' + opName + ')' : '') +
-          ': ' + U.formatTimeValue(t.value) + ' ثانیه — ' + (statusLabel[t.status] || t.status),
+          ' — مقدار: ' + U.formatTimeValue(t.value) + ' ثانیه — ' + (statusLabel[t.status] || t.status),
       };
     });
     block.appendChild(UI.lineChart({ points: points, meanLine: el.stats ? el.stats.mean : null }));
+    /* عنوان محورها — زیرنویس متنی (دستیار مشترک عنوان محور نمی‌کشد) */
+    block.appendChild(U.h('p', { class: 't2a-axis-caption', text: 'محور افقی: شمارهٔ چرخه — محور عمودی: مدت (ثانیه)' }));
     return block;
   }
 

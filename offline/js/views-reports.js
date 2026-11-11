@@ -7,6 +7,13 @@
      محاسبات، جعبهٔ هشدارهای بازبینی، دسته‌های مجاز، جدول
      عناصر (OT/NT/ST)، زمان استاندارد کل، مشاهدات مشکوک و
      امضاها — همگام با فیلترهای فعالیت/اپراتور
+   • §۱۶: کارت «مرکز گزارش‌ها» — سه حالت نمایش عوامل وستینگهاوس
+     (رتبهٔ حروفی / مقدار عددی / هر دو) + اندازهٔ کاغذ و جهت چاپ؛
+     تنظیمات پروژه‌محور است و بلافاصله ذخیره می‌شود.
+   • §۱۶.۱: حالت نمایش فقط ظاهر ستون وستینگهاوس را عوض می‌کند؛
+     محاسبات، R و ترتیب/نام چهار عامل ثابت می‌مانند.
+   • §۱۶.۲: چاپ با تزریق پویای @page (کاغذ/جهت) + پاورقی
+     تکرارشوندهٔ هر صفحه؛ شماره‌گذاری صفحات بر عهدهٔ مرورگر است.
    ═══════════════════════════════════════════════════════════ */
 (function (g) {
   'use strict';
@@ -37,8 +44,46 @@
   var OUTLIER_RULE_LABELS = { MODIFIED_Z_MAD: 'Z تعدیل‌شده', IQR_FENCE: 'IQR' };
   var METHOD_SHORT = { SNAPBACK: 'برگشت به صفر', CONTINUOUS: 'پیوسته' };
 
+  /* راهنمای کارت «مرکز گزارش‌ها و خروجی‌ها» — §۱۶ */
+  var HELP_REPORT_CENTER = {
+    what: 'تنظیمات نمایش و چاپ گزارش‌ها در یکجا جمع شده‌اند تا در چند صفحه پراکنده نباشند.',
+    input: 'حالت نمایش عوامل وستینگهاوس و تنظیمات کاغذ را انتخاب کنید؛ همان تنظیم در پیش‌نمایش و چاپ اعمال می‌شود.',
+    example: 'برای گزارش رسمی چاپی معمولاً BOTH مناسب است؛ برای تحلیل سریع NUMERIC.',
+    note: 'این تنظیم فقط نحوهٔ نمایش عوامل را عوض می‌کند؛ محاسبات و R تغییر نمی‌کنند. تنظیم در سطح پروژه ذخیره می‌شود.',
+  };
+
+  /* راهنمای گروه رادیوی حالت نمایش — §۱۶.۱ */
+  var HELP_WESTINGHOUSE_MODE = {
+    what: 'چهار عامل مهارت، تلاش، شرایط و ثبات در ستون «وستینگهاوس» جدول عناصر به سه شکل نمایش داده می‌شوند؛ ستون R جدا و دست‌نخورده می‌ماند.',
+    input: 'حالت دلخواه را انتخاب کنید؛ انتخاب برای این پروژه ذخیره می‌شود و هم در پیش‌نمایش و هم در چاپ یکسان اعمال می‌شود.',
+    example: 'حالت عددی هر عامل را با علامت نشان می‌دهد؛ مثل \u200E+0.02\u200E یا \u200E−0.13\u200E.',
+    note: 'این تنظیم فقط نحوهٔ نمایش عوامل را عوض می‌کند؛ محاسبات و R تغییر نمی‌کنند.',
+  };
+
+  /* سه گزینهٔ رادیو — اعداد/رتبه‌ها با span جهت‌دار LTR ساخته می‌شوند */
+  var WH_MODES = [
+    {
+      value: 'GRADE',
+      label: function () {
+        return ['فقط رتبهٔ حروفی (مثل ', ltr('A1'), '، ', ltr('B2'), '، ', ltr('C'), ')'];
+      },
+    },
+    {
+      value: 'NUMERIC',
+      label: function () {
+        return ['فقط مقدار عددی اثر (مثل ', ltr('+0.02'), ' یا ', ltr('−0.13'), ')'];
+      },
+    },
+    {
+      value: 'BOTH',
+      label: function () { return ['رتبه و مقدار عددی با هم (پیش‌فرض)']; },
+    },
+  ];
+
   /* وضعیت فیلترها بین رندرها حفظ می‌شود (به ازای هر پروژه) */
   var uiState = {};
+  /* کارت «مرکز گزارش‌ها» پیش‌فرض باز است — §۱۶ (مانند نسخهٔ وب) */
+  var centerCardOpen = true;
 
   /* ═══════════ SpreadsheetML 2003 — سازندهٔ سند .xls ═══════════
      آفلاین‌پسند؛ اکسل به‌صورت بومی باز می‌کند؛ برگه‌های RTL؛
@@ -66,6 +111,53 @@
 
   function isNull(v) { return v === null || v === undefined || (typeof v === 'number' && !isFinite(v)); }
 
+  /* عدد/کد LTR داخل متن فارسی — جهت رندر تضمینی */
+  function ltr(text) { return U.h('span', { dir: 'ltr' }, text); }
+
+  /* ═══════════ عوامل وستینگهاوس در سه حالت نمایش — §۱۶.۱ ═══════════
+     ترتیب و نام چهار عامل (مهارت/تلاش/شرایط/ثبات) همیشه ثابت است و
+     ستون پنجمی وجود ندارد؛ حالت فقط «نحوهٔ نمایش» را عوض می‌کند و روی
+     محاسبات/R اثری ندارد. پیش‌نمایش و چاپ از همین DOM می‌آیند. */
+
+  /** مقدار عددی عامل با علامت — +0.02 / −0.13 / 0.06
+   *  علامت فقط برای مقادیر ناصفر (منهای U+2212)؛ ارقام فارسی یا لاتین
+   *  مطابق تنظیم نمایش برنامه، اما جهت رندر همیشه LTR می‌ماند
+   *  (فراخواننده span dir="ltr" می‌گذارد). */
+  function formatSignedFactor(value) {
+    var v = typeof value === 'number' && isFinite(value) ? value : 0;
+    var mag = Math.round((Math.abs(v) + Number.EPSILON) * 100) / 100;
+    var sign = mag === 0 ? '' : v > 0 ? '+' : v < 0 ? '−' : '';
+    return sign + U.formatTimeValue(mag, 2);
+  }
+
+  /** سلول ستون «وستینگهاوس (S/E/C/Cons)» بر اساس حالت نمایش:
+   *  GRADE فقط رتبهٔ حروفی فشرده («A1/B2/C/D»)، NUMERIC فقط مقدار
+   *  عددی علامت‌دار LTR («+0.02 · −0.13 · …»)، BOTH رتبه + مقدار در
+   *  پرانتز («A1 (+0.02) · …»). عنصر بدون ارزیابی «ارزیابی نشده» است؛
+   *  زیرخط «جدول: …» می‌ماند و ستون R جدا و دست‌نخورده است. */
+  function westinghouseCell(rating, mode) {
+    if (!rating || !rating.assessment) {
+      return U.h('span', { class: 'pr-wh-unrated', text: 'ارزیابی نشده' });
+    }
+    var a = rating.assessment;
+    var grades = [a.skillGrade, a.effortGrade, a.conditionsGrade, a.consistencyGrade];
+    var values = [a.skillValue, a.effortValue, a.conditionsValue, a.consistencyValue];
+    var wrap = U.h('div', { class: 'pr-wh' });
+    if (mode === 'GRADE') {
+      wrap.appendChild(document.createTextNode(grades.map(function (x) { return x || '—'; }).join('/')));
+    } else {
+      for (var i = 0; i < 4; i++) {
+        if (i > 0) wrap.appendChild(document.createTextNode(' · '));
+        var txt = mode === 'NUMERIC'
+          ? formatSignedFactor(values[i])
+          : (grades[i] || '—') + ' (' + formatSignedFactor(values[i]) + ')';
+        wrap.appendChild(U.h('span', { class: 'pr-wh-val', dir: 'ltr', text: txt }));
+      }
+    }
+    wrap.appendChild(U.h('div', { class: 'pr-wh-table', text: 'جدول: ' + (rating.table ? rating.table.name : '—') }));
+    return wrap;
+  }
+
   /* ═══════════════════════════════════════════════════════════
      مرحلهٔ «گزارش‌ها»
      ═══════════════════════════════════════════════════════════ */
@@ -79,6 +171,12 @@
 
     var flt = uiState[projectId];
     if (!flt) flt = uiState[projectId] = { type: 'overview', activity: '', operator: '' };
+
+    /* تنظیمات مرکز گزارش‌ها — §۱۶ (پروژه‌محور؛ پیش‌فرض BOTH/A4/عمودی).
+       در آغاز هر رندر تازه خوانده می‌شود تا تغییرها از همین‌جا اعمال شوند. */
+    var settings = DB.getReportSettings(projectId);
+    /* تحلیل فعالیت‌های منتخب — یک‌بار در هر رندر محاسبه می‌شود */
+    var analyses = [];
 
     var root = U.h('div', null);
     container.appendChild(root);
@@ -104,9 +202,12 @@
 
     function render() {
       if (!root.isConnected) return;
+      settings = DB.getReportSettings(projectId);
+      analyses = chosenActivities().map(function (a) { return DB.getActivityAnalysis(a.id); });
       U.clear(root);
       buildHeader();
       buildTopBar();
+      root.appendChild(buildCenterCard());
       buildFilters();
       buildPreview();
     }
@@ -122,10 +223,143 @@
           U.h('p', { class: 'text-sm text-muted', text: 'خروجی Excel برای تحلیل و گزارش رسمی برای چاپ/PDF' }))));
     }
 
-    /* ── نوار چاپ ── */
+    /* ── نوار چاپ (فقط وقتی داده‌ای برای گزارش هست) ── */
     function buildTopBar() {
+      var hasData = analyses.some(function (an) { return an.sampleProgress.totalCycles > 0; });
+      if (!hasData) return;
       root.appendChild(U.h('div', { class: 'flex flex-wrap gap-2 mb-4 no-print' },
-        U.h('button', { class: 'btn btn-brand', onclick: function () { g.print(); } }, U.icon('printer'), 'چاپ / ذخیره PDF')));
+        U.h('button', { class: 'btn btn-brand', onclick: handlePrint }, U.icon('printer'), 'چاپ / ذخیره PDF')));
+    }
+
+    /* ── چاپ با تزریق پویای @page — §۱۶.۲ ──
+       اندازهٔ کاغذ/جهت در CSS پارامتری‌شدنی نیست (نه در کلاس، نه با
+       CSS var)؛ بنابراین درست پیش از window.print یک <style> موقت
+       (A4: ۲۱۰×۲۹۷mm، A3: ۲۹۷×۴۲۰mm — افقی جابه‌جا) به head اضافه و
+       پس از چاپ حذف می‌شود. پیش‌فرض (A4 عمودی) در app.css می‌ماند؛
+       پشتیبان مرورگرهای بدون afterprint: حذف پس از ۶۰ ثانیه. */
+    function handlePrint() {
+      var styleId = 'print-page-style';
+      var old = document.getElementById(styleId);
+      if (old && old.parentNode) old.parentNode.removeChild(old);
+      var dims = settings.paperSize === 'A3' ? ['297mm', '420mm'] : ['210mm', '297mm'];
+      var sizeCss = settings.orientation === 'landscape' ? dims[1] + ' ' + dims[0] : dims[0] + ' ' + dims[1];
+      var el = document.createElement('style');
+      el.id = styleId;
+      el.textContent = '@page { size: ' + sizeCss + '; margin: 14mm 12mm; }';
+      document.head.appendChild(el);
+      var done = false;
+      var cleanup = function () {
+        if (done) return;
+        done = true;
+        if (el.parentNode) el.parentNode.removeChild(el);
+        g.removeEventListener('afterprint', cleanup);
+      };
+      g.addEventListener('afterprint', cleanup);
+      g.print();
+      g.setTimeout(cleanup, 60000);
+    }
+
+    /* ── کارت «مرکز گزارش‌ها و خروجی‌ها» — §۱۶ ──
+       نکته: چیدمان با کلاس‌های kit (collapsible-*) ساخته می‌شود اما
+       چرخش شِورون با مرجع مستقیم مدیریت می‌شود — همان دورزنی کارت
+       تنظیمات تشخیص غیرعادی در views-analysis برای باگ ui.js
+       (کوئری «svg:last-child» در collapsibleCard). */
+    function buildCenterCard() {
+      var open = centerCardOpen;
+      var bodyWrap = U.h('div', { class: 'collapsible-body' });
+      var chevron = U.icon('chevronDown');
+
+      function toggle() {
+        open = !open;
+        centerCardOpen = open;
+        paint();
+      }
+
+      var head = U.h('div', { class: 'collapsible-head', onclick: toggle },
+        U.h('span', { class: 'chip-icon' }, U.icon('settings2')),
+        U.h('div', { class: 'flex-1 min-w-0' },
+          U.h('div', { class: 'font-bold text-sm', text: 'مرکز گزارش‌ها و خروجی‌ها' })),
+        UI.helpDot('مرکز گزارش‌ها', HELP_REPORT_CENTER),
+        U.h('span', { class: 'text-faint', 'aria-hidden': 'true' }, chevron));
+
+      var card = U.h('section', { class: 'card collapsible-card mb-4 no-print', 'aria-label': 'مرکز گزارش‌ها و خروجی‌ها' },
+        head, bodyWrap);
+
+      function paint() {
+        bodyWrap.style.display = open ? '' : 'none';
+        chevron.style.transform = open ? 'rotate(180deg)' : '';
+        U.clear(bodyWrap);
+        if (open) buildCenterBody(bodyWrap);
+      }
+      paint();
+      return card;
+    }
+
+    /* بدنهٔ کارت مرکز گزارش‌ها — حالت نمایش وستینگهاوس (§۱۶.۱) +
+       اندازه/جهت کاغذ چاپ (§۱۶.۲) + یادآوری شماره‌گذاری صفحات */
+    function buildCenterBody(body) {
+      var mode = settings.westinghouseMode;
+
+      /* گروه رادیو «حالت نمایش چهار عامل وستینگهاوس» — الگوی radio-card.
+         برچسب با markup دستی ساخته می‌شود (نه UI.field) تا label دور
+         چند کنترل، کلیک متن را به رادیوی اول نچسباند. */
+      var group = U.h('div', {
+        class: 'grid grid-cols-1 md:grid-cols-3 gap-2',
+        role: 'radiogroup', 'aria-label': 'حالت نمایش چهار عامل وستینگهاوس',
+      });
+      WH_MODES.forEach(function (o) {
+        var rb = U.h('input', {
+          type: 'radio', name: 't2r-wh-mode', checked: mode === o.value,
+          style: { accentColor: 'var(--brand)', marginTop: '3px' },
+        });
+        var rc = U.h('label', { class: 'radio-card' + (mode === o.value ? ' selected' : '') },
+          rb, U.h('span', { class: 'text-sm leading-relaxed' }, o.label()));
+        rb.addEventListener('change', function () {
+          try {
+            DB.putReportSettings(projectId, { westinghouseMode: o.value });
+            UI.toast('تنظیم نمایش وستینگهاوس ذخیره شد.');
+            render();
+          } catch (err) {
+            UI.toastError(err);
+          }
+        });
+        group.appendChild(rc);
+      });
+      body.appendChild(U.h('div', null,
+        U.h('div', { class: 'field-label' },
+          'حالت نمایش چهار عامل وستینگهاوس',
+          UI.helpDot('حالت نمایش وستینگهاوس', HELP_WESTINGHOUSE_MODE)),
+        group,
+        U.h('p', {
+          class: 'hint',
+          text: 'این تنظیم فقط نحوهٔ نمایش عوامل را عوض می‌کند؛ محاسبات و R تغییر نمی‌کنند.',
+        })));
+
+      /* اندازه و جهت کاغذ چاپ — §۱۶.۲ */
+      var paperSel = UI.selectEl(
+        [{ value: 'A4', label: 'A4 (پیش‌فرض)' }, { value: 'A3', label: 'A3' }],
+        settings.paperSize,
+        function (v) {
+          try { DB.putReportSettings(projectId, { paperSize: v }); } catch (err) { UI.toastError(err); }
+          render();
+        },
+        'اندازهٔ کاغذ چاپ');
+      var orientSel = UI.selectEl(
+        [{ value: 'portrait', label: 'عمودی (پیش‌فرض)' }, { value: 'landscape', label: 'افقی' }],
+        settings.orientation,
+        function (v) {
+          try { DB.putReportSettings(projectId, { orientation: v }); } catch (err) { UI.toastError(err); }
+          render();
+        },
+        'جهت کاغذ');
+      body.appendChild(U.h('div', { class: 'grid grid-cols-1 md:grid-cols-2 gap-3 mt-4' },
+        UI.field('اندازهٔ کاغذ چاپ', paperSel),
+        UI.field('جهت کاغذ', orientSel)));
+
+      body.appendChild(U.h('p', { class: 'hint' },
+        'شماره‌گذاری صفحات بر عهدهٔ تنظیمات چاپ مرورگر است (در پنجرهٔ چاپ، ',
+        ltr('Headers and footers'),
+        ' را فعال کنید).'));
     }
 
     /* ── کارت فیلترها و خروجی Excel ── */
@@ -279,12 +513,19 @@
        گزارش رسمی A4 — پیش‌نمایش چاپ (div.print-report)
        ═══════════════════════════════════════════════════════════ */
 
-    /* جدول سادهٔ داخل گزارش چاپی */
+    /* جدول سادهٔ داخل گزارش چاپی — سلول می‌تواند رشته/گره یا شیء
+       { cls: 'pr-note', text } / { node } باشد؛ pr-note سلول‌های
+       متن‌بلند را در چاپ راست‌چین RTL نگه می‌دارد (§۱۶.۲) */
     function prTable(headers, rows) {
       var thead = U.h('thead', null, U.h('tr', null, headers.map(function (hd) { return U.h('th', { text: hd }); })));
       var tbody = U.h('tbody');
       rows.forEach(function (r) {
-        tbody.appendChild(U.h('tr', null, r.map(function (c) { return U.h('td', null, c); })));
+        tbody.appendChild(U.h('tr', null, r.map(function (c) {
+          if (c && (c.cls || c.node !== undefined)) {
+            return U.h('td', { class: c.cls || null }, c.node !== undefined ? c.node : c.text);
+          }
+          return U.h('td', null, c);
+        })));
       });
       return U.h('table', null, thead, tbody);
     }
@@ -294,8 +535,8 @@
       var tbody = U.h('tbody');
       pairs.forEach(function (p) {
         tbody.appendChild(U.h('tr', null,
-          U.h('th', { style: { width: '34%' }, text: p[0] }),
-          U.h('td', null, p[1])));
+          U.h('th', { class: 'pr-note', style: { width: '34%' }, text: p[0] }),
+          U.h('td', { class: 'pr-note' }, p[1])));
       });
       return U.h('table', null, tbody);
     }
@@ -306,10 +547,13 @@
 
     function buildPreview() {
       root.appendChild(U.h('div', { class: 'flex flex-wrap items-center justify-between gap-2 mb-2 no-print' },
-        U.h('span', { class: 'text-sm font-bold', text: 'پیش‌نمایش گزارش رسمی (کاغذ A4)' }),
+        U.h('span', {
+          class: 'text-sm font-bold',
+          text: 'پیش‌نمایش گزارش رسمی (چاپ روی ' + settings.paperSize + ' ' +
+            (settings.orientation === 'landscape' ? 'افقی' : 'عمودی') + ')',
+        }),
         UI.badge('همگام با فیلترها', 'green')));
 
-      var analyses = chosenActivities().map(function (a) { return DB.getActivityAnalysis(a.id); });
       var hasData = analyses.some(function (an) { return an.sampleProgress.totalCycles > 0; });
       if (!hasData) {
         root.appendChild(UI.emptyState({ title: 'هنوز داده‌ای برای گزارش‌گیری ثبت نشده است', icon: 'fileText' }));
@@ -333,6 +577,13 @@
       rep.appendChild(buildParamsSection(analyses[0].settings));
       analyses.forEach(function (an, idx) { rep.appendChild(buildActivitySection(an, idx + 2)); });
       rep.appendChild(buildReportFooter());
+      /* پاورقی تکرارشوندهٔ چاپ — §۱۶.۲: در Chrome عناصر position:fixed
+         روی همهٔ صفحات چاپ تکرار می‌شوند؛ شماره‌گذاری صفحات عمداً جعل
+         نمی‌شود و بر عهدهٔ تنظیمات «Headers and footers» مرورگر است. */
+      rep.appendChild(U.h('div', {
+        class: 'print-running-footer',
+        text: project.name + ' — گزارش مطالعهٔ زمان — صفحه‌بندی خودکار',
+      }));
       root.appendChild(rep);
     }
 
@@ -421,7 +672,7 @@
           ['عنوان الونس', 'نوع / مبنا', 'مقدار مؤثر', 'مبدأ', 'وضعیت'],
           alwRows.map(function (r) {
             return [
-              r.title + (r.code ? ' (' + r.code + ')' : ''),
+              { cls: 'pr-note', text: r.title + (r.code ? ' (' + r.code + ')' : '') },
               r.valueType === 'PERCENT' ? 'درصدی' : (r.applicationBasis === 'PER_CYCLE' ? 'زمان ثابت — هر چرخه' : 'زمان ثابت — هر اجرا'),
               r.valueType === 'PERCENT' ? U.formatPercent(r.percentValue) : U.formatTimeValue(r.timeValueSeconds, 1) + 's',
               r.sourceScopeLabel || '—',
@@ -436,12 +687,7 @@
         ['عنصر', 'نوع', 'n', 'میانگین', 'SD', 'CV٪', 'OT', 'وستینگهاوس (S/E/C/Cons)', 'R', 'NT', 'ST'],
         an.elements.map(function (el) {
           var rating = DB.getElementRating(el.id);
-          var grades = '—/—/—/—', rVal = null;
-          if (rating && rating.assessment) {
-            grades = [rating.assessment.skillGrade, rating.assessment.effortGrade, rating.assessment.conditionsGrade, rating.assessment.consistencyGrade]
-              .map(function (x) { return x || '—'; }).join('/');
-            rVal = rating.assessment.totalFactor;
-          }
+          var rVal = rating && rating.assessment ? rating.assessment.totalFactor : null;
           var n, mean, sd, cv, ot, nt, stv;
           if (flt.operator) {
             var opRow = el.operators.filter(function (o) { return o.operatorId === flt.operator; })[0];
@@ -454,15 +700,15 @@
             ot = el.ot; nt = el.nt; stv = el.st;
           }
           return [
-            el.name,
+            { cls: 'pr-note', text: el.name },
             DB.CONST.ELEMENT_TYPE_LABELS[el.elementType] || el.elementType,
             U.formatInt(n),
             isNull(mean) ? '—' : U.formatTimeValue(mean),
             isNull(sd) ? '—' : U.formatTimeValue(sd),
             isNull(cv) ? '—' : U.formatTimeValue(cv, 1) + '٪',
             isNull(ot) ? '—' : U.formatTimeValue(ot),
-            grades,
-            isNull(rVal) ? '—' : U.formatTimeValue(rVal, 2),
+            { node: westinghouseCell(rating, settings.westinghouseMode) },
+            isNull(rVal) ? '—' : U.formatTimeValue(rVal, 3),
             isNull(nt) ? '—' : U.formatTimeValue(nt),
             isNull(stv) ? NOT_COMPUTABLE : U.formatTimeValue(stv),
           ];
@@ -489,9 +735,9 @@
             var scoreTxt = isNull(s.score)
               ? '—'
               : U.formatTimeValue(s.score, 2) + ' / ' + (OUTLIER_RULE_LABELS[s.rule] || s.rule || '—');
-            return [s.elementName, U.formatInt(s.cycleNo), s.operatorName, U.formatTimeValue(s.value),
+            return [{ cls: 'pr-note', text: s.elementName }, U.formatInt(s.cycleNo), s.operatorName, U.formatTimeValue(s.value),
               s.validityStatus === 'SUSPECT' ? 'مشکوک' : 'خارج‌شده',
-              scoreTxt, s.exclusionReason || '—'];
+              scoreTxt, { cls: 'pr-note', text: s.exclusionReason || '—' }];
           }))));
       }
       return sec;

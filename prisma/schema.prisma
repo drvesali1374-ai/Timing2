@@ -273,6 +273,7 @@ model CycleObservation {
   session      StudySession        @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   lanes        TimelineLane[]
   observations ElementObservation[]
+  overlaps     ObservationOverlap[]
 
   @@unique([sessionId, cycleNo])
   @@map("cycle_observations")
@@ -308,6 +309,8 @@ model ElementObservation {
   exclusionReason   String?  @map("exclusion_reason")
   outlierScore      Float?   @map("outlier_score")
   outlierRule       String?  @map("outlier_rule")
+  // جلسه ۲ — snapshot تشخیصی در لحظه پرچم‌گذاری SUSPECT (مقدار/روش/آستانه/آمار)
+  outlierSnapshot   String?  @map("outlier_snapshot") // JSON: {value, method, threshold, statistics, flaggedAt}
   updatedAt         DateTime @updatedAt @map("updated_at")
   cycle        CycleObservation @relation(fields: [cycleId], references: [id], onDelete: Cascade)
   workElement WorkElement      @relation(fields: [workElementId], references: [id], onDelete: Cascade)
@@ -316,6 +319,53 @@ model ElementObservation {
   @@index([cycleId])
   @@index([workElementId])
   @@map("element_observations")
+}
+
+// ═══════════════ روابط موازی عناصر کاری — جلسه دوم ═══════════════
+// یک رابطه دوتایی در سطح پروژه — شناسه‌ها همیشه مرتب ذخیره می‌شوند
+// (elementLowId = min، elementHighId = max)؛ قید یکتا یعنی هر زوج در طول
+// عمر پروژه فقط یک رکورد دارد (آرشیو/بازگردانی، بدون رکورد تکراری).
+// FK عمدی ندارد (الگوی ChartEdge): حذف عنصر رابطه را cascade نمی‌کند؛
+// سرویس مرکزی رابطه‌های مرجع به عنصر حذف‌شده را archive می‌کند تا
+// تاریخچهٔ مقادیر چرخه‌ها حفظ شود.
+model OverlapRelation {
+  id           String   @id @default(uuid())
+  projectId    String   @map("project_id")
+  elementLowId String   @map("element_low_id")
+  elementHighId String  @map("element_high_id")
+  isActive     Boolean  @default(true) @map("is_active") // آرشیو نرم
+  version      Int      @default(1) // optimistic concurrency
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  values ObservationOverlap[]
+
+  @@unique([projectId, elementLowId, elementHighId])
+  @@index([projectId])
+  @@index([elementLowId])
+  @@index([elementHighId])
+  @@map("overlap_relations")
+}
+
+// مقدار هم‌پوشانی یک رابطه در یک چرخه — سه وضعیت:
+//   UNREVIEWED: overlapDuration = null (بررسی‌نشده؛ صفر قطعی نیست)
+//   NO_OVERLAP: کاربر تأیید کرده هم‌پوشانی نیست → overlapDuration = 0
+//   OVERLAP: مقدار مثبت الزامی
+// رکورد فقط با اولین ثبت ساخته می‌شود؛ عدم وجود رکورد = بررسی‌نشده.
+model ObservationOverlap {
+  id              String   @id @default(uuid())
+  relationId      String   @map("relation_id")
+  cycleId         String   @map("cycle_id")
+  status          String   @default("UNREVIEWED") @map("status") // UNREVIEWED|NO_OVERLAP|OVERLAP
+  overlapDuration Float?   @map("overlap_duration") // فقط OVERLAP مثبت؛ NO_OVERLAP صفر؛ UNREVIEWED تهی
+  version         Int      @default(1) // optimistic concurrency
+  updatedAt       DateTime @updatedAt @map("updated_at")
+  relation OverlapRelation  @relation(fields: [relationId], references: [id], onDelete: Cascade)
+  cycle    CycleObservation @relation(fields: [cycleId], references: [id], onDelete: Cascade)
+
+  @@unique([relationId, cycleId])
+  @@index([cycleId])
+  @@map("observation_overlaps")
 }
 
 // ═══════════════ وستینگهاوس ═══════════════
@@ -422,6 +472,9 @@ model ChartEdge {
   sourceNodeId String  @map("source_node_id")
   targetNodeId String  @map("target_node_id")
   sortOrder    Int     @default(0) @map("sort_order")
+  // جلسه ۲ §۱۵.۴ — anchor اتصال (N | S | E | W)؛ تهی = خودکار بر اساس موقعیت
+  sourceAnchor String? @map("source_anchor") // top | bottom | left | right
+  targetAnchor String? @map("target_anchor")
   // یال زنجیرهٔ توالی (سیستمی، با تغییر ترتیب بازسازی می‌شود) در برابر اتصال دستی کاربر
   isChain      Boolean @default(false) @map("is_chain")
 

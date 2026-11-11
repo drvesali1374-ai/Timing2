@@ -23,6 +23,13 @@ export const PROCESS_TYPE_SYMBOLS: Record<ProcessType, string> = {
   STORAGE: '▽',
 }
 
+// ── جلسه ۲ §۱۵.۱ — گره ورودی مواد/قطعات (node مستقل، نه event فرایندی) ──
+export const MATERIAL_INPUT_NODE_TYPE = 'MATERIAL_INPUT' as const
+export const MATERIAL_INPUT_LABEL = 'ورودی مواد/قطعات'
+export const MATERIAL_INPUT_SYMBOL = '⬡'
+/** نماد انبار برای OPC توسعه‌یافته — مثلث وارونه (همان ▽ انبارش) */
+export const STORAGE_SYMBOL = '▽'
+
 // ── نوع عنصر کاری — FR-02 ──
 export const ELEMENT_TYPES = ['MANUAL', 'MACHINE', 'WAITING', 'OVERLAP'] as const
 export type ElementType = (typeof ELEMENT_TYPES)[number]
@@ -174,6 +181,7 @@ export const STUDY_STAGES = [
   { key: 'allowances', label: 'مجازها و الونس‌ها', desc: 'تعریف مرکزی الونس، تخصیص سلسله‌مراتبی و گروه‌های فعالیت' },
   { key: 'westinghouse', label: 'ارزیابی وستینگهاوس', desc: 'جدول مرجع و ارزیابی عناصر کاری' },
   { key: 'timing', label: 'زمان‌سنجی', desc: 'جلسه، جدول چرخه‌محور، Paste از Excel' },
+  { key: 'matrix', label: 'ماتریس هم‌پوشانی', desc: 'روابط موازی عناصر کاری و مقادیر هر چرخه' },
   { key: 'analysis', label: 'تحلیل نتایج', desc: 'آمار، داده غیرعادی و مقایسه اپراتورها' },
   { key: 'charts', label: 'نمودار فرایند', desc: 'OPC و FPC با گره‌های فعالیت' },
   { key: 'dashboard', label: 'داشبورد', desc: 'کارت‌های خلاصه و شاخص‌های تخصصی' },
@@ -200,7 +208,16 @@ export const PROJECT_SETTING_KEYS = {
   allowanceMethod: 'calc.allowanceMethod',
   aggregationMethod: 'calc.aggregationMethod',
   dashboardLayout: 'dash.layout',
+  /** جلسه ۲ — حالت نمایش وستینگهاوس در گزارش‌ها: GRADE | NUMERIC | BOTH */
+  westinghouseMode: 'report.westinghouseMode',
+  /** جلسه ۲ — ابعاد بوم نمودار (مستقل از zoom و PDF) — مقدار: JSON {width,height} */
+  chartCanvas: (chartType: 'OPC' | 'FPC') => `chart.canvas.${chartType}`,
+  /** جلسه ۲ — snapshot آخرین چیدمان دستی نمودار — مقدار: JSON {nodes, canvas, savedAt} */
+  chartLayoutSnapshot: (chartType: 'OPC' | 'FPC') => `chart.layoutSnapshot.${chartType}`,
 } as const
+
+/** حالت‌های نمایش چهار عامل Westinghouse — جلسه ۲ §۱۶.۱ */
+export type WestinghouseDisplayMode = 'GRADE' | 'NUMERIC' | 'BOTH'
 
 export const DEFAULT_PROJECT_SETTINGS: Record<string, string> = {
   'calc.allowanceMethod': 'PERCENT_OF_NT',

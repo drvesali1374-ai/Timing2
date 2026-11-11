@@ -339,6 +339,9 @@ export async function getElementDependencyCounts(elementId: string) {
 
 export async function deleteElement(elementId: string) {
   const { element, counts } = await getElementDependencyCounts(elementId)
+  // جلسه ۲ — روابط موازی مرجع به این عنصر آرشیو می‌شوند (تاریخچهٔ مقادیر حفظ می‌شود)
+  const { archiveRelationsForElement } = await import('./overlap-service')
+  const archivedRelations = await archiveRelationsForElement(elementId)
   await db.$transaction(async (tx) => {
     await markDeleted(tx, 'WorkElement', [elementId])
     // ارزیابی و مشاهدات با Cascade حذف می‌شوند
@@ -349,8 +352,9 @@ export async function deleteElement(elementId: string) {
   await recordAudit({
     entityType: 'WorkElement', entityId: elementId, action: 'DELETE', entityName: element.name,
     projectId: element.activity.station.projectId,
+    after: archivedRelations > 0 ? { archivedParallelRelations: archivedRelations } : undefined,
   })
-  return counts
+  return { ...counts, archivedParallelRelations: archivedRelations }
 }
 
 export async function reorderElements(activityId: string, ids: string[]) {
