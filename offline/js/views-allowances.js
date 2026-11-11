@@ -436,10 +436,20 @@
 
     function fmtSeconds(v) { return v === null || v === undefined ? '—' : U.formatTimeValue(v) + ' ثانیه'; }
 
+    /** برچسب مبنای زمان ثابت — null هرگز به «هر اجرا» تبدیل نمی‌شود (بازبینی تکمیلی ج۱) */
+    function basisLabel(basis) {
+      if (basis === 'PER_CYCLE') return 'هر چرخه';
+      if (basis === 'PER_ELEMENT_EXECUTION') return 'هر اجرا';
+      return 'مبنا نامشخص';
+    }
+
     /** برچسب منوی Restore — با وضعیت واقعی تخصیص هماهنگ (الزام ۴) */
     function restoreMenuLabel(row) {
       if (row.status === 'CUSTOM') return 'حذف تخصیص محلی';
       if (row.status === 'EXCLUDED') return row.parentMode === 'ACTIVE' ? 'بازگردانی الونس والد' : 'حذف استثنای محلی';
+      // والد مستقیم EXCLUDE است → Restore فقط تخصیص محلی را حذف می‌کند و وضعیت
+      // «حذف از ارث‌بری» والد دوباره برقرار می‌شود — «مقدار» والدی برای بازگشت نیست.
+      if (row.parentMode === 'EXCLUDE') return 'بازگردانی به وضعیت والد (حذف تخصیص محلی)';
       return 'بازگردانی به مقدار والد';
     }
     function restoreToast(row) {
@@ -448,6 +458,9 @@
         return row.parentMode === 'ACTIVE'
           ? 'استثنای محلی «' + row.title + '» حذف شد و الونس والد بازگشت'
           : 'استثنای محلی «' + row.title + '» حذف شد';
+      }
+      if (row.parentMode === 'EXCLUDE') {
+        return 'تخصیص محلی «' + row.title + '» حذف شد و وضعیت حذف از ارث‌بری والد دوباره برقرار شد';
       }
       return 'تخصیص محلی «' + row.title + '» حذف شد و مقدار والد بازگشت';
     }
@@ -507,7 +520,7 @@
             U.h('span', { class: 'text-xs' },
               row.valueType === 'PERCENT' ? 'درصدی'
               : row.valueType === 'FIXED_TIME' ? U.h('span', null, 'زمان ثابت',
-                U.h('span', { class: 'block text-[10px] text-muted', text: row.applicationBasis === 'PER_CYCLE' ? 'هر چرخه' : 'هر اجرا' }))
+                U.h('span', { class: 'block text-[10px] text-muted', text: basisLabel(row.displayApplicationBasis) }))
               : U.h('span', { class: 'text-faint', text: '—' })),
             U.h('span', { class: 'num font-bold' },
               excluded || (row.valueType !== 'PERCENT' && row.valueType !== 'FIXED_TIME') ? '—' :

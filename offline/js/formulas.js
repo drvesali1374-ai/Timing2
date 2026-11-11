@@ -412,6 +412,12 @@
       var excluded = decision.mode === 'EXCLUDE';
       // نوع نمایشی ردیف — برای EXCLUDED از منابع معنادار مشتق می‌شود (الزام ۴)
       var rowValueType = excluded ? deriveExcludedDisplayType(nearestActiveAbove, def) : decision.valueType;
+      // مبنای نمایشی — بازبینی تکمیلی ج۱ (هم‌ارز نسخه وب): برای EXCLUDED از تخصیص فعال
+      // بالادست منتقل می‌شود؛ پیش‌فرض مرکزی مبنای واقعی ندارد → null.
+      var displayApplicationBasis = excluded
+        ? (nearestActiveAbove && nearestActiveAbove.mode === 'ACTIVE' && nearestActiveAbove.valueType === 'FIXED_TIME'
+            ? nearestActiveAbove.applicationBasis : null)
+        : (decision.valueType === 'FIXED_TIME' ? decision.applicationBasis : null);
       var needsAggregationRule =
         !excluded &&
         decision.valueType === 'FIXED_TIME' &&
@@ -444,6 +450,7 @@
         percentValue: !excluded && decision.valueType === 'PERCENT' ? decision.percentValue : null,
         timeValueSeconds: !excluded && decision.valueType === 'FIXED_TIME' ? decision.timeValueSeconds : null,
         applicationBasis: decision.valueType === 'FIXED_TIME' ? decision.applicationBasis : null,
+        displayApplicationBasis: displayApplicationBasis,
         sourceScopeType: decision.scopeType,
         sourceScopeLabel: sourceLink ? sourceLink.label : null,
         hasLocalDecision: isLocal,

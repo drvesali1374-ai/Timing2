@@ -261,9 +261,11 @@ function ReportPaper({ report }: { report: StudyReportInfoDto }) {
                         {row.valueType === 'PERCENT'
                           ? 'درصدی'
                           : row.valueType === 'FIXED_TIME'
-                            ? row.applicationBasis === 'PER_CYCLE'
+                            ? row.displayApplicationBasis === 'PER_CYCLE'
                               ? 'زمان ثابت — هر چرخه'
-                              : 'زمان ثابت — هر اجرا'
+                              : row.displayApplicationBasis === 'PER_ELEMENT_EXECUTION'
+                                ? 'زمان ثابت — هر اجرا'
+                                : 'زمان ثابت — مبنا نامشخص'
                             : '—'}
                       </td>
                       <td className="py-1 text-center font-bold tabular-nums">

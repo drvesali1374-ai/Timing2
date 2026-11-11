@@ -87,6 +87,16 @@ export interface ResolvedAllowanceRow {
   timeValueSeconds: number | null
   /** مبنای وقوع زمان ثابت */
   applicationBasis: AllowanceBasis | null
+  /**
+   * مبنای «نمایشی» زمان ثابت — مستقل از applicationBasis تخصیص (بازبینی تکمیلی ج۱):
+   *  • ردیف فعال: مبنای واقعی تخصیص (همان applicationBasis)؛
+   *  • ردیف EXCLUDED با نوع نمایشی FIXED_TIME از تخصیص فعال بالادست:
+   *    مبنای همان تخصیص بالادست منتقل می‌شود؛
+   *  • نوع نمایشی از پیش‌فرض تعریف مرکزی یا درصدی: null.
+   * EXCLUDE هرگز به‌صورت مصنوعی PER_ELEMENT_EXECUTION/PER_CYCLE نمی‌گیرد و
+   * UI مقدار null را به «هر اجرا» تبدیل نمی‌کند.
+   */
+  displayApplicationBasis: AllowanceBasis | null
   /** مبدأ مقدار مؤثر */
   sourceScopeType: AllowanceScopeType | null
   sourceScopeLabel: string | null
@@ -312,6 +322,16 @@ export function resolveEffectiveAllowances(params: {
     const rowValueType: AllowanceValueType | null = excluded
       ? deriveExcludedDisplayType(nearestActiveAbove, def)
       : decision.valueType
+    // مبنای نمایشی — بازبینی تکمیلی ج۱: برای EXCLUDED از تخصیص فعال بالادست
+    // (فقط وقتی نوع نمایشی از همان تخصیص مشتق شده) منتقل می‌شود؛ پیش‌فرض مرکزی
+    // هیچ مبنای واقعی ندارد → null. ردیف فعال = مبنای خود تخصیص.
+    const displayApplicationBasis: AllowanceBasis | null = excluded
+      ? nearestActiveAbove && nearestActiveAbove.mode === 'ACTIVE' && nearestActiveAbove.valueType === 'FIXED_TIME'
+        ? nearestActiveAbove.applicationBasis
+        : null
+      : decision.valueType === 'FIXED_TIME'
+        ? decision.applicationBasis
+        : null
     // زمان ثابت per-execution در سطح بالاتر از عنصر → نیازمند قاعده تجمیع (§۲.۳)
     const needsAggregationRule =
       !excluded &&
@@ -342,6 +362,7 @@ export function resolveEffectiveAllowances(params: {
       percentValue: !excluded && decision.valueType === 'PERCENT' ? decision.percentValue : null,
       timeValueSeconds: !excluded && decision.valueType === 'FIXED_TIME' ? decision.timeValueSeconds : null,
       applicationBasis: decision.valueType === 'FIXED_TIME' ? decision.applicationBasis : null,
+      displayApplicationBasis,
       sourceScopeType: decision.scopeType,
       sourceScopeLabel: sourceLink?.label ?? null,
       hasLocalDecision: isLocal,

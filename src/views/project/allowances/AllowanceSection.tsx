@@ -116,10 +116,20 @@ function formatSeconds(v: number | null, prefs: Prefs): string {
   return `${formatTimeValue(v, prefs)} ثانیه`
 }
 
+/** برچسب مبنای زمان ثابت — null هرگز به «هر اجرا» تبدیل نمی‌شود (بازبینی تکمیلی ج۱) */
+function basisLabel(basis: 'PER_ELEMENT_EXECUTION' | 'PER_CYCLE' | null | undefined): string {
+  if (basis === 'PER_CYCLE') return 'هر چرخه'
+  if (basis === 'PER_ELEMENT_EXECUTION') return 'هر اجرا'
+  return 'مبنا نامشخص'
+}
+
 /** برچسب منوی عملیات Restore — با وضعیت واقعی تخصیص هماهنگ (الزام ۴) */
 function restoreMenuLabel(row: ResolvedAllowanceRowDto): string {
   if (row.status === 'CUSTOM') return 'حذف تخصیص محلی'
   if (row.status === 'EXCLUDED') return row.parentMode === 'ACTIVE' ? 'بازگردانی الونس والد' : 'حذف استثنای محلی'
+  // والد مستقیم EXCLUDE است → Restore فقط تخصیص محلی را حذف می‌کند و وضعیت
+  // «حذف از ارث‌بری» والد دوباره برقرار می‌شود — «مقدار» والدی برای بازگشت نیست.
+  if (row.parentMode === 'EXCLUDE') return 'بازگردانی به وضعیت والد (حذف تخصیص محلی)'
   return 'بازگردانی به مقدار والد'
 }
 
@@ -130,6 +140,9 @@ function restoreToast(row: ResolvedAllowanceRowDto): string {
     return row.parentMode === 'ACTIVE'
       ? `استثنای محلی «${row.title}» حذف شد و الونس والد بازگشت`
       : `استثنای محلی «${row.title}» حذف شد`
+  }
+  if (row.parentMode === 'EXCLUDE') {
+    return `تخصیص محلی «${row.title}» حذف شد و وضعیت حذف از ارث‌بری والد دوباره برقرار شد`
   }
   return `تخصیص محلی «${row.title}» حذف شد و مقدار والد بازگشت`
 }
@@ -565,9 +578,7 @@ function AllowanceRowDesktop({
         ) : row.valueType === 'FIXED_TIME' ? (
           <span>
             زمان ثابت
-            <span className="block text-[10px] text-muted-foreground">
-              {row.applicationBasis === 'PER_CYCLE' ? 'هر چرخه' : 'هر اجرا'}
-            </span>
+            <span className="block text-[10px] text-muted-foreground">{basisLabel(row.displayApplicationBasis)}</span>
           </span>
         ) : (
           <span className="text-faint">—</span>
@@ -638,8 +649,8 @@ function AllowanceRowMobile({
             ) : (
               <span className="font-bold">{formatSeconds(row.timeValueSeconds, prefs)}</span>
             )}
-            {row.valueType === 'FIXED_TIME' && !excluded && (
-              <span className="text-muted-foreground"> · {row.applicationBasis === 'PER_CYCLE' ? 'هر چرخه' : 'هر اجرا'}</span>
+            {row.valueType === 'FIXED_TIME' && (
+              <span className="text-muted-foreground"> · {basisLabel(row.displayApplicationBasis)}</span>
             )}
           </p>
           <p className="mt-0.5 text-[11px] text-muted-foreground">
