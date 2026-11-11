@@ -1,7 +1,7 @@
 'use client'
 
 // جدول ماتریس دسکتاپ — هدر sticky + ستون اول sticky + چهار حالت سلول — §۱۱
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -30,7 +30,6 @@ export default function MatrixTable({
   onDraft: (relationId: string, draft: CellDraft | null) => void
 }) {
   const prefs = useDisplayPrefs()
-  const [openCell, setOpenCell] = useState<string | null>(null)
   if (!matrix) return null
   const { members, relations, cells } = matrix
   const activeRelations = relations.filter((r) => r.isActive)
@@ -110,8 +109,6 @@ export default function MatrixTable({
                       relationId={relationId}
                       cell={cells[relationId] ?? null}
                       draft={drafts[relationId] ?? null}
-                      open={openCell === relationId}
-                      onOpenChange={(o) => setOpenCell(o ? relationId : null)}
                       onDraft={onDraft}
                       prefs={prefs}
                       rowName={row.name}
@@ -132,8 +129,6 @@ function MatrixCell({
   relationId,
   cell,
   draft,
-  open,
-  onOpenChange,
   onDraft,
   prefs,
   rowName,
@@ -142,21 +137,20 @@ function MatrixCell({
   relationId: string
   cell: OverlapMatrixDto['cells'][string] | null
   draft: CellDraft | null
-  open: boolean
-  onOpenChange: (open: boolean) => void
   onDraft: (relationId: string, draft: CellDraft | null) => void
   prefs: ReturnType<typeof useDisplayPrefs>
   rowName: string
   colName: string
 }) {
+  const [open, setOpen] = useState(false)
   const effective: CellDraft = draft ?? {
     status: cell?.status ?? 'UNREVIEWED',
     overlapDuration: cell?.overlapDuration ?? null,
   }
   const isDraft = draft != null
   return (
-    <Popover open={open} onOpenChange={onOpenChange}>
-      <PopoverTrigger asChild>
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
         <button
           type="button"
           className={cn(
@@ -167,12 +161,15 @@ function MatrixCell({
         >
           <CellContent status={effective.status} duration={effective.overlapDuration} prefs={prefs} />
         </button>
-      </PopoverTrigger>
-      <PopoverContent className="w-72" dir="rtl" align="center">
-        <div className="space-y-3">
-          <p className="text-xs text-muted-foreground">
+      </DialogTrigger>
+      <DialogContent className="max-w-sm" dir="rtl">
+        <DialogHeader className="space-y-0 text-right">
+          <DialogTitle className="text-right text-sm">ویرایش هم‌پوشانی</DialogTitle>
+          <DialogDescription className="text-right text-xs">
             {rowName} ↔ {colName}
-          </p>
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3">
           <RadioGroup
             value={effective.status}
             onValueChange={(v) =>
@@ -228,14 +225,14 @@ function MatrixCell({
             <Button variant="ghost" size="sm" onClick={() => onDraft(relationId, null)} disabled={!isDraft}>
               بازگردانی سلول
             </Button>
-            <Button size="sm" onClick={() => onOpenChange(false)} disabled={!isDraft}>
+            <Button size="sm" onClick={() => setOpen(false)} disabled={!isDraft}>
               <Pencil className="size-3.5" aria-hidden />
               نگه‌داری تغییر
             </Button>
           </div>
         </div>
-      </PopoverContent>
-    </Popover>
+      </DialogContent>
+    </Dialog>
   )
 }
 

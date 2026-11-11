@@ -2,7 +2,7 @@
 
 // دکمهٔ سربرگ ستون برگهٔ زمان‌سنجی — باز کردن بخش روابط موازی عنصر با چرخه‌های همین جلسه — §۴.۱
 import { useState } from 'react'
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { Network } from 'lucide-react'
 import ParallelRelationsSection, { type CycleContextOption } from './ParallelRelationsSection'
 
@@ -21,8 +21,8 @@ export default function ElementParallelPopover({
 }) {
   const [open, setOpen] = useState(false)
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
         <button
           type="button"
           className="rounded-full bg-muted px-1.5 py-px text-[10px] font-bold text-muted-foreground transition-colors hover:bg-brand-soft hover:text-brand"
@@ -32,8 +32,14 @@ export default function ElementParallelPopover({
         >
           <Network className="inline size-3" aria-hidden />
         </button>
-      </PopoverTrigger>
-      <PopoverContent className="w-96" dir="rtl" align="start">
+      </DialogTrigger>
+      <DialogContent className="max-h-[85vh] max-w-lg overflow-y-auto sm:max-w-xl" dir="rtl">
+        <DialogHeader className="space-y-0 text-right">
+          <DialogTitle className="text-right text-sm">عناصر موازی و اطلاعات هم‌پوشانی</DialogTitle>
+          <DialogDescription className="text-right text-xs">
+            عنصر «{elementName}» — مقادیر چرخه‌های همین جلسه
+          </DialogDescription>
+        </DialogHeader>
         {open && (
           <ParallelRelationsSection
             projectId={projectId}
@@ -44,7 +50,7 @@ export default function ElementParallelPopover({
             compact
           />
         )}
-      </PopoverContent>
-    </Popover>
+      </DialogContent>
+    </Dialog>
   )
 }
