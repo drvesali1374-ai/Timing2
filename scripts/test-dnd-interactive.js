@@ -1,7 +1,6 @@
 /* ═══════════════════════════════════════════════════════════
    تست تعاملی قابل تکرار Drag & Drop — نسخه آفلاین (بازبینی تکمیلی ج۱ §۶)
-   اجرا:  node scripts/test-dnd-interactive.js
-   (یا:   bun scripts/test-dnd-interactive.js)
+   اجرا:  bun scripts/test-dnd-interactive.js
 
    پیش‌نیاز: Playwright نصب باشد — یکی از مسیرهای زیر جست‌وجو می‌شود:
      • نصب محلی پروژه (npm i -D playwright)
@@ -26,23 +25,29 @@
    ═══════════════════════════════════════════════════════════ */
 'use strict';
 
+const { fileURLToPath } = await import('node:url');
+const path = await import('node:path');
+const fs = await import('node:fs');
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
 /* بارگذاری Playwright — ابتدا محلی، سپس مسیرهای سراسری متداول */
-function loadPlaywright() {
+async function loadPlaywright() {
   const candidates = [
     'playwright',
-    '/home/z/.npm-global/lib/node_modules/playwright',
-    '/usr/lib/node_modules/playwright',
-    '/usr/local/lib/node_modules/playwright',
+    '/home/z/.npm-global/lib/node_modules/playwright/index.js',
+    '/usr/lib/node_modules/playwright/index.js',
+    '/usr/local/lib/node_modules/playwright/index.js',
   ];
   for (const c of candidates) {
-    try { return require(c); } catch (e) { /* مسیر بعدی */ }
+    try {
+      const mod = await import(c);
+      if (mod.chromium) return mod;
+      if (mod.default && mod.default.chromium) return mod.default;
+    } catch (e) { /* مسیر بعدی */ }
   }
   throw new Error('Playwright یافت نشد. نصب: npm i -g playwright && npx playwright install chromium');
 }
-
-const { chromium } = loadPlaywright();
-const path = require('node:path');
-const fs = require('node:fs');
+const { chromium } = await loadPlaywright();
 
 const OFFLINE_HTML = path.resolve(__dirname, '..', 'Timing2-Offline.html');
 const SHOT_DIR = path.resolve(__dirname, '..', 'offline', 'parity-shots', 'final-review');
