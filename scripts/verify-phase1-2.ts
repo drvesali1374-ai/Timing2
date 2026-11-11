@@ -255,40 +255,39 @@ async function main() {
     check('اپراتور در فهرست', list.data?.items?.length === 1)
   }
 
-  console.log('\nB4) مجازها: دسته → گروه → ارث‌بری → بازنویسی (FR-04/15)')
-  let GID2 = '', C1 = '', C2 = ''
+  console.log('\nB4) الونس‌ها: تعریف مرکزی → تخصیص خط → ارث‌بری → جایگزینی (جلسه اول)')
+  let DEF1 = '', DEF2 = ''
   {
-    const groups = await api('GET', `/api/projects/${PID}/groups`)
-    GID2 = groups.data?.items?.[0]?.id
-    const c1 = await api('POST', `/api/projects/${PID}/allowance-categories`, { name: 'استراحت شخصی', code: 'PF', isActive: true, sortOrder: 0 })
-    const c2 = await api('POST', `/api/projects/${PID}/allowance-categories`, { name: 'نیازهای طبیعی', code: 'NF', isActive: true, sortOrder: 1 })
-    C1 = c1.data?.category?.id
-    C2 = c2.data?.category?.id
-    check('ایجاد ۲ دسته مجاز', Boolean(C1 && C2))
+    // تعریف‌های مرکزی — درصد فارسی در ورودی API پذیرفته می‌شود (FR-07/29)
+    const d1 = await api('POST', `/api/projects/${PID}/allowance-definitions`, { title: 'استراحت شخصی', code: 'PF', defaultValueType: 'PERCENT', defaultValuePercent: 0.05 })
+    const d2 = await api('POST', `/api/projects/${PID}/allowance-definitions`, { title: 'نیازهای طبیعی', code: 'NF', defaultValueType: 'PERCENT', defaultValuePercent: 0.1 })
+    DEF1 = d1.data?.definition?.id
+    DEF2 = d2.data?.definition?.id
+    check('ایجاد ۲ تعریف مرکزی', Boolean(DEF1 && DEF2))
 
-    // درصد فارسی! — FR-07/29
-    const ga = await api('PUT', `/api/groups/${GID2}/allowances`, {
-      values: [
-        { categoryId: C1, percentValue: 0.05 },
-        { categoryId: C2, percentValue: 0.1 },
+    // تخصیص سطح خط تولید
+    const ga = await api('PUT', `/api/projects/${PID}/allowances`, {
+      ops: [
+        { definitionId: DEF1, action: 'SET', valueType: 'PERCENT', percentValue: 0.05 },
+        { definitionId: DEF2, action: 'SET', valueType: 'PERCENT', percentValue: 0.1 },
       ],
     })
-    check('ثبت مقادیر گروه (۵٪ + ۱۰٪)', approx(ga.data?.totalA ?? -1, 0.15), ga.data?.totalA, 0.15)
+    check('ثبت تخصیص سطح خط (۵٪ + ۱۰٪)', approx(ga.data?.resolved?.summary?.totalPercent ?? -1, 0.15), ga.data?.resolved?.summary?.totalPercent, 0.15)
 
     // ارث‌بری
     const eff = await api('GET', `/api/activities/${AID}/allowances`)
-    const cat1 = eff.data?.categories?.find((c: any) => c.categoryId === C1)
-    check('فعالیت مقدار گروه را به ارث می‌برد', cat1?.source === 'GROUP' && approx(cat1?.effectiveValue ?? -1, 0.05), cat1?.source, 'GROUP')
-    check('برچسب منبع فارسی «ارث‌رسیده از گروه»', typeof cat1?.sourceLabel === 'string' && cat1.sourceLabel.includes('ارث'), cat1?.sourceLabel)
-    check('فرمول روش نمایش داده می‌شود (FR-15)', typeof eff.data?.formula === 'string' && eff.data.formula.includes('ST'), eff.data?.formula)
+    const row1 = eff.data?.resolved?.rows?.find((r: any) => r.definitionId === DEF1)
+    check('فعالیت مقدار خط را به ارث می‌برد', row1?.status === 'INHERITED' && approx(row1?.percentValue ?? -1, 0.05), row1?.status, 'INHERITED')
+    check('برچسب وضعیت فارسی «ارث‌رسیده» با مبدأ خط', row1?.sourceScopeType === 'PROJECT' && typeof row1?.sourceScopeLabel === 'string', row1?.sourceScopeType)
+    check('فرمول روش نمایش داده می‌شود (FR-15)', typeof eff.data?.settings?.formula === 'string' && eff.data.settings.formula.includes('ST'), eff.data?.settings?.formula)
 
-    // بازنویسی
+    // جایگزینی (بازنویسی قدیمی)
     const ov = await api('PUT', `/api/activities/${AID}/allowances`, {
-      overrides: [{ categoryId: C1, percentValue: 0.08 }],
+      ops: [{ definitionId: DEF1, action: 'SET', valueType: 'PERCENT', percentValue: 0.08 }],
     })
-    const cat1b = ov.data?.categories?.find((c: any) => c.categoryId === C1)
-    check('بازنویسی فعالیت بر ارث‌بری اولویت دارد', cat1b?.source === 'OVERRIDE' && approx(cat1b?.effectiveValue ?? -1, 0.08))
-    check('جمع A پس از بازنویسی = 0.18', approx(ov.data?.totalA ?? -1, 0.18), ov.data?.totalA, 0.18)
+    const row1b = ov.data?.resolved?.rows?.find((r: any) => r.definitionId === DEF1)
+    check('جایگزینی فعالیت بر ارث‌بری اولویت دارد', row1b?.status === 'OVERRIDDEN' && approx(row1b?.percentValue ?? -1, 0.08), row1b?.status)
+    check('جمع A پس از جایگزینی = 0.18', approx(ov.data?.resolved?.summary?.totalPercent ?? -1, 0.18), ov.data?.resolved?.summary?.totalPercent, 0.18)
 
     // قید روش ۲ (A < 100٪)
     const m2 = await api('PUT', `/api/projects/${PID}/calc-settings`, { allowanceMethod: 'SHARE_OF_ST' })

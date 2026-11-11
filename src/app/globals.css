@@ -220,6 +220,17 @@
     box-shadow: var(--shadow-2);
     transform: translateY(-2px);
   }
+  /* هدر کارت‌های اصلی — پس‌زمینه بسیار ملایم + divider نازک (§۸.۱ جلسه اول)
+     به‌صورت component مشترک؛ نه CSS تکراری در هر صفحه.
+     کارت‌های کوچک توکار (KPI و nested) header مستقل ندارند. */
+  .card-head {
+    background: linear-gradient(
+      to left,
+      color-mix(in srgb, var(--brand-soft) 45%, transparent),
+      transparent 65%
+    );
+    border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  }
   .chip-icon {
     display: inline-flex;
     align-items: center;
@@ -295,6 +306,30 @@
   }
   .bulb-on svg {
     filter: drop-shadow(0 0 5px color-mix(in srgb, var(--amber) 70%, transparent));
+  }
+
+  /* ═══════════ سیاست alignment جداول — §۸.۳ جلسه اول ═══════════
+     هدر همه ستون‌ها center؛ داده کوتاه/عدد/کد/تاریخ/status/badge
+     center؛ توضیح بلند right (RTL). عددها tabular-nums + ltr.
+     به‌صورت CSS مشترک — نه کلاس تکراری در هر جدول. */
+  table.tbl th,
+  table.tbl thead th {
+    text-align: center;
+  }
+  table.tbl td,
+  table.tbl tbody td {
+    text-align: center;
+  }
+  /* توضیح بلند — ستون متن راست‌چین RTL */
+  table.tbl td.tbl-text,
+  table.tbl th.tbl-text {
+    text-align: right;
+  }
+  /* عددها و کدها — جهت خنثی و ارقام جدولی */
+  table.tbl td.tbl-num,
+  table.tbl th.tbl-num {
+    direction: ltr;
+    font-variant-numeric: tabular-nums;
   }
 }
 

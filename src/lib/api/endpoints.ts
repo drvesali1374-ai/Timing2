@@ -972,6 +972,10 @@ export interface ReportElementRowDto {
   nt: number | null
   st: number | null
   stError: string | null
+  /** جمع درصدهای الونس مؤثر عنصر — جلسه اول (§۳) */
+  allowanceP: number
+  /** ثانیه‌های ثابت per-execution عنصر */
+  allowanceT: number
   operatorsCount: number
 }
 
@@ -1007,22 +1011,13 @@ export interface ReportActivitySectionDto {
     message: string
   }
   allowances: {
+    method: string
     methodLabel: string
     formula: string
-    hasGroup: boolean
-    groupName: string | null
-    totalA: number
-    categories: {
-      categoryId: string
-      name: string
-      code: string | null
-      isActive: boolean
-      source: string
-      sourceLabel: string
-      groupValue: number | null
-      overrideValue: number | null
-      effectiveValue: number | null
-    }[]
+    rows: ResolvedAllowanceRowDto[]
+    summary: EffectiveAllowanceSummaryDto
+    perCycleTotal: number
+    needsAggregation: { title: string; sourceScopeLabel: string | null; timeValueSeconds: number }[]
   }
   elements: ReportElementRowDto[]
   activityTotal: { st: number | null; status: 'OK' | 'NEEDS_AGGREGATION_RULE' | 'INCOMPLETE'; reason: string }

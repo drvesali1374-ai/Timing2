@@ -1,33 +1,43 @@
 'use client'
 
 // ═══════════════════════════════════════════════════════════
-// نمای ساختار تولید — FR-02 + ۷.۳
-// درخت خط ← ایستگاه ← فعالیت با Drag & Drop (SortableList)؛
-// پنل جزئیات ایستگاه با ذخیره خودکار و کنترل هم‌زمانی
-// (expectedUpdatedAt — ۶.۶)؛ ایجاد/ویرایش/حذف با شمارش
-// وابستگی‌های واقعی (FR-26).
-// دسکتاپ: دو ستون هم‌عرض (۵۰-۵۰) با عرض کامل صفحه —
-// دستگیره درگ داخل کارت چسبیده به لبه راست؛ عملیات ویرایش/حذف
-// عمودی در راست کارت؛ عنوان تا دو خط؛ شمارش/گروه فقط روی کارت
-// انتخاب‌شده؛ موبایل: درخت تاشو در بالا + جزئیات در پایین — FR-30
+// نمای ساختار تولید — بازطراحی جلسه اول (§۷)
+// درخت کامل سلسله‌مراتبی:
+//   پروژه (ریشه) ← ایستگاه ← فعالیت ← عنصر کاری
+// • کلیک نام/بدنه گره = فقط انتخاب (فعالیت → صفحه فعالیت؛
+//   عنصر → دیالوگ ویرایش با الونس‌ها)؛ کلیک chevron = فقط
+//   باز/بسته — دو رفتار مستقل (§۷.۲)
+// • جست‌وجو در نام‌ها؛ نتایج مسیر والد را باز می‌کنند (§۷.۴)
+// • DnD سه سطح با محدوده مجاز — انتقال عنصر بین فعالیت‌ها
+//   ممنوع (SortableList مستقل هر والد — §۷.۳)
+// • پنل جزئیات ایستگاه: ذخیره خودکار + «الونس‌ها و زمان‌های
+//   مجاز» سطح ایستگاه (§۶)
+// • دکمه افزودن ایستگاه/فعالیت/عنصر با variant متمایز btn-brand
+// • عملیات ویرایش/حذف عمودی در سمت چپ ردیف RTL (§۷.۵)
 // ═══════════════════════════════════════════════════════════
 import { useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
-  ArrowLeft,
   ChevronDown,
+  ChevronsDownUp,
+  ChevronsUpDown,
+  CircleDot,
   Factory,
   ListTree,
   Loader2,
   MousePointerClick,
   Pencil,
   Plus,
+  Search,
   Trash2,
   Warehouse,
+  X,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import {
   Collapsible,
   CollapsibleContent,
@@ -41,8 +51,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import {
   Select,
   SelectContent,
@@ -63,20 +71,26 @@ import {
   projectsApi,
   structureApi,
   type ActivityDto,
+  type ElementDto,
   type GroupDto,
   type StationDto,
 } from '@/lib/api/endpoints'
+import { api } from '@/lib/api-client'
 import { qk } from '@/lib/api/keys'
 import {
+  ELEMENT_TYPES,
+  ELEMENT_TYPE_LABELS,
   PROCESS_TYPES,
   PROCESS_TYPE_LABELS,
   PROCESS_TYPE_SYMBOLS,
+  type ElementType,
   type ProcessType,
 } from '@/domain/types'
 import { useAppStore } from '@/store/app-store'
 import { useDisplayPrefs } from '@/store/display-store'
 import { formatDate, formatDateTime, formatInt } from '@/lib/format'
 import { cn } from '@/lib/utils'
+import { AllowanceSection } from './allowances/AllowanceSection'
 
 type Prefs = ReturnType<typeof useDisplayPrefs>
 
@@ -93,14 +107,22 @@ interface ActivityFormState {
   groupId: string // '' یعنی بدون گروه
 }
 
+interface ElementFormState {
+  name: string
+  description: string
+  elementType: string
+}
+
 const EMPTY_STATION_FORM: StationFormState = { name: '', description: '' }
 const EMPTY_ACTIVITY_FORM: ActivityFormState = { name: '', description: '', processType: 'OPERATION', groupId: '' }
+const EMPTY_ELEMENT_FORM: ElementFormState = { name: '', description: '', elementType: 'MANUAL' }
+
 /** مقدار Sentinel — Radix Select مقدار رشته خالی قبول نمی‌کند */
 const NO_GROUP = 'none'
 
 // ── محتوای راهنمای آیکونی — FR-28 / ۷.۵ ──
 const LINE_HELP = {
-  what: 'هر پروژه مطالعه زمان‌سنجی دقیقاً یک خط تولید و یک محصول را پوشش می‌دهد؛ ساختار داده از خط آغاز می‌شود: خط ← ایستگاه ← فعالیت ← عنصر کاری ← مشاهده.',
+  what: 'هر پروژه مطالعه زمان‌سنجی دقیقاً یک خط تولید و یک محصول را پوشش می‌دهد؛ ریشه درخت ساختار از همین آغاز می‌شود: خط ← ایستگاه ← فعالیت ← عنصر کاری ← مشاهده.',
   input: 'نام خط و محصول در مرحله «مشخصات پروژه» وارد و ویرایش می‌شود.',
   example: 'خط مونتاژ ماشین لباسشویی — مدل X-۲۰۰',
   note: 'ترکیب چند خط یا چند محصول در یک پروژه، مقایسه‌پذیری زمان‌های استاندارد را از بین می‌برد؛ برای هر خط/محصول پروژه‌ای جدا بسازید.',
@@ -128,10 +150,31 @@ const PROCESS_TYPE_HELP = {
 } as const
 
 const GROUP_ASSIGN_HELP = {
-  what: 'گروه مجازها مجموعه‌ای از درصدهای مجاز (مانند نیازهای شخصی و خستگی) است که فعالیت‌های مشابه مقادیر آن را به ارث می‌برند.',
-  input: 'گروه مناسب ماهیت فعالیت را انتخاب کنید یا «بدون گروه» بگذارید.',
+  what: 'گروه فعالیت فقط برای طبقه‌بندی فعالیت‌های مشابه است؛ دیگر منبع اعمال الونس نیست. الونس‌ها به‌صورت سلسله‌مراتبی از خط ← ایستگاه ← فعالیت ← عنصر resolve می‌شوند.',
+  input: 'گروه دلخواه را انتخاب کنید یا «بدون گروه» بگذارید.',
   example: '«کار دستی سبک»، «کار ماشینی سنگین»',
-  note: 'بدون گروه، هیچ مجازی برای فعالیت اعمال نمی‌شود؛ در صفحه فعالیت می‌توانید مقدار هر دسته را بازنویسی کنید.',
+  note: 'مقادیر قدیمی گروه‌ها هنگام مهاجرت به تخصیص سطح فعالیت تبدیل شده‌اند تا نتیجه پروژه‌های موجود حفظ شود.',
+} as const
+
+const ELEMENT_NAME_HELP = {
+  what: 'عنصر کاری کوچک‌ترین واحد قابل‌تفکیک کار در فعالیت است؛ زمان‌سنجی روی همین سطح انجام می‌شود.',
+  input: 'نامی کوتاه با نقطه پایانی مشخص؛ ترجیحاً فعل + مفعول.',
+  example: '«برداشتن قطعه از گراناق» یا «بستن پیچ با آچار مخفی»',
+  note: 'حذف عنصر همه مشاهدات و ارزیابی وستینگهاوس آن را دائمی حذف می‌کند. ترتیب عناصر با Drag & Drop داخل همین فعالیت تغییر می‌کند.',
+} as const
+
+const ELEMENT_TYPE_HELP = {
+  what: 'نوع عنصر کاری تعیین‌کننده رفتار محاسباتی آن است: دستی (تابع مهارت اپراتور)، خودکار ماشین، انتظار یا هم‌زمان/دارای هم‌پوشانی.',
+  input: 'ماهیت غالب عنصر را انتخاب کنید؛ پیش‌فرض «دستی» است.',
+  example: 'بارگذاری قطعه در فیکسچر = دستی؛ سیکل پرس = خودکار ماشین.',
+  note: 'عنصر «هم‌زمان» بازه‌های شروع/پایان می‌پذیرد و جمع ساده زمان استاندارد عناصر برای فعالیت ممنوع می‌شود (نیازمند قاعده تجمیع).',
+} as const
+
+const TREE_HELP = {
+  what: 'درخت ساختار تولید با چهار سطح: خط تولید (ریشه پروژه) ← ایستگاه ← فعالیت ← عنصر کاری.',
+  input: 'کلیک روی نام هر گره آن را انتخاب می‌کند (فعالیت → صفحه اختصاصی؛ عنصر → دیالوگ ویرایش). باز/بسته کردن زیرشاخه فقط با فلش کنار گره انجام می‌شود.',
+  example: 'با جست‌وجو، ایستگاه/فعالیت/عنصرِ منطبق و مسیر والدش باز می‌شوند.',
+  note: 'جابه‌جایی با کشیدن دستگیره لبه راست هر ردیف؛ عنصر فقط درون فعالیت خودش جابه‌جا می‌شود.',
 } as const
 
 // ── کمک‌تابع‌ها ──
@@ -153,6 +196,14 @@ function removedCountsText(prefs: Prefs, parts: Array<[string, number]>): string
   return segs.length > 0 ? `${segs.join('، ')} نیز به‌طور دائمی حذف شدند.` : undefined
 }
 
+/** وابستگی‌های حذف عنصر — GET /api/elements/{id} فقط هنگام دیالوگ */
+interface ElementDepsDto {
+  element: ElementDto & { _count?: { observations: number; sessions: number } }
+}
+const elementDepsKey = (id: string) => ['element-depends', id] as const
+
+// ═══════════════ نمای اصلی ═══════════════
+
 export default function StructureView({ projectId }: { projectId: string }) {
   const prefs = useDisplayPrefs()
   const isMobile = useIsMobile()
@@ -160,10 +211,13 @@ export default function StructureView({ projectId }: { projectId: string }) {
   const selectedStationId = useAppStore((s) => s.selectedStationId)
   const setSelectedStation = useAppStore((s) => s.setSelectedStation)
   const openActivity = useAppStore((s) => s.openActivity)
+  const navigate = useAppStore((s) => s.navigate)
 
   // ── وضعیت محلی ──
   const [treeOpen, setTreeOpen] = useState(true) // درخت تاشوی موبایل
   const [openMap, setOpenMap] = useState<Record<string, boolean>>({}) // ایستگاه‌های باز (پیش‌فرض: باز)
+  const [openActivityMap, setOpenActivityMap] = useState<Record<string, boolean>>({}) // فعالیت‌های باز (پیش‌فرض: بسته)
+  const [search, setSearch] = useState('')
   const [stationCreateOpen, setStationCreateOpen] = useState(false)
   const [stationCreateForm, setStationCreateForm] = useState<StationFormState>(EMPTY_STATION_FORM)
   const [stationCreating, setStationCreating] = useState(false)
@@ -176,16 +230,25 @@ export default function StructureView({ projectId }: { projectId: string }) {
   const [activityCreating, setActivityCreating] = useState(false)
   const [deletingStation, setDeletingStation] = useState<StationDto | null>(null)
   const [deletingActivity, setDeletingActivity] = useState<ActivityDto | null>(null)
+  const [deletingElement, setDeletingElement] = useState<{ element: ElementDto; activity: ActivityDto } | null>(null)
+  const [elementEditor, setElementEditor] = useState<ElementDto | null>(null)
+  const [elementCreateFor, setElementCreateFor] = useState<ActivityDto | null>(null)
+  const [elementCreateForm, setElementCreateForm] = useState<ElementFormState>(EMPTY_ELEMENT_FORM)
+  const [elementCreating, setElementCreating] = useState(false)
 
   // ── داده‌ها ──
   const treeQuery = useQuery({
     queryKey: qk.structure(projectId),
     queryFn: () => structureApi.tree(projectId),
   })
-  const lineQuery = useQuery({
+  const projectQuery = useQuery({
     queryKey: qk.project(projectId),
     queryFn: () => projectsApi.get(projectId),
-    select: (d) => ({ lineName: d.project.lineName, productName: d.project.productName }),
+    select: (d) => ({
+      name: d.project.name,
+      lineName: d.project.lineName,
+      productName: d.project.productName,
+    }),
   })
   const groupsQuery = useQuery({
     queryKey: qk.groups(projectId),
@@ -197,6 +260,11 @@ export default function StructureView({ projectId }: { projectId: string }) {
     queryKey: qk.stations(projectId),
     queryFn: () => structureApi.stations(projectId),
     enabled: deletingStation !== null || deletingActivity !== null,
+  })
+  const elementDepsQuery = useQuery({
+    queryKey: elementDepsKey(deletingElement?.element.id ?? 'none'),
+    queryFn: () => api.get<ElementDepsDto>(`/api/elements/${deletingElement!.element.id}`),
+    enabled: deletingElement !== null,
   })
 
   const stations = treeQuery.data?.stations ?? []
@@ -222,11 +290,10 @@ export default function StructureView({ projectId }: { projectId: string }) {
     invalidateStructureMeta()
     void qc.invalidateQueries({ queryKey: ['activities'] })
     void qc.invalidateQueries({ queryKey: ['elements'] })
-    void qc.invalidateQueries({ queryKey: qk.groups(projectId) })
+    void qc.invalidateQueries({ queryKey: ['scope-allowances'] })
   }
-  const onActivitySaved = (activityId: string) => {
+  const onActivitySaved = () => {
     invalidateActivityData()
-    void qc.invalidateQueries({ queryKey: qk.activityAllowances(activityId) })
   }
 
   // ── جهش‌ها ──
@@ -290,6 +357,33 @@ export default function StructureView({ projectId }: { projectId: string }) {
     onError: (err) => toast.error(err instanceof Error ? err.message : 'حذف فعالیت ناموفق بود'),
   })
 
+  const createElementMutation = useMutation({
+    mutationFn: (vars: { activityId: string; body: Record<string, unknown> }) =>
+      structureApi.createElement(vars.activityId, vars.body),
+    onSuccess: () => {
+      invalidateActivityData()
+      toast.success('عنصر کاری ثبت شد')
+      setElementCreateFor(null)
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : 'ثبت عنصر ناموفق بود'),
+  })
+
+  const deleteElementMutation = useMutation({
+    mutationFn: (elementId: string) => structureApi.deleteElement(elementId),
+    onSuccess: (res, elementId) => {
+      invalidateActivityData()
+      const name = deletingElement?.element.name ?? 'عنصر'
+      toast.success(`عنصر «${name}» به‌طور دائمی حذف شد`, {
+        description: removedCountsText(prefs, [
+          ['مشاهده', res.removedCounts.observations],
+          ...(res.removedCounts.hasRating ? [['ارزیابی وستینگهاوس', 1] as [string, number]] : []),
+        ]),
+      })
+      setDeletingElement(null)
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : 'حذف عنصر ناموفق بود'),
+  })
+
   // ── جابه‌جایی خوش‌بینانه: کش بلافاصله به‌روز می‌شود و سرور تأیید می‌کند ──
   const reorderStationsMutation = useMutation({
     mutationFn: (ids: string[]) => structureApi.reorderStations(projectId, ids),
@@ -312,6 +406,19 @@ export default function StructureView({ projectId }: { projectId: string }) {
     },
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : 'تغییر ترتیب فعالیت‌ها ناموفق بود')
+      invalidateStructureMeta()
+    },
+  })
+
+  const reorderElementsMutation = useMutation({
+    mutationFn: (vars: { activityId: string; ids: string[] }) =>
+      structureApi.reorderElements(vars.activityId, vars.ids),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: qk.structure(projectId) })
+      void qc.invalidateQueries({ queryKey: ['elements'] })
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : 'تغییر ترتیب عناصر ناموفق بود')
       invalidateStructureMeta()
     },
   })
@@ -347,6 +454,28 @@ export default function StructureView({ projectId }: { projectId: string }) {
       }
     })
     reorderActivitiesMutation.mutate({ stationId, ids })
+  }
+
+  const handleReorderElements = (activityId: string, ids: string[]) => {
+    qc.setQueryData<{ stations: StationDto[] }>(qk.structure(projectId), (old) => {
+      if (!old) return old
+      return {
+        stations: old.stations.map((s) => ({
+          ...s,
+          activities: s.activities.map((a) => {
+            if (a.id !== activityId || !a.elements) return a
+            return {
+              ...a,
+              elements: ids.flatMap((id) => {
+                const e = a.elements!.find((x) => x.id === id)
+                return e ? [e] : []
+              }),
+            }
+          }),
+        })),
+      }
+    })
+    reorderElementsMutation.mutate({ activityId, ids })
   }
 
   // ── کنش‌ها ──
@@ -407,6 +536,32 @@ export default function StructureView({ projectId }: { projectId: string }) {
     }
   }
 
+  const openElementCreate = (activity: ActivityDto) => {
+    setElementCreateForm(EMPTY_ELEMENT_FORM)
+    setElementCreateFor(activity)
+  }
+
+  const submitElementCreate = async () => {
+    if (!elementCreateFor) return
+    if (!elementCreateForm.name.trim()) {
+      toast.error('نام عنصر کاری الزامی است')
+      return
+    }
+    setElementCreating(true)
+    try {
+      await createElementMutation.mutateAsync({
+        activityId: elementCreateFor.id,
+        body: {
+          name: elementCreateForm.name.trim(),
+          description: elementCreateForm.description.trim() || null,
+          elementType: elementCreateForm.elementType,
+        },
+      })
+    } finally {
+      setElementCreating(false)
+    }
+  }
+
   // ── شمارش وابستگی‌ها پیش از حذف — FR-26 ──
   const stationDeleteDeps = useMemo(() => {
     if (!deletingStation) return {}
@@ -440,6 +595,15 @@ export default function StructureView({ projectId }: { projectId: string }) {
     return deps
   }, [deletingActivity, deleteDepsQuery.data])
 
+  const elementDeleteDeps = useMemo(() => {
+    if (!deletingElement) return {}
+    const deps: Record<string, number> = {}
+    const obsCount = elementDepsQuery.data?.element._count?.observations ?? 0
+    if (obsCount > 0) deps['مشاهده'] = obsCount
+    if (elementDepsQuery.data?.element.rating) deps['ارزیابی وستینگهاوس این عنصر'] = 1
+    return deps
+  }, [deletingElement, elementDepsQuery.data])
+
   const editorStationName = activityEditor
     ? stations.find((s) => s.id === activityEditor.stationId)?.name ?? ''
     : ''
@@ -449,12 +613,24 @@ export default function StructureView({ projectId }: { projectId: string }) {
     stations,
     prefs,
     openMap,
-    lineName: lineQuery.data?.lineName ?? null,
-    productName: lineQuery.data?.productName ?? null,
-    lineLoading: lineQuery.isLoading,
-    selectedStationId,
+    openActivityMap,
     onStationOpenChange: (stationId: string, open: boolean) =>
       setOpenMap((m) => ({ ...m, [stationId]: open })),
+    onActivityOpenChange: (activityId: string, open: boolean) =>
+      setOpenActivityMap((m) => ({ ...m, [activityId]: open })),
+    onExpandAll: () => {
+      setOpenMap(Object.fromEntries(stations.map((s) => [s.id, true])))
+      setOpenActivityMap(
+        Object.fromEntries(stations.flatMap((s) => s.activities.map((a) => [a.id, true])))
+      )
+    },
+    onCollapseAll: () => {
+      setOpenMap(Object.fromEntries(stations.map((s) => [s.id, false])))
+      setOpenActivityMap({})
+    },
+    project: projectQuery.data ?? null,
+    lineLoading: projectQuery.isLoading,
+    selectedStationId,
     onSelectStation: selectStation,
     onEditStation: openEditStation,
     onDeleteStation: (station: StationDto) => setDeletingStation(station),
@@ -463,9 +639,14 @@ export default function StructureView({ projectId }: { projectId: string }) {
       setActivityEditor({ stationId: activity.stationId, activity }),
     onDeleteActivity: (activity: ActivityDto) => setDeletingActivity(activity),
     onNewActivity: openActivityCreate,
+    onEditElement: (element: ElementDto) => setElementEditor(element),
+    onDeleteElement: (element: ElementDto, activity: ActivityDto) => setDeletingElement({ element, activity }),
+    onNewElement: openElementCreate,
     onReorderStations: handleReorderStations,
     onReorderActivities: handleReorderActivities,
+    onReorderElements: handleReorderElements,
     onNewStation: openStationCreate,
+    onEditProject: () => navigate({ name: 'project', projectId, stage: 'info' }),
   }
 
   return (
@@ -536,7 +717,7 @@ export default function StructureView({ projectId }: { projectId: string }) {
                   </CollapsibleTrigger>
                   <CollapsibleContent>
                     <div className="border-t">
-                      <StructureTree {...treeProps} />
+                      <StructureTree {...treeProps} search={search} onSearchChange={setSearch} />
                     </div>
                   </CollapsibleContent>
                 </div>
@@ -544,7 +725,7 @@ export default function StructureView({ projectId }: { projectId: string }) {
             </div>
             <div className="hidden lg:block">
               <div className="card-premium overflow-hidden">
-                <StructureTree {...treeProps} />
+                <StructureTree {...treeProps} search={search} onSearchChange={setSearch} />
               </div>
             </div>
           </div>
@@ -566,6 +747,7 @@ export default function StructureView({ projectId }: { projectId: string }) {
             ) : selectedStation ? (
               <StationDetailsPanel
                 key={selectedStation.id}
+                projectId={projectId}
                 station={selectedStation}
                 prefs={prefs}
                 dialogOpen={stationDialogOpen}
@@ -584,8 +766,8 @@ export default function StructureView({ projectId }: { projectId: string }) {
                   <div className="space-y-1">
                     <p className="font-bold">ایستگاهی را از درخت انتخاب کنید</p>
                     <p className="mx-auto max-w-md text-sm leading-6 text-muted-foreground">
-                      با انتخاب هر ایستگاه، فرم ویرایش آن و فهرست فعالیت‌هایش در این بخش نمایش داده می‌شود. برای
-                      مشاهده عناصر کاری و مجازها، روی فعالیت کلیک کنید تا صفحه اختصاصی آن باز شود.
+                      با انتخاب هر ایستگاه، فرم ویرایش آن، الونس‌های سطح ایستگاه و فهرست فعالیت‌هایش در این بخش
+                      نمایش داده می‌شود. برای مشاهده عناصر کاری، فعالیت را در درخت باز کنید.
                     </p>
                   </div>
                   <div className="flex flex-wrap justify-center gap-2">
@@ -694,7 +876,7 @@ export default function StructureView({ projectId }: { projectId: string }) {
                     id="activity-create-desc"
                     value={activityCreateForm.description}
                     onChange={(e) => setActivityCreateForm((s) => ({ ...s, description: e.target.value }))}
-                    placeholder="مثلاً: بستن ۴ پیچ با پیچ‌گوشتی برقی"
+                    placeholder="مثلاً: بستن ۴ پیچ با آچار بکس"
                     className="min-h-16"
                   />
                 </div>
@@ -708,13 +890,13 @@ export default function StructureView({ projectId }: { projectId: string }) {
                       value={activityCreateForm.processType}
                       onValueChange={(v) => setActivityCreateForm((s) => ({ ...s, processType: v }))}
                     >
-                      <SelectTrigger className="w-full" aria-label="نوع رویداد فرایندی">
+                      <SelectTrigger aria-label="نوع رویداد فرایندی">
                         <SelectValue />
                       </SelectTrigger>
-                      <SelectContent>
+                      <SelectContent dir="rtl">
                         {PROCESS_TYPES.map((pt) => (
                           <SelectItem key={pt} value={pt}>
-                            <span className="num">{PROCESS_TYPE_SYMBOLS[pt]}</span> {PROCESS_TYPE_LABELS[pt]}
+                            <span className="num">{processSymbolOf(pt)}</span> {processLabelOf(pt)}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -722,8 +904,8 @@ export default function StructureView({ projectId }: { projectId: string }) {
                   </div>
                   <div className="space-y-1.5">
                     <div className="flex items-center gap-1">
-                      <Label>گروه مجازها</Label>
-                      <HelpDot label="گروه مجازها" content={GROUP_ASSIGN_HELP} />
+                      <Label>گروه فعالیت (طبقه‌بندی)</Label>
+                      <HelpDot label="گروه فعالیت" content={GROUP_ASSIGN_HELP} />
                     </div>
                     <Select
                       value={activityCreateForm.groupId || NO_GROUP}
@@ -732,10 +914,10 @@ export default function StructureView({ projectId }: { projectId: string }) {
                       }
                       disabled={groupsQuery.isLoading}
                     >
-                      <SelectTrigger className="w-full" aria-label="گروه مجازها">
+                      <SelectTrigger aria-label="گروه فعالیت">
                         <SelectValue />
                       </SelectTrigger>
-                      <SelectContent>
+                      <SelectContent dir="rtl">
                         <SelectItem value={NO_GROUP}>بدون گروه</SelectItem>
                         {groups.map((g) => (
                           <SelectItem key={g.id} value={g.id}>
@@ -745,7 +927,7 @@ export default function StructureView({ projectId }: { projectId: string }) {
                       </SelectContent>
                     </Select>
                     {groupsQuery.isError && (
-                      <p className="text-[11px] leading-5 text-red">
+                      <p className="text-xs leading-5 text-red">
                         بارگذاری گروه‌ها ناموفق بود؛ فعلاً تنها «بدون گروه» در دسترس است.
                       </p>
                     )}
@@ -770,6 +952,88 @@ export default function StructureView({ projectId }: { projectId: string }) {
         </DialogContent>
       </Dialog>
 
+      {/* دیالوگ ویرایش عنصر کاری — با الونس‌های عنصر (§۶) */}
+      {elementEditor && (
+        <ElementEditDialog
+          key={elementEditor.id}
+          projectId={projectId}
+          element={elementEditor}
+          onClose={() => setElementEditor(null)}
+          onSaved={invalidateActivityData}
+        />
+      )}
+
+      {/* دیالوگ ایجاد عنصر کاری */}
+      <Dialog open={elementCreateFor !== null} onOpenChange={(open) => !open && setElementCreateFor(null)}>
+        <DialogContent dir="rtl" className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>عنصر کاری جدید</DialogTitle>
+            <DialogDescription>
+              {elementCreateFor ? `در فعالیت «${elementCreateFor.name}» — ` : ''}
+              عنصر در انتهای فهرست افزوده می‌شود.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-1">
+                <Label htmlFor="element-create-name">نام عنصر کاری</Label>
+                <HelpDot label="نام عنصر کاری" content={ELEMENT_NAME_HELP} />
+              </div>
+              <Input
+                id="element-create-name"
+                value={elementCreateForm.name}
+                onChange={(e) => setElementCreateForm((s) => ({ ...s, name: e.target.value }))}
+                placeholder="مثلاً: برداشتن قطعه از گراناق"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="element-create-desc">شرح عنصر (اختیاری)</Label>
+              <Textarea
+                id="element-create-desc"
+                value={elementCreateForm.description}
+                onChange={(e) => setElementCreateForm((s) => ({ ...s, description: e.target.value }))}
+                placeholder="مثلاً: برداشت با دو دست و قراردادن روی میز کار"
+                className="min-h-16"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-1">
+                <Label>نوع عنصر کاری</Label>
+                <HelpDot label="نوع عنصر کاری" content={ELEMENT_TYPE_HELP} />
+              </div>
+              <Select
+                value={elementCreateForm.elementType}
+                onValueChange={(v) => setElementCreateForm((s) => ({ ...s, elementType: v }))}
+              >
+                <SelectTrigger aria-label="نوع عنصر کاری">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent dir="rtl">
+                  {ELEMENT_TYPES.map((et) => (
+                    <SelectItem key={et} value={et}>
+                      {ELEMENT_TYPE_LABELS[et]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setElementCreateFor(null)}>
+              انصراف
+            </Button>
+            <Button onClick={submitElementCreate} disabled={elementCreating} className="btn-brand border-0">
+              {elementCreating ? (
+                <Loader2 className="size-4 animate-spin" aria-hidden />
+              ) : (
+                <Plus className="size-4" aria-hidden />
+              )}
+              ثبت عنصر
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* تأیید حذف دائمی ایستگاه — FR-26 */}
       <ConfirmDeleteDialog
         open={deletingStation !== null}
@@ -791,42 +1055,37 @@ export default function StructureView({ projectId }: { projectId: string }) {
         onConfirm={() => deletingActivity && deleteActivityMutation.mutate(deletingActivity)}
         loading={deleteActivityMutation.isPending}
       />
+
+      {/* تأیید حذف دائمی عنصر — FR-26 */}
+      <ConfirmDeleteDialog
+        open={deletingElement !== null}
+        onOpenChange={(open) => !open && setDeletingElement(null)}
+        title="حذف دائمی عنصر کاری"
+        entityName={deletingElement?.element.name ?? ''}
+        dependencies={elementDeleteDeps}
+        onConfirm={() => deletingElement && deleteElementMutation.mutate(deletingElement.element.id)}
+        loading={deleteElementMutation.isPending}
+      />
     </div>
   )
 }
 
 // ═══════════════════════════════════════════════════════════
-// درخت ساختار — ریشه: خط تولید؛ ایستگاه‌ها و فعالیت‌ها با D&D
-// فعالیت‌های هر ایستگاه داخل Collapsible باز/بسته می‌شوند
+// درخت ساختار — چهار سطح + جست‌وجو + باز/بستن همه — §۷
 // ═══════════════════════════════════════════════════════════
-function StructureTree({
-  stations,
-  prefs,
-  openMap,
-  lineName,
-  productName,
-  lineLoading,
-  selectedStationId,
-  onStationOpenChange,
-  onSelectStation,
-  onEditStation,
-  onDeleteStation,
-  onOpenActivity,
-  onEditActivity,
-  onDeleteActivity,
-  onNewActivity,
-  onReorderStations,
-  onReorderActivities,
-  onNewStation,
-}: {
+
+interface StructureTreeProps {
   stations: StationDto[]
   prefs: Prefs
   openMap: Record<string, boolean>
-  lineName: string | null
-  productName: string | null
+  openActivityMap: Record<string, boolean>
+  onStationOpenChange: (stationId: string, open: boolean) => void
+  onActivityOpenChange: (activityId: string, open: boolean) => void
+  onExpandAll: () => void
+  onCollapseAll: () => void
+  project: { name: string; lineName: string; productName: string } | null
   lineLoading: boolean
   selectedStationId: string | null
-  onStationOpenChange: (stationId: string, open: boolean) => void
   onSelectStation: (stationId: string) => void
   onEditStation: (station: StationDto) => void
   onDeleteStation: (station: StationDto) => void
@@ -834,225 +1093,209 @@ function StructureTree({
   onEditActivity: (activity: ActivityDto) => void
   onDeleteActivity: (activity: ActivityDto) => void
   onNewActivity: (stationId: string) => void
+  onEditElement: (element: ElementDto) => void
+  onDeleteElement: (element: ElementDto, activity: ActivityDto) => void
+  onNewElement: (activity: ActivityDto) => void
   onReorderStations: (ids: string[]) => void
   onReorderActivities: (stationId: string, ids: string[]) => void
+  onReorderElements: (activityId: string, ids: string[]) => void
   onNewStation: () => void
-}) {
+  onEditProject: () => void
+  search: string
+  onSearchChange: (q: string) => void
+}
+
+function StructureTree(props: StructureTreeProps) {
+  const {
+    stations,
+    prefs,
+    openMap,
+    openActivityMap,
+    onStationOpenChange,
+    onActivityOpenChange,
+    onExpandAll,
+    onCollapseAll,
+    project,
+    lineLoading,
+    selectedStationId,
+    onSelectStation,
+    onEditStation,
+    onDeleteStation,
+    onOpenActivity,
+    onEditActivity,
+    onDeleteActivity,
+    onNewActivity,
+    onEditElement,
+    onDeleteElement,
+    onNewElement,
+    onReorderStations,
+    onReorderActivities,
+    onReorderElements,
+    onNewStation,
+    onEditProject,
+    search,
+    onSearchChange,
+  } = props
+
+  // ── فیلتر جست‌وجو — نتایج مسیر والد را باز می‌کنند (§۷.۴) ──
+  const q = search.trim()
+  const matchName = (name: string) => !q || name.includes(q)
+  const visibleStations = stations.filter(
+    (s) =>
+      matchName(s.name) ||
+      s.activities.some((a) => matchName(a.name) || (a.elements ?? []).some((e) => matchName(e.name)))
+  )
+  const stationVisibleActivities = (s: StationDto): ActivityDto[] =>
+    q
+      ? s.activities.filter(
+          (a) => matchName(a.name) || (a.elements ?? []).some((e) => matchName(e.name))
+        )
+      : s.activities
+  const activityVisibleElements = (a: ActivityDto): ElementDto[] =>
+    q ? (a.elements ?? []).filter((e) => matchName(e.name)) : (a.elements ?? [])
+  const hasSearch = q.length > 0
+
   return (
     <div>
-      {/* ریشه درخت: خط تولید + محصول (کامل، بدون برش) */}
+      {/* ریشه: پروژه/خط تولید + محصول — §۷.۱ */}
       <div className="border-b bg-gradient-to-l from-brand-soft/70 to-transparent p-4">
         <div className="flex items-center gap-2.5">
-          <div className="chip-icon bg-brand-soft text-brand">
+          <span className="chip-icon bg-brand-soft text-brand">
             <Factory className="size-5" aria-hidden />
-          </div>
+          </span>
           <div className="min-w-0 flex-1">
             {lineLoading ? (
-              <Skeleton className="h-5 w-28" />
+              <Skeleton className="h-5 w-40" />
             ) : (
-              <p className="truncate font-extrabold" title={lineName ?? undefined}>
-                {lineName ?? 'خط تولید'}
-              </p>
+              <>
+                <p className="truncate font-extrabold" title={project?.name ?? undefined}>
+                  {project?.name ?? 'پروژه'}
+                </p>
+                <p className="num truncate text-[11px] text-muted-foreground">
+                  خط: {project?.lineName ?? '—'} · محصول: {project?.productName ?? '—'}
+                </p>
+              </>
             )}
-            <p className="text-xs leading-5 text-muted-foreground">
-              محصول: {productName ?? '—'}
-            </p>
           </div>
-          <HelpDot label="خط تولید و محصول" content={LINE_HELP} />
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-7 shrink-0"
+            aria-label="ویرایش مشخصات پروژه"
+            title="ویرایش مشخصات پروژه"
+            onClick={onEditProject}
+          >
+            <Pencil className="size-3.5" aria-hidden />
+          </Button>
+          <HelpDot label="درخت ساختار تولید" content={TREE_HELP} />
         </div>
       </div>
 
-      {/* ایستگاه‌ها — قابل مرتب‌سازی با Drag & Drop */}
-      <div className="scroll-slim max-h-[24rem] overflow-y-auto p-3 lg:max-h-[calc(100vh-19rem)]">
-        {stations.length === 0 ? (
-          <div className="space-y-2 rounded-xl border border-dashed p-4 text-center">
-            <p className="text-xs leading-6 text-muted-foreground">هنوز ایستگاهی ثبت نشده است.</p>
-            <Button size="sm" onClick={onNewStation} className="btn-brand gap-1.5 border-0">
-              <Plus className="size-3.5" aria-hidden />
-              ثبت اولین ایستگاه
-            </Button>
+      {/* نوار ابزار: جست‌وجو + باز/بستن همه — §۷.۳/۷.۴ */}
+      <div className="flex items-center gap-1.5 border-b bg-surface-2/40 p-2.5">
+        <div className="relative min-w-0 flex-1">
+          <Search className="pointer-events-none absolute inset-y-0 start-2.5 my-auto size-3.5 text-faint" aria-hidden />
+          <Input
+            value={search}
+            onChange={(e) => onSearchChange(e.target.value)}
+            placeholder="جست‌وجوی ایستگاه، فعالیت یا عنصر…"
+            className="h-8 rounded-lg bg-card ps-8 text-xs"
+            aria-label="جست‌وجو در درخت ساختار"
+          />
+          {search && (
+            <button
+              type="button"
+              className="absolute inset-y-0 end-2 my-auto text-faint transition-colors hover:text-foreground"
+              aria-label="پاک‌کردن جست‌وجو"
+              onClick={() => onSearchChange('')}
+            >
+              <X className="size-3.5" aria-hidden />
+            </button>
+          )}
+        </div>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="size-8 shrink-0"
+          aria-label="باز کردن همه شاخه‌ها"
+          title="باز کردن همه"
+          onClick={onExpandAll}
+        >
+          <ChevronsUpDown className="size-4" aria-hidden />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="size-8 shrink-0"
+          aria-label="بستن همه شاخه‌ها"
+          title="بستن همه"
+          onClick={onCollapseAll}
+        >
+          <ChevronsDownUp className="size-4" aria-hidden />
+        </Button>
+      </div>
+
+      {/* ایستگاه‌ها */}
+      <div className="scroll-slim max-h-[26rem] overflow-y-auto p-3 lg:max-h-[calc(100vh-23rem)]">
+        {visibleStations.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-border/70 p-5 text-center">
+            <p className="text-sm font-bold">
+              {hasSearch ? 'موردی منطبق با جست‌وجو یافت نشد' : 'هنوز ایستگاهی ثبت نشده است'}
+            </p>
+            {!hasSearch && (
+              <Button size="sm" className="btn-brand mt-3 gap-1.5 border-0" onClick={onNewStation}>
+                <Plus className="size-4" aria-hidden />
+                ثبت اولین ایستگاه
+              </Button>
+            )}
           </div>
         ) : (
           <SortableList
-            items={stations}
-            onReorder={onReorderStations}
+            items={visibleStations}
+            onReorder={(ids) => onReorderStations(ids.filter((id) => visibleStations.some((s) => s.id === id)))}
             handleClassName="rounded-s-xl"
             renderItem={(station) => {
               const isSelected = station.id === selectedStationId
-              const isOpen = openMap[station.id] !== false
-              const elementCount = station.activities.reduce(
-                (sum, a) => sum + activityElementCount(a),
-                0
-              )
+              // هنگام جست‌وجو، مسیر والد باز نمایش داده می‌شود (بدون تغییر state)
+              const isOpen = hasSearch || openMap[station.id] !== false
+              const acts = stationVisibleActivities(station)
               return (
-                <Collapsible
+                <StationNode
                   key={station.id}
-                  open={isOpen}
-                  onOpenChange={(open) => onStationOpenChange(station.id, open)}
-                >
-                  <div
-                    className={cn(
-                      'overflow-hidden rounded-xl border bg-card transition-all',
-                      isSelected
-                        ? 'border-brand bg-brand-soft/40 shadow-[0_6px_18px_-8px_rgba(114,87,255,0.5)] ring-2 ring-brand/25'
-                        : 'border-border/60 hover:border-brand/40'
-                    )}
-                  >
-                    {/* سربرگ کارت — کل ناحیه کلیک‌پذیر: انتخاب + باز/بسته شدن */}
-                    <div
-                      role="button"
-                      tabIndex={0}
-                      aria-expanded={isOpen}
-                      aria-current={isSelected ? true : undefined}
-                      onClick={(e) => {
-                        if ((e.target as HTMLElement).closest('button')) return
-                        onSelectStation(station.id)
-                        onStationOpenChange(station.id, !isOpen)
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' || e.key === ' ') {
-                          e.preventDefault()
-                          onSelectStation(station.id)
-                          onStationOpenChange(station.id, !isOpen)
-                        }
-                      }}
-                      className="flex cursor-pointer items-stretch gap-1.5 py-1 pe-1.5 ps-8 focus-visible:outline-2 focus-visible:outline-ring"
-                    >
-                      {/* عملیات: ویرایش بالا، حذف پایین — چسبیده به راست */}
-                      <div className="flex shrink-0 flex-col justify-center gap-0.5">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="size-7"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            onEditStation(station)
-                          }}
-                          aria-label={`ویرایش ایستگاه ${station.name}`}
-                        >
-                          <Pencil className="size-3.5" aria-hidden />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="size-7 text-red hover:text-red"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            onDeleteStation(station)
-                          }}
-                          aria-label={`حذف ایستگاه ${station.name}`}
-                        >
-                          <Trash2 className="size-3.5" aria-hidden />
-                        </Button>
-                      </div>
-                      {/* عنوان تا دو خط + شمارش فقط برای کارت انتخاب‌شده */}
-                      <div className="min-w-0 flex-1 self-center">
-                        <p
-                          className="line-clamp-2 text-sm font-bold leading-5"
-                          title={station.name}
-                        >
-                          {station.name}
-                        </p>
-                        {isSelected && (
-                          <p className="num mt-0.5 text-[11px] leading-4 text-muted-foreground">
-                            {formatInt(station.activities.length, prefs)} فعالیت ·{' '}
-                            {formatInt(elementCount, prefs)} عنصر کاری
-                          </p>
-                        )}
-                      </div>
-                    </div>
-
-                    <CollapsibleContent>
-                      {/* زیرمنوی فعالیت‌ها — تورفتگی + خط راهنمای درختی در راست */}
-                      <div className="mt-1 mb-2 ms-2 border-s-2 border-dashed border-brand/25 pb-1 ps-2.5">
-                        {station.activities.length === 0 ? (
-                          <p className="py-1.5 text-center text-[11px] text-faint">فعالیتی ثبت نشده است</p>
-                        ) : (
-                          <SortableList
-                            items={station.activities}
-                            onReorder={(ids) => onReorderActivities(station.id, ids)}
-                            className="space-y-1"
-                            renderItem={(activity) => {
-                              const parentSelected = isSelected
-                              const group = activity.group
-                              return (
-                                <div
-                                  className="flex items-stretch gap-1.5 rounded-lg bg-surface-2/70 py-0.5 pe-1 ps-8 transition-colors hover:bg-brand-soft/30"
-                                  title={`نوع رویداد فرایندی: ${processLabelOf(activity.processType)}${group ? ` · گروه مجازها: ${group.name}` : ''} · ${formatInt(activityElementCount(activity), prefs)} عنصر`}
-                                >
-                                  {/* عملیات: ویرایش بالا، حذف پایین — چسبیده به راست */}
-                                  <div className="flex shrink-0 flex-col justify-center gap-0.5">
-                                    <Button
-                                      variant="ghost"
-                                      size="icon"
-                                      className="size-6"
-                                      onClick={(e) => {
-                                        e.stopPropagation()
-                                        onEditActivity(activity)
-                                      }}
-                                      aria-label={`ویرایش فعالیت ${activity.name}`}
-                                    >
-                                      <Pencil className="size-3" aria-hidden />
-                                    </Button>
-                                    <Button
-                                      variant="ghost"
-                                      size="icon"
-                                      className="size-6 text-red hover:text-red"
-                                      onClick={(e) => {
-                                        e.stopPropagation()
-                                        onDeleteActivity(activity)
-                                      }}
-                                      aria-label={`حذف فعالیت ${activity.name}`}
-                                    >
-                                      <Trash2 className="size-3" aria-hidden />
-                                    </Button>
-                                  </div>
-                                  {/* عنوان تا دو خط + گروه/شمارش فقط برای فعالیت‌های ایستگاه انتخاب‌شده */}
-                                  <button
-                                    type="button"
-                                    onClick={() => onOpenActivity(activity.id)}
-                                    className="flex min-w-0 flex-1 items-center rounded-md text-right focus-visible:outline-2 focus-visible:outline-ring"
-                                    aria-label={`باز کردن صفحه فعالیت ${activity.name}`}
-                                  >
-                                    <span className="min-w-0">
-                                      <span className="line-clamp-2 block text-[13px] font-medium leading-5">
-                                        {activity.name}
-                                      </span>
-                                      {parentSelected && (
-                                        <span className="num mt-0.5 block text-[10.5px] leading-4 text-muted-foreground">
-                                          {formatInt(activityElementCount(activity), prefs)} عنصر ·{' '}
-                                          {group ? group.name : 'بدون گروه'}
-                                        </span>
-                                      )}
-                                    </span>
-                                  </button>
-                                </div>
-                              )
-                            }}
-                          />
-                        )}
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="mt-1.5 w-full gap-1 text-xs text-muted-foreground"
-                          onClick={() => onNewActivity(station.id)}
-                        >
-                          <Plus className="size-3.5" aria-hidden />
-                          فعالیت جدید
-                        </Button>
-                      </div>
-                    </CollapsibleContent>
-                  </div>
-                </Collapsible>
+                  station={station}
+                  activities={acts}
+                  prefs={prefs}
+                  isSelected={isSelected}
+                  isOpen={isOpen}
+                  hasSearch={hasSearch}
+                  openActivityMap={openActivityMap}
+                  selectedStationId={selectedStationId}
+                  onStationOpenChange={onStationOpenChange}
+                  onActivityOpenChange={onActivityOpenChange}
+                  onSelectStation={onSelectStation}
+                  onEditStation={onEditStation}
+                  onDeleteStation={onDeleteStation}
+                  onOpenActivity={onOpenActivity}
+                  onEditActivity={onEditActivity}
+                  onDeleteActivity={onDeleteActivity}
+                  onNewActivity={onNewActivity}
+                  onEditElement={onEditElement}
+                  onDeleteElement={onDeleteElement}
+                  onNewElement={onNewElement}
+                  onReorderActivities={onReorderActivities}
+                  onReorderElements={onReorderElements}
+                  visibleActivities={stationVisibleActivities}
+                  activityVisibleElements={activityVisibleElements}
+                />
               )
             }}
           />
         )}
       </div>
 
-      {/* افزودن ایستگاه جدید */}
+      {/* پانوشت: افزودن ایستگاه — §۷.۶ variant متمایز */}
       <div className="border-t p-3">
-        <Button variant="outline" className="w-full gap-1.5" onClick={onNewStation}>
+        <Button variant="outline" className="btn-brand gap-1.5 border-0" onClick={onNewStation}>
           <Plus className="size-4" aria-hidden />
           ایستگاه جدید
         </Button>
@@ -1061,12 +1304,378 @@ function StructureTree({
   )
 }
 
+// ═══════════════ گره ایستگاه — کارت متمایز از ردیف فعالیت (§۷.۶) ═══════════════
+
+interface StationNodeProps {
+  station: StationDto
+  activities: ActivityDto[]
+  prefs: Prefs
+  isSelected: boolean
+  isOpen: boolean
+  hasSearch: boolean
+  openActivityMap: Record<string, boolean>
+  selectedStationId: string | null
+  onStationOpenChange: (stationId: string, open: boolean) => void
+  onActivityOpenChange: (activityId: string, open: boolean) => void
+  onSelectStation: (stationId: string) => void
+  onEditStation: (station: StationDto) => void
+  onDeleteStation: (station: StationDto) => void
+  onOpenActivity: (activityId: string) => void
+  onEditActivity: (activity: ActivityDto) => void
+  onDeleteActivity: (activity: ActivityDto) => void
+  onNewActivity: (stationId: string) => void
+  onEditElement: (element: ElementDto) => void
+  onDeleteElement: (element: ElementDto, activity: ActivityDto) => void
+  onNewElement: (activity: ActivityDto) => void
+  onReorderActivities: (stationId: string, ids: string[]) => void
+  onReorderElements: (activityId: string, ids: string[]) => void
+  visibleActivities: (s: StationDto) => ActivityDto[]
+  activityVisibleElements: (a: ActivityDto) => ElementDto[]
+}
+
+function StationNode(p: StationNodeProps) {
+  const { station, prefs, isSelected, isOpen, hasSearch } = p
+  const elementCount = station.activities.reduce((sum, a) => sum + activityElementCount(a), 0)
+
+  return (
+    <Collapsible
+      open={isOpen}
+      onOpenChange={(open) => p.onStationOpenChange(station.id, open)}
+    >
+      <div
+        className={cn(
+          // کارت ایستگاه: پس‌زمینه متفاوت از ردیف فعالیت + border واضح‌تر (§۷.۶)
+          'overflow-hidden rounded-xl border bg-card transition-all',
+          isSelected
+            ? 'border-brand bg-brand-soft/40 shadow-[0_6px_18px_-8px_rgba(114,87,255,0.5)] ring-2 ring-brand/25'
+            : 'border-line-strong bg-card hover:border-brand/40'
+        )}
+      >
+        {/* سربرگ کارت: chevron مستقل + بدنه انتخاب + عملیات چپ — §۷.۲ */}
+        <div className="flex items-stretch gap-1 py-1 pe-1.5 ps-8">
+          {/* chevron — فقط باز/بسته زیرشاخه (§۷.۲) */}
+          <button
+            type="button"
+            className="flex w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-brand-soft/50 hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+            aria-label={(isOpen ? 'بستن' : 'باز کردن') + ' زیرشاخه ایستگاه ' + station.name}
+            aria-expanded={isOpen}
+            title="فعالیت‌های ایستگاه"
+            onClick={(e) => {
+              e.stopPropagation()
+              p.onStationOpenChange(station.id, !isOpen)
+            }}
+          >
+            <ChevronDown className={cn('size-4 transition-transform', !isOpen && '-rotate-90')} aria-hidden />
+          </button>
+          {/* بدنه — کلیک = فقط انتخاب (§۷.۲) */}
+          <div
+            role="button"
+            tabIndex={0}
+            aria-current={isSelected ? 'true' : undefined}
+            className="flex min-w-0 flex-1 cursor-pointer flex-col justify-center gap-0.5 rounded-md px-1.5 py-1.5 transition-colors hover:bg-brand-soft/25 focus-visible:outline-2 focus-visible:outline-ring"
+            onClick={() => p.onSelectStation(station.id)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault()
+                p.onSelectStation(station.id)
+              }
+            }}
+          >
+            <div className="flex items-center gap-1.5">
+              <span className="line-clamp-2 min-w-0 flex-1 text-sm font-bold leading-5">{station.name}</span>
+              <Badge variant="secondary" className="num shrink-0 border-0 bg-surface-3 text-[10px]" aria-label="تعداد فعالیت">
+                {formatInt(station.activities.length, prefs)}
+              </Badge>
+            </div>
+            {isSelected && (
+              <p className="num text-[11px] leading-4 text-muted-foreground">
+                {formatInt(station.activities.length, prefs)} فعالیت · {formatInt(elementCount, prefs)} عنصر کاری
+              </p>
+            )}
+          </div>
+          {/* عملیات ویرایش/حذف عمودی در چپ ردیف RTL — §۷.۵ */}
+          <div className="flex shrink-0 flex-col justify-center gap-0.5">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-7"
+              aria-label={`ویرایش ایستگاه ${station.name}`}
+              onClick={(e) => {
+                e.stopPropagation()
+                p.onEditStation(station)
+              }}
+            >
+              <Pencil className="size-3.5" aria-hidden />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-7 text-red hover:text-red"
+              aria-label={`حذف ایستگاه ${station.name}`}
+              onClick={(e) => {
+                e.stopPropagation()
+                p.onDeleteStation(station)
+              }}
+            >
+              <Trash2 className="size-3.5" aria-hidden />
+            </Button>
+          </div>
+        </div>
+
+        {/* زیرشاخه فعالیت‌ها — خط راهنمای سلسله‌مراتبی */}
+        <CollapsibleContent>
+          <div className="mb-2 mt-1 ms-2 border-s-2 border-dashed border-brand/25 pb-1 ps-2.5">
+            {p.activities.length === 0 ? (
+              <p className="px-1 py-1.5 text-[11px] text-faint">
+                {hasSearch ? 'فعالیت منطبقی نیست' : 'فعالیتی ثبت نشده است'}
+              </p>
+            ) : (
+              <SortableList
+                items={p.activities}
+                onReorder={(ids) => p.onReorderActivities(station.id, ids)}
+                className="space-y-1"
+                renderItem={(activity) => {
+                  const parentSelected = station.id === p.selectedStationId
+                  // هنگام جست‌وجو مسیر والد باز است؛ در حالت عادی از openActivityMap
+                  const actOpen = hasSearch || p.openActivityMap[activity.id] === true
+                  return (
+                    <ActivityNode
+                      key={activity.id}
+                      activity={activity}
+                      station={station}
+                      prefs={prefs}
+                      parentSelected={parentSelected}
+                      isOpen={actOpen}
+                      hasSearch={hasSearch}
+                      onActivityOpenChange={p.onActivityOpenChange}
+                      onOpenActivity={p.onOpenActivity}
+                      onEditActivity={p.onEditActivity}
+                      onDeleteActivity={p.onDeleteActivity}
+                      onEditElement={p.onEditElement}
+                      onDeleteElement={p.onDeleteElement}
+                      onNewElement={p.onNewElement}
+                      onReorderElements={p.onReorderElements}
+                      visibleElements={p.activityVisibleElements}
+                    />
+                  )
+                }}
+              />
+            )}
+            {/* افزودن فعالیت — §۷.۶ variant متمایز */}
+            <Button
+              variant="ghost"
+              size="sm"
+              className="mt-1 w-full gap-1.5 text-muted-foreground"
+              onClick={() => p.onNewActivity(station.id)}
+            >
+              <Plus className="size-3.5" aria-hidden />
+              فعالیت جدید
+            </Button>
+          </div>
+        </CollapsibleContent>
+      </div>
+    </Collapsible>
+  )
+}
+
+// ═══════════════ گره فعالیت — ردیف با border مستقل ظریف + badge نوع فرایند (§۷.۶) ═══════════════
+
+interface ActivityNodeProps {
+  activity: ActivityDto
+  station: StationDto
+  prefs: Prefs
+  parentSelected: boolean
+  isOpen: boolean
+  hasSearch: boolean
+  onActivityOpenChange: (activityId: string, open: boolean) => void
+  onOpenActivity: (activityId: string) => void
+  onEditActivity: (activity: ActivityDto) => void
+  onDeleteActivity: (activity: ActivityDto) => void
+  onEditElement: (element: ElementDto) => void
+  onDeleteElement: (element: ElementDto, activity: ActivityDto) => void
+  onNewElement: (activity: ActivityDto) => void
+  onReorderElements: (activityId: string, ids: string[]) => void
+  visibleElements: (a: ActivityDto) => ElementDto[]
+}
+
+/** رنگ badge نوع عنصر کاری */
+const ELEMENT_TYPE_BADGE: Record<string, string> = {
+  MANUAL: 'bg-brand-soft text-brand',
+  MACHINE: 'bg-cyan-soft text-cyan',
+  WAITING: 'bg-amber-soft text-amber',
+  OVERLAP: 'bg-green-soft text-green',
+}
+
+function ActivityNode(p: ActivityNodeProps) {
+  const { activity, prefs, parentSelected, isOpen, hasSearch } = p
+  const elements = p.visibleElements(activity)
+  const elementCount = activityElementCount(activity)
+  const groupLabel = activity.group?.name ?? null
+
+  return (
+    <Collapsible
+      open={isOpen}
+      onOpenChange={(open) => p.onActivityOpenChange(activity.id, open)}
+    >
+      <div
+        className={cn(
+          // ردیف فعالیت: پس‌زمینه متفاوت از کارت ایستگاه + border مستقل ظریف (§۷.۶)
+          'overflow-hidden rounded-lg border border-border/60 bg-surface-2/80 transition-colors hover:border-brand/35',
+          parentSelected && 'bg-brand-soft/25'
+        )}
+        title={`${processLabelOf(activity.processType)}${groupLabel ? ` · گروه: ${groupLabel}` : ''} · ${formatInt(elementCount, prefs)} عنصر کاری`}
+      >
+        <div className="flex items-stretch gap-1 py-0.5 pe-1 ps-8">
+          {/* chevron — فقط باز/بسته عناصر کاری (§۷.۲) */}
+          <button
+            type="button"
+            className="flex w-5 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-brand-soft/50 hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+            aria-label={(isOpen ? 'بستن' : 'باز کردن') + ' عناصر کاری فعالیت ' + activity.name}
+            aria-expanded={isOpen}
+            title="عناصر کاری"
+            onClick={(e) => {
+              e.stopPropagation()
+              p.onActivityOpenChange(activity.id, !isOpen)
+            }}
+          >
+            <ChevronDown className={cn('size-3.5 transition-transform', !isOpen && '-rotate-90')} aria-hidden />
+          </button>
+          {/* بدنه — کلیک = باز شدن صفحه فعالیت */}
+          <button
+            type="button"
+            className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-1.5 py-1 text-right transition-colors hover:bg-brand-soft/30 focus-visible:outline-2 focus-visible:outline-ring"
+            aria-label={`باز کردن صفحه فعالیت ${activity.name}`}
+            onClick={() => p.onOpenActivity(activity.id)}
+          >
+            <span className="line-clamp-2 min-w-0 flex-1 text-[13px] font-medium leading-4.5">{activity.name}</span>
+            {/* badge نوع فرایند کنار نام — نه فقط در title (§۷.۶) */}
+            <span
+              className="num size-5 shrink-0 rounded-md bg-brand-soft text-[11px] font-bold leading-5 text-brand"
+              title={processLabelOf(activity.processType)}
+              aria-label={`نوع فرایند: ${processLabelOf(activity.processType)}`}
+            >
+              {processSymbolOf(activity.processType)}
+            </span>
+            <Badge variant="secondary" className="num shrink-0 border-0 bg-surface-3 text-[9.5px]" aria-label="تعداد عنصر">
+              {formatInt(elementCount, prefs)}
+            </Badge>
+          </button>
+          {/* عملیات ویرایش/حذف عمودی در چپ — §۷.۵ */}
+          <div className="flex shrink-0 flex-col justify-center gap-0.5">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-6"
+              aria-label={`ویرایش فعالیت ${activity.name}`}
+              onClick={(e) => {
+                e.stopPropagation()
+                p.onEditActivity(activity)
+              }}
+            >
+              <Pencil className="size-3" aria-hidden />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-6 text-red hover:text-red"
+              aria-label={`حذف فعالیت ${activity.name}`}
+              onClick={(e) => {
+                e.stopPropagation()
+                p.onDeleteActivity(activity)
+              }}
+            >
+              <Trash2 className="size-3" aria-hidden />
+            </Button>
+          </div>
+        </div>
+
+        {/* زیرشاخه عناصر کاری — سطح چهارم (§۷.۱) */}
+        <CollapsibleContent>
+          <div className="mb-1 mt-0.5 ms-2 border-s-2 border-dashed border-border/70 pb-1 ps-2">
+            {elements.length === 0 ? (
+              <p className="px-1 py-1 text-[10.5px] text-faint">
+                {hasSearch ? 'عنصر منطبقی نیست' : 'عنصری ثبت نشده است'}
+              </p>
+            ) : (
+              <SortableList
+                items={elements}
+                onReorder={(ids) => p.onReorderElements(activity.id, ids)}
+                className="space-y-0.5"
+                renderItem={(element) => (
+                  <div
+                    key={element.id}
+                    className="group flex items-stretch gap-1 rounded-md py-0.5 pe-1 ps-7 transition-colors hover:bg-brand-soft/25"
+                  >
+                    <button
+                      type="button"
+                      className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-1 py-0.5 text-right focus-visible:outline-2 focus-visible:outline-ring"
+                      aria-label={`ویرایش عنصر کاری ${element.name}`}
+                      title={`${element.name} — ${ELEMENT_TYPE_LABELS[element.elementType as ElementType] ?? ''}${element.rating ? ` · R = ${element.rating.totalFactor}` : ' · ارزیابی نشده'}`}
+                      onClick={() => p.onEditElement(element)}
+                    >
+                      <CircleDot
+                        className={cn('size-3 shrink-0', ELEMENT_TYPE_BADGE[element.elementType] ? 'text-brand' : 'text-faint')}
+                        aria-hidden
+                      />
+                      <span className="line-clamp-1 min-w-0 flex-1 text-[11.5px] leading-4">{element.name}</span>
+                      {element.rating && (
+                        <span className="num shrink-0 rounded bg-green-soft px-1 text-[9px] font-bold text-green" dir="ltr">
+                          R = {element.rating.totalFactor}
+                        </span>
+                      )}
+                    </button>
+                    <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="size-5"
+                        aria-label={`ویرایش عنصر ${element.name}`}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          p.onEditElement(element)
+                        }}
+                      >
+                        <Pencil className="size-2.5" aria-hidden />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="size-5 text-red hover:text-red"
+                        aria-label={`حذف عنصر ${element.name}`}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          p.onDeleteElement(element, activity)
+                        }}
+                      >
+                        <Trash2 className="size-2.5" aria-hidden />
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              />
+            )}
+            <Button
+              variant="ghost"
+              size="sm"
+              className="mt-0.5 w-full gap-1 justify-start ps-2 text-[11px] text-muted-foreground"
+              onClick={() => p.onNewElement(activity)}
+            >
+              <Plus className="size-3" aria-hidden />
+              عنصر جدید
+            </Button>
+          </div>
+        </CollapsibleContent>
+      </div>
+    </Collapsible>
+  )
+}
+
 // ═══════════════════════════════════════════════════════════
-// پنل جزئیات ایستگاه — فرم ویرایش با ذخیره خودکار (FR-23)
-// دیالوگ ویرایش همان فرم مشترک را نمایش می‌دهد تا تنها یک
-// نمونه autosave برای هر ایستگاه فعال باشد (کنترل هم‌زمانی)
+// پنل جزئیات ایستگاه — autosave + الونس‌های سطح ایستگاه (§۶)
 // ═══════════════════════════════════════════════════════════
+
 function StationDetailsPanel({
+  projectId,
   station,
   prefs,
   dialogOpen,
@@ -1076,6 +1685,7 @@ function StationDetailsPanel({
   onOpenActivity,
   onDeleteStation,
 }: {
+  projectId: string
   station: StationDto
   prefs: Prefs
   dialogOpen: boolean
@@ -1085,8 +1695,6 @@ function StationDetailsPanel({
   onOpenActivity: (activityId: string) => void
   onDeleteStation: () => void
 }) {
-  // فرم یک‌بار از داده اولیه مقداردهی می‌شود؛ ref آخرین updatedAt را
-  // برای کنترل هم‌زمانی (expectedUpdatedAt) نگه می‌دارد — ۶.۶
   const [form, setForm] = useState<StationFormState>(() => ({
     name: station.name,
     description: station.description ?? '',
@@ -1095,7 +1703,7 @@ function StationDetailsPanel({
 
   const { status, lastError, retry } = useAutosave<StationFormState>({
     data: form,
-    ready: true,
+    ready: form.name.trim().length > 0,
     save: async (value) => {
       const res = await structureApi.updateStation(station.id, {
         name: value.name.trim(),
@@ -1119,11 +1727,9 @@ function StationDetailsPanel({
         id={id}
         value={form.name}
         onChange={(e) => setForm((s) => ({ ...s, name: e.target.value }))}
-        placeholder="مثلاً: ایستگاه برش ورق"
       />
     </div>
   )
-
   const descField = (id: string) => (
     <div className="space-y-1.5">
       <Label htmlFor={id}>شرح ایستگاه (اختیاری)</Label>
@@ -1131,21 +1737,20 @@ function StationDetailsPanel({
         id={id}
         value={form.description}
         onChange={(e) => setForm((s) => ({ ...s, description: e.target.value }))}
-        placeholder="مثلاً: برش ورق گالوانیزه با گیوتین ۳ متری"
-        className="min-h-20"
+        className="min-h-16"
       />
     </div>
   )
 
   return (
-    <div className="space-y-5">
-      {/* کارت ایستگاه — فرم ویرایش با ذخیره خودکار */}
+    <div className="space-y-4">
+      {/* جزئیات ایستگاه */}
       <section className="card-premium p-5" aria-label={`جزئیات ایستگاه ${station.name}`}>
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="flex min-w-0 items-center gap-3">
-            <div className="chip-icon bg-brand-soft text-brand">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-2.5">
+            <span className="chip-icon bg-brand-soft text-brand">
               <Warehouse className="size-6" aria-hidden />
-            </div>
+            </span>
             <div className="min-w-0">
               <h2 className="truncate text-lg font-extrabold">{station.name}</h2>
               <p className="num text-xs text-muted-foreground">
@@ -1153,86 +1758,104 @@ function StationDetailsPanel({
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-2">
             <SaveIndicator status={status} onRetry={retry} error={lastError} />
-            <Button variant="outline" size="sm" className="gap-1.5" onClick={() => onDialogOpenChange(true)}>
-              <Pencil className="size-3.5" aria-hidden />
+            <Button variant="outline" size="sm" onClick={() => onDialogOpenChange(true)}>
               ویرایش
             </Button>
             <Button
-              variant="ghost"
+              variant="outline"
               size="icon"
               className="size-8 text-red hover:text-red"
-              onClick={onDeleteStation}
               aria-label={`حذف ایستگاه ${station.name}`}
+              onClick={onDeleteStation}
             >
               <Trash2 className="size-4" aria-hidden />
             </Button>
           </div>
         </div>
-
-        <div className="mt-4 space-y-4">
+        <div className="mt-4 space-y-3">
           {nameField(`station-name-${station.id}`)}
           {descField(`station-desc-${station.id}`)}
         </div>
-
         <p className="num mt-3 text-[11px] text-faint">
-          ایجاد: {formatDate(station.createdAt, prefs)} · آخرین تغییر: {formatDateTime(station.updatedAt, prefs)} ·
+          ایجاد: {formatDateTime(station.createdAt, prefs)} · آخرین تغییر: {formatDateTime(station.updatedAt, prefs)} ·
           تغییرات به‌صورت خودکار ذخیره می‌شوند.
         </p>
       </section>
 
-      {/* فعالیت‌های ایستگاه — کارت‌های کلیک‌شو به صفحه اختصاصی فعالیت */}
+      {/* الونس‌های سطح ایستگاه — §۶ */}
+      <AllowanceSection projectId={projectId} scopeType="STATION" scopeId={station.id} />
+
+      {/* فعالیت‌های ایستگاه */}
       <section className="card-premium p-5" aria-label="فعالیت‌های ایستگاه">
-        <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             <h2 className="font-extrabold">فعالیت‌های این ایستگاه</h2>
             <Badge variant="secondary" className="num border-0 bg-surface-2">
               {formatInt(station.activities.length, prefs)}
             </Badge>
           </div>
-          <Button onClick={onNewActivity} className="btn-brand gap-1.5 border-0">
+          <Button size="sm" className="btn-brand gap-1.5 border-0" onClick={onNewActivity}>
             <Plus className="size-4" aria-hidden />
             فعالیت جدید
           </Button>
         </div>
-
         {station.activities.length === 0 ? (
           <EmptyState
-            icon={<ListTree className="size-7" aria-hidden />}
-            title="فعالیتی برای این ایستگاه ثبت نشده است"
-            description="هر فعالیت از عناصر کاری تشکیل می‌شود و صفحه اختصاصی چهارزبانه دارد: مشخصات، عناصر کاری، زمان‌سنجی و تحلیل نتایج."
+            className="mt-4 py-6"
+            icon={<ListTree className="size-6" aria-hidden />}
+            title="فعالیتی ثبت نشده است"
+            description="هر فعالیت از عناصر کاری تشکیل می‌شود؛ عناصر را در صفحه فعالیت یا درخت ساختار اضافه کنید."
             action={
-              <Button onClick={onNewActivity} className="btn-brand gap-1.5 border-0">
+              <Button size="sm" onClick={onNewActivity} className="btn-brand gap-1.5 border-0">
                 <Plus className="size-4" aria-hidden />
                 ثبت اولین فعالیت
               </Button>
             }
-            className="mt-3"
           />
         ) : (
           <ul className="mt-4 grid gap-2 sm:grid-cols-2">
-            {station.activities.map((activity) => (
-              <li key={activity.id}>
-                <ActivityCard activity={activity} prefs={prefs} onOpen={onOpenActivity} />
+            {station.activities.map((a) => (
+              <li key={a.id}>
+                <button
+                  type="button"
+                  className="group flex w-full items-center gap-2.5 rounded-xl border border-border/60 bg-surface-2/50 p-3 text-right transition-colors hover:border-brand/40 hover:bg-brand-soft/40 focus-visible:outline-2 focus-visible:outline-ring"
+                  onClick={() => onOpenActivity(a.id)}
+                  aria-label={`باز کردن صفحه فعالیت ${a.name}`}
+                >
+                  <span
+                    className="num size-9 shrink-0 rounded-lg bg-brand-soft text-base font-bold text-brand"
+                    title={processLabelOf(a.processType)}
+                    aria-hidden
+                  >
+                    {processSymbolOf(a.processType)}
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-bold">{a.name}</span>
+                    <span className="num block truncate text-[11px] text-muted-foreground">
+                      {formatInt(activityElementCount(a), prefs)} عنصر کاری
+                      {a.group ? ` · گروه ${a.group.name}` : ''}
+                    </span>
+                  </span>
+                  <ChevronDown className="size-4 shrink-0 -rotate-90 text-faint transition-colors group-hover:text-brand" aria-hidden />
+                </button>
               </li>
             ))}
           </ul>
         )}
       </section>
 
-      {/* دیالوگ ویرایش — نمای بزرگ‌تر همان فرم ذخیره خودکار */}
+      {/* دیالوگ ویرایش مشترک با autosave */}
       <Dialog open={dialogOpen} onOpenChange={onDialogOpenChange}>
         <DialogContent dir="rtl" className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>ویرایش ایستگاه</DialogTitle>
-            <DialogDescription>
-              تغییرات به‌صورت خودکار ذخیره می‌شوند؛ همین فرم در پنل جزئیات نیز فعال است.
-            </DialogDescription>
+            <DialogDescription>تغییرات به‌صورت خودکار ذخیره می‌شوند.</DialogDescription>
           </DialogHeader>
-          <div className="space-y-4">
-            {nameField(`station-dialog-name-${station.id}`)}
-            {descField(`station-dialog-desc-${station.id}`)}
+          <div className="space-y-3">
+            {nameField(`station-edit-name-${station.id}`)}
+            {descField(`station-edit-desc-${station.id}`)}
           </div>
           <DialogFooter className="flex-row justify-between gap-2">
             <SaveIndicator status={status} onRetry={retry} error={lastError} />
@@ -1247,48 +1870,9 @@ function StationDetailsPanel({
 }
 
 // ═══════════════════════════════════════════════════════════
-// کارت فعالیت — کلیک → صفحه اختصاصی فعالیت (FR-03)
+// فرم ویرایش فعالیت (داخل دیالوگ) — ذخیره خودکار
 // ═══════════════════════════════════════════════════════════
-function ActivityCard({
-  activity,
-  prefs,
-  onOpen,
-}: {
-  activity: ActivityDto
-  prefs: Prefs
-  onOpen: (activityId: string) => void
-}) {
-  const label = processLabelOf(activity.processType)
-  return (
-    <button
-      type="button"
-      onClick={() => onOpen(activity.id)}
-      className="group flex w-full items-center gap-2.5 rounded-xl border border-border/60 bg-surface-2/50 p-3 text-right transition-all hover:border-brand/40 hover:bg-brand-soft/40 focus-visible:outline-2 focus-visible:outline-ring"
-      aria-label={`باز کردن صفحه فعالیت ${activity.name}`}
-    >
-      <span
-        className="num flex size-9 shrink-0 items-center justify-center rounded-lg bg-brand-soft text-base font-bold text-brand"
-        title={label}
-        aria-hidden
-      >
-        {processSymbolOf(activity.processType)}
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className="block truncate text-sm font-bold">{activity.name}</span>
-        <span className="num mt-0.5 block truncate text-[11px] text-muted-foreground">
-          {formatInt(activityElementCount(activity), prefs)} عنصر کاری
-          {activity.group ? ` · گروه ${activity.group.name}` : ' · بدون گروه'}
-        </span>
-      </span>
-      <ArrowLeft className="size-4 shrink-0 text-faint transition-colors group-hover:text-brand" aria-hidden />
-    </button>
-  )
-}
 
-// ═══════════════════════════════════════════════════════════
-// فرم ویرایش فعالیت (داخل دیالوگ) — ذخیره خودکار؛
-// با key فعالیت رندر می‌شود تا وضعیت فرم با تعویض فعالیت بازنشانی شود
-// ═══════════════════════════════════════════════════════════
 function ActivityEditForm({
   activity,
   groups,
@@ -1302,7 +1886,7 @@ function ActivityEditForm({
   groupsLoading: boolean
   groupsError: boolean
   onClose: () => void
-  onSaved: (activityId: string) => void
+  onSaved: () => void
 }) {
   const [form, setForm] = useState<ActivityFormState>(() => ({
     name: activity.name,
@@ -1314,7 +1898,7 @@ function ActivityEditForm({
 
   const { status, lastError, retry } = useAutosave<ActivityFormState>({
     data: form,
-    ready: true,
+    ready: form.name.trim().length > 0,
     save: async (value) => {
       const res = await structureApi.updateActivity(activity.id, {
         name: value.name.trim(),
@@ -1324,7 +1908,7 @@ function ActivityEditForm({
         expectedUpdatedAt: updatedAtRef.current,
       })
       updatedAtRef.current = res.activity.updatedAt
-      onSaved(activity.id)
+      onSaved()
     },
   })
 
@@ -1344,7 +1928,6 @@ function ActivityEditForm({
             id={`activity-edit-name-${activity.id}`}
             value={form.name}
             onChange={(e) => setForm((s) => ({ ...s, name: e.target.value }))}
-            placeholder="مثلاً: بستن درب پنل"
           />
         </div>
         <div className="space-y-1.5">
@@ -1353,7 +1936,6 @@ function ActivityEditForm({
             id={`activity-edit-desc-${activity.id}`}
             value={form.description}
             onChange={(e) => setForm((s) => ({ ...s, description: e.target.value }))}
-            placeholder="مثلاً: بستن ۴ پیچ با پیچ‌گوشتی برقی"
             className="min-h-16"
           />
         </div>
@@ -1364,13 +1946,13 @@ function ActivityEditForm({
               <HelpDot label="نوع رویداد فرایندی" content={PROCESS_TYPE_HELP} />
             </div>
             <Select value={form.processType} onValueChange={(v) => setForm((s) => ({ ...s, processType: v }))}>
-              <SelectTrigger className="w-full" aria-label="نوع رویداد فرایندی">
+              <SelectTrigger aria-label="نوع رویداد فرایندی">
                 <SelectValue />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent dir="rtl">
                 {PROCESS_TYPES.map((pt) => (
                   <SelectItem key={pt} value={pt}>
-                    <span className="num">{PROCESS_TYPE_SYMBOLS[pt]}</span> {PROCESS_TYPE_LABELS[pt]}
+                    <span className="num">{processSymbolOf(pt)}</span> {processLabelOf(pt)}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -1378,18 +1960,18 @@ function ActivityEditForm({
           </div>
           <div className="space-y-1.5">
             <div className="flex items-center gap-1">
-              <Label>گروه مجازها</Label>
-              <HelpDot label="گروه مجازها" content={GROUP_ASSIGN_HELP} />
+              <Label>گروه فعالیت (طبقه‌بندی)</Label>
+              <HelpDot label="گروه فعالیت" content={GROUP_ASSIGN_HELP} />
             </div>
             <Select
               value={form.groupId || NO_GROUP}
               onValueChange={(v) => setForm((s) => ({ ...s, groupId: v === NO_GROUP ? '' : v }))}
               disabled={groupsLoading}
             >
-              <SelectTrigger className="w-full" aria-label="گروه مجازها">
+              <SelectTrigger aria-label="گروه فعالیت">
                 <SelectValue />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent dir="rtl">
                 <SelectItem value={NO_GROUP}>بدون گروه</SelectItem>
                 {groups.map((g) => (
                   <SelectItem key={g.id} value={g.id}>
@@ -1399,7 +1981,7 @@ function ActivityEditForm({
               </SelectContent>
             </Select>
             {groupsError && (
-              <p className="text-[11px] leading-5 text-red">
+              <p className="text-xs leading-5 text-red">
                 بارگذاری گروه‌ها ناموفق بود؛ فعلاً تنها «بدون گروه» در دسترس است.
               </p>
             )}
@@ -1413,5 +1995,110 @@ function ActivityEditForm({
         </Button>
       </DialogFooter>
     </>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════
+// دیالوگ ویرایش عنصر کاری — با الونس‌های سطح عنصر (§۶)
+// ═══════════════════════════════════════════════════════════
+
+function ElementEditDialog({
+  projectId,
+  element,
+  onClose,
+  onSaved,
+}: {
+  projectId: string
+  element: ElementDto
+  onClose: () => void
+  onSaved: () => void
+}) {
+  const [form, setForm] = useState<ElementFormState>(() => ({
+    name: element.name,
+    description: element.description ?? '',
+    elementType: element.elementType,
+  }))
+  const updatedAtRef = useRef(element.updatedAt)
+
+  const { status, lastError, retry } = useAutosave<ElementFormState>({
+    data: form,
+    ready: form.name.trim().length > 0,
+    save: async (value) => {
+      const res = await structureApi.updateElement(element.id, {
+        name: value.name.trim(),
+        description: value.description.trim() || null,
+        elementType: value.elementType,
+        expectedUpdatedAt: updatedAtRef.current,
+      })
+      updatedAtRef.current = res.element.updatedAt
+      onSaved()
+    },
+  })
+
+  return (
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent dir="rtl" className="max-h-[92vh] overflow-y-auto sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>ویرایش عنصر کاری</DialogTitle>
+          <DialogDescription>
+            مشخصات به‌صورت خودکار ذخیره می‌شوند؛ الونس‌های اختصاصی این عنصر در بخش پایین.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-1">
+              <Label htmlFor={`element-edit-name-${element.id}`}>نام عنصر کاری</Label>
+              <HelpDot label="نام عنصر کاری" content={ELEMENT_NAME_HELP} />
+            </div>
+            <Input
+              id={`element-edit-name-${element.id}`}
+              value={form.name}
+              onChange={(e) => setForm((s) => ({ ...s, name: e.target.value }))}
+              placeholder="مثلاً: برداشتن قطعه از گراناق"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor={`element-edit-desc-${element.id}`}>شرح عنصر (اختیاری)</Label>
+            <Textarea
+              id={`element-edit-desc-${element.id}`}
+              value={form.description}
+              onChange={(e) => setForm((s) => ({ ...s, description: e.target.value }))}
+              placeholder="مثلاً: برداشت با دو دست و قراردادن روی میز کار"
+              className="min-h-16"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-1">
+              <Label>نوع عنصر کاری</Label>
+              <HelpDot label="نوع عنصر کاری" content={ELEMENT_TYPE_HELP} />
+            </div>
+            <Select value={form.elementType} onValueChange={(v) => setForm((s) => ({ ...s, elementType: v }))}>
+              <SelectTrigger className="w-full" aria-label="نوع عنصر کاری">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent dir="rtl">
+                {ELEMENT_TYPES.map((et) => (
+                  <SelectItem key={et} value={et}>
+                    {ELEMENT_TYPE_LABELS[et]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-[11px] leading-5 text-faint">
+              تغییر نوع عنصر بر مدل محاسباتی اثر دارد و وضعیت محاسبات را «نیازمند محاسبه مجدد» می‌کند.
+            </p>
+          </div>
+
+          {/* الونس‌ها و زمان‌های مجاز — سطح عنصر کاری (§۶) */}
+          <AllowanceSection projectId={projectId} scopeType="WORK_ELEMENT" scopeId={element.id} compact />
+        </div>
+        <DialogFooter className="flex-row justify-between gap-2">
+          <SaveIndicator status={status} onRetry={retry} error={lastError} />
+          <Button variant="outline" onClick={onClose}>
+            بستن
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }

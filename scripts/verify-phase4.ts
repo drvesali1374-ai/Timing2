@@ -68,10 +68,14 @@ async function main() {
   const op2 = (await api('POST', `/api/projects/${PID}/operators`, { displayName: 'اپراتور ب', code: 'B-02' })).data?.operator?.id
   check('ایستگاه و اپراتورها', Boolean(SID && op1 && op2))
 
-  // دسته مجاز ۱۵٪ + گروه
-  const cat = (await api('POST', `/api/projects/${PID}/allowance-categories`, { name: 'استراحت و نیازهای شخصی' })).data?.category?.id
+  // الونس ۱۵٪ — مدل سلسله‌مراتبی (جلسه اول): تعریف مرکزی + تخصیص سطح خط
+  const def15 = (await api('POST', `/api/projects/${PID}/allowance-definitions`, {
+    title: 'استراحت و نیازهای شخصی', defaultValueType: 'PERCENT', defaultValuePercent: 0.15,
+  })).data?.definition?.id
   const grp = (await api('POST', `/api/projects/${PID}/groups`, { name: 'کار دستی' })).data?.group?.id
-  await api('PUT', `/api/groups/${grp}/allowances`, { values: [{ categoryId: cat, percentValue: 0.15 }] })
+  await api('PUT', `/api/projects/${PID}/allowances`, {
+    ops: [{ definitionId: def15, action: 'SET', valueType: 'PERCENT', percentValue: 0.15 }],
+  })
 
   // جدول وستینگهاوس پیش‌فرض پروژه
   const tables = await api('GET', `/api/projects/${PID}/rating-tables`)
@@ -117,9 +121,9 @@ async function main() {
   console.log('\nB2) مجازها: NT=9.047 و A=0.15 — FR-15')
   an = (await api('GET', `/api/activities/${AID_A}/analysis`)).data?.analysis
   elAdto = an?.elements?.[0]
-  check('مجموع مجاز مؤثر A = 0.15', approx(an?.allowances?.totalA, 0.15), an?.allowances?.totalA, 0.15)
+  check('مجموع مجاز مؤثر A = 0.15', approx(an?.allowances?.summary?.totalPercent, 0.15), an?.allowances?.summary?.totalPercent, 0.15)
   check('روش ۱ (پیش‌فرض): ST = 9.047 × 1.15 = 10.40405', approx(elAdto?.st, 10.40405), elAdto?.st, 10.40405)
-  check('منبع مجاز: ارث از گروه', an?.allowances?.categories?.[0]?.source === 'GROUP', an?.allowances?.categories?.[0]?.source, 'GROUP')
+  check('منبع مجاز: ارث از خط تولید', an?.allowances?.rows?.[0]?.status === 'INHERITED' && an?.allowances?.rows?.[0]?.sourceScopeType === 'PROJECT', an?.allowances?.rows?.[0]?.status, 'INHERITED')
 
   const sw2 = await api('PUT', `/api/projects/${PID}/calc-settings`, { allowanceMethod: 'SHARE_OF_ST' })
   check('تغییر روش به سهم از زمان استاندارد', sw2.status === 200, sw2.status)
