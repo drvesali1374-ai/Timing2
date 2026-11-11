@@ -295,7 +295,7 @@ function buildSummarySheet(wb: ExcelJS.Workbook, report: StudyReportDto, prefs: 
       seen.add(key)
       ws3.getCell(r3, 1).value = sec.activity.name
       ws3.getCell(r3, 2).value = row.title
-      ws3.getCell(r3, 3).value = row.valueType === 'PERCENT' ? 'درصدی' : 'زمان ثابت'
+      ws3.getCell(r3, 3).value = row.valueType === 'PERCENT' ? 'درصدی' : row.valueType === 'FIXED_TIME' ? 'زمان ثابت' : '—'
       if (row.valueType === 'PERCENT' && row.percentValue !== null) ws3.getCell(r3, 4).value = Number((row.percentValue * 100).toFixed(4))
       if (row.valueType === 'FIXED_TIME' && row.timeValueSeconds !== null) ws3.getCell(r3, 4).value = Number(row.timeValueSeconds.toFixed(4))
       ws3.getCell(r3, 5).value = row.sourceScopeLabel ?? '—'

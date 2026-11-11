@@ -260,16 +260,20 @@ function ReportPaper({ report }: { report: StudyReportInfoDto }) {
                       <td className="py-1 text-center">
                         {row.valueType === 'PERCENT'
                           ? 'درصدی'
-                          : row.applicationBasis === 'PER_CYCLE'
-                            ? 'زمان ثابت — هر چرخه'
-                            : 'زمان ثابت — هر اجرا'}
+                          : row.valueType === 'FIXED_TIME'
+                            ? row.applicationBasis === 'PER_CYCLE'
+                              ? 'زمان ثابت — هر چرخه'
+                              : 'زمان ثابت — هر اجرا'
+                            : '—'}
                       </td>
                       <td className="py-1 text-center font-bold tabular-nums">
                         {row.status === 'EXCLUDED'
                           ? '—'
                           : row.valueType === 'PERCENT'
                             ? formatPercent(row.percentValue, prefs, 2)
-                            : `${formatTimeValue(row.timeValueSeconds, prefs, 1)}s`}
+                            : row.valueType === 'FIXED_TIME'
+                              ? `${formatTimeValue(row.timeValueSeconds, prefs, 1)}s`
+                              : '—'}
                       </td>
                       <td className="py-1 text-center">{row.sourceScopeLabel ?? '—'}</td>
                       <td className="py-1 text-center">

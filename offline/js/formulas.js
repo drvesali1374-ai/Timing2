@@ -324,6 +324,20 @@
   }
 
   /**
+   * نوع نمایشی یک تخصیص EXCLUDE — مستقل از نوع مقدار فعال (الزام ۴ — هم‌ارز نسخه وب):
+   *  ۱. نزدیک‌ترین تصمیم «فعال» در سطح بالاترِ خود scope،
+   *  ۲. وگرنه نوع/مقدار پیش‌فرض تعریف مرکزی،
+   *  ۳. وگرنه null — وضعیت حذف‌شده به‌صورت خنثی نمایش داده می‌شود.
+   */
+  function deriveExcludedDisplayType(nearestActiveAbove, def) {
+    if (nearestActiveAbove && nearestActiveAbove.mode === 'ACTIVE') return nearestActiveAbove.valueType;
+    if (def.defaultValueType === 'PERCENT' || def.defaultValueType === 'FIXED_TIME') return def.defaultValueType;
+    if (def.defaultTimeSeconds !== null && def.defaultTimeSeconds !== undefined) return 'FIXED_TIME';
+    if (def.defaultValuePercent !== null && def.defaultValuePercent !== undefined) return 'PERCENT';
+    return null;
+  }
+
+  /**
    * الونس‌های مؤثر یک scope با پیمایش زنجیره والد (از برگ به ریشه).
    * قواعد ۱ تا ۱۰ سند §۲.۴ — مطابق نسخه وب.
    */
@@ -368,6 +382,27 @@
         if (chain[ci].type === decision.scopeType && chain[ci].id === decision.scopeId) { sourceLink = chain[ci]; break; }
       }
 
+      // نزدیک‌ترین تصمیم «فعال» در سطح بالاترِ خود scope — برای نوع نمایشی EXCLUDED (الزام ۴)
+      var nearestActiveAbove = null;
+      for (var ni = chain.length - 1; ni >= 0; ni--) {
+        var nLink = chain[ni];
+        if (nLink.type === target.type && nLink.id === target.id) continue; // خود scope
+        for (var na = 0; na < assignments.length; na++) {
+          var aA = assignments[na];
+          if (aA.definitionId === def.id && aA.scopeType === nLink.type && aA.scopeId === nLink.id && aA.mode === 'ACTIVE') {
+            nearestActiveAbove = aA;
+            break;
+          }
+        }
+        if (nearestActiveAbove) break;
+      }
+
+      // والد مستقیم scope (نه والد تصمیم):
+      //  • تصمیم محلی وجود دارد → والد = نزدیک‌ترین تصمیم بالاتر (parentDecision)
+      //  • تصمیم ارثی است → خود تصمیم از والد می‌آید؛ والد مستقیم همان است.
+      var directParent = isLocal ? parentDecision : decision;
+      var parentIsActive = directParent !== null && directParent.mode === 'ACTIVE';
+
       var status;
       if (decision.mode === 'EXCLUDE') status = 'EXCLUDED';
       else if (isLocal && parentDecision) status = 'OVERRIDDEN';
@@ -375,6 +410,8 @@
       else status = 'INHERITED';
 
       var excluded = decision.mode === 'EXCLUDE';
+      // نوع نمایشی ردیف — برای EXCLUDED از منابع معنادار مشتق می‌شود (الزام ۴)
+      var rowValueType = excluded ? deriveExcludedDisplayType(nearestActiveAbove, def) : decision.valueType;
       var needsAggregationRule =
         !excluded &&
         decision.valueType === 'FIXED_TIME' &&
@@ -403,15 +440,19 @@
         title: def.title,
         code: def.code || null,
         status: status,
-        valueType: decision.valueType,
+        valueType: rowValueType,
         percentValue: !excluded && decision.valueType === 'PERCENT' ? decision.percentValue : null,
         timeValueSeconds: !excluded && decision.valueType === 'FIXED_TIME' ? decision.timeValueSeconds : null,
         applicationBasis: decision.valueType === 'FIXED_TIME' ? decision.applicationBasis : null,
         sourceScopeType: decision.scopeType,
         sourceScopeLabel: sourceLink ? sourceLink.label : null,
         hasLocalDecision: isLocal,
-        parentValue: parentDecision ? assignmentValueOf(parentDecision) : null,
-        parentScopeType: parentDecision ? parentDecision.scopeType : null,
+        parentValue: parentIsActive ? assignmentValueOf(directParent) : null,
+        parentValueType: parentIsActive ? directParent.valueType : null,
+        parentApplicationBasis: parentIsActive && directParent.valueType === 'FIXED_TIME' ? directParent.applicationBasis : null,
+        parentScopeType: directParent ? directParent.scopeType : null,
+        parentDecisionExists: directParent !== null,
+        parentMode: directParent ? directParent.mode : null,
         needsAggregationRule: needsAggregationRule,
         note: note,
       };
@@ -419,9 +460,9 @@
 
       if (!excluded && !needsAggregationRule) {
         count++;
-        if (row.valueType === 'PERCENT' && row.percentValue !== null) {
+        if (decision.valueType === 'PERCENT' && row.percentValue !== null) {
           totalPercent += row.percentValue;
-        } else if (row.valueType === 'FIXED_TIME' && row.timeValueSeconds !== null) {
+        } else if (decision.valueType === 'FIXED_TIME' && row.timeValueSeconds !== null) {
           if (row.applicationBasis === 'PER_CYCLE') perCycleSeconds += row.timeValueSeconds;
           else perExecutionSeconds += row.timeValueSeconds;
         }

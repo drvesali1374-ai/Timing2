@@ -116,6 +116,34 @@ function formatSeconds(v: number | null, prefs: Prefs): string {
   return `${formatTimeValue(v, prefs)} ثانیه`
 }
 
+/** برچسب منوی عملیات Restore — با وضعیت واقعی تخصیص هماهنگ (الزام ۴) */
+function restoreMenuLabel(row: ResolvedAllowanceRowDto): string {
+  if (row.status === 'CUSTOM') return 'حذف تخصیص محلی'
+  if (row.status === 'EXCLUDED') return row.parentMode === 'ACTIVE' ? 'بازگردانی الونس والد' : 'حذف استثنای محلی'
+  return 'بازگردانی به مقدار والد'
+}
+
+/** پیام موفقیت Restore — متن هماهنگ با وضعیت والد (گمراه‌کننده نباشد) */
+function restoreToast(row: ResolvedAllowanceRowDto): string {
+  if (row.status === 'CUSTOM') return `تخصیص محلی «${row.title}» حذف شد`
+  if (row.status === 'EXCLUDED') {
+    return row.parentMode === 'ACTIVE'
+      ? `استثنای محلی «${row.title}» حذف شد و الونس والد بازگشت`
+      : `استثنای محلی «${row.title}» حذف شد`
+  }
+  return `تخصیص محلی «${row.title}» حذف شد و مقدار والد بازگشت`
+}
+
+/** مقدار والد با «نوع و مبنای خودش» قالب‌بندی می‌شود — نه نوع تخصیص محلی (الزام ۳) */
+function formatParentValue(row: ResolvedAllowanceRowDto, prefs: Prefs): string {
+  if (row.parentValue === null || row.parentValue === undefined) return '—'
+  if (row.parentValueType === 'PERCENT') return formatPercent(row.parentValue, prefs, 2)
+  const seconds = `${formatTimeValue(row.parentValue, prefs, 1)} ثانیه`
+  const basis =
+    row.parentApplicationBasis === 'PER_CYCLE' ? ' (هر چرخه)' : row.parentApplicationBasis === 'PER_ELEMENT_EXECUTION' ? ' (هر اجرا)' : ''
+  return seconds + basis
+}
+
 // ═══════════════ بخش اصلی ═══════════════
 
 export function AllowanceSection({
@@ -274,12 +302,7 @@ export function AllowanceSection({
                         if (def) setEditing({ definition: def, row })
                       }}
                       onExclude={() => setExcluding(row)}
-                      onRestore={() =>
-                        runOp(
-                          { definitionId: row.definitionId, action: 'RESTORE' },
-                          `تخصیص محلی «${row.title}» حذف شد و مقدار والد بازگشت`
-                        )
-                      }
+                      onRestore={() => runOp({ definitionId: row.definitionId, action: 'RESTORE' }, restoreToast(row)) }
                       onBasis={() => setBasisTarget(row)}
                     />
                   ))}
@@ -299,12 +322,7 @@ export function AllowanceSection({
                     if (def) setEditing({ definition: def, row })
                   }}
                   onExclude={() => setExcluding(row)}
-                  onRestore={() =>
-                    runOp(
-                      { definitionId: row.definitionId, action: 'RESTORE' },
-                      `تخصیص محلی «${row.title}» حذف شد و مقدار والد بازگشت`
-                    )
-                  }
+                  onRestore={() => runOp({ definitionId: row.definitionId, action: 'RESTORE' }, restoreToast(row)) }
                   onBasis={() => setBasisTarget(row)}
                 />
               ))}
@@ -544,13 +562,15 @@ function AllowanceRowDesktop({
       <td className="px-3 py-2.5 text-center text-xs">
         {row.valueType === 'PERCENT' ? (
           <span>درصدی</span>
-        ) : (
+        ) : row.valueType === 'FIXED_TIME' ? (
           <span>
             زمان ثابت
             <span className="block text-[10px] text-muted-foreground">
               {row.applicationBasis === 'PER_CYCLE' ? 'هر چرخه' : 'هر اجرا'}
             </span>
           </span>
+        ) : (
+          <span className="text-faint">—</span>
         )}
       </td>
       <td className="num px-3 py-2.5 text-center font-bold">
@@ -611,7 +631,7 @@ function AllowanceRowMobile({
             <span className={cn('rounded-full px-2 py-0.5 text-[10px] font-bold', badge.className)}>{badge.label}</span>
           </div>
           <p className="num mt-1 text-xs">
-            {excluded ? (
+            {excluded || (row.valueType !== 'PERCENT' && row.valueType !== 'FIXED_TIME') ? (
               <span className="text-faint">—</span>
             ) : row.valueType === 'PERCENT' ? (
               <span className="font-bold text-brand">{formatPercent(row.percentValue, prefs, 2)}</span>
@@ -679,7 +699,7 @@ function RowActionsMenu({
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={onRestore} className="text-red focus:text-red">
               <RotateCcw className="size-4" aria-hidden />
-              {row.status === 'CUSTOM' ? 'حذف تخصیص محلی' : 'بازگردانی به مقدار والد'}
+              {restoreMenuLabel(row)}
             </DropdownMenuItem>
           </>
         )}
@@ -970,16 +990,12 @@ function AllowanceEditorDialog({
             </>
           )}
 
-          {row?.parentValue !== null && row?.parentValue !== undefined && row.status !== 'CUSTOM' && (
+          {row && row.parentDecisionExists && row.parentMode === 'ACTIVE' && row.parentValue !== null && row.parentValue !== undefined ? (
             <p className="text-[11px] text-muted-foreground">
-              مقدار فعلی والد:{' '}
-              <b className="num">
-                {row.valueType === 'PERCENT'
-                  ? formatPercent(row.parentValue, prefs, 2)
-                  : `${formatTimeValue(row.parentValue, prefs, 1)} ثانیه`}
-              </b>
+              مقدار فعلی والد{row.parentScopeType ? ` (${SCOPE_LABELS[row.parentScopeType] ?? ''})` : ''}:{' '}
+              <b className="num">{formatParentValue(row, prefs)}</b>
             </p>
-          )}
+          ) : null}
         </div>
         <DialogFooter className="gap-2">
           <Button variant="outline" onClick={onClose}>

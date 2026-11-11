@@ -321,7 +321,9 @@ export default function AnalysisContent({ activityId }: { activityId: string }) 
                     {r.title}:{' '}
                     {r.valueType === 'PERCENT'
                       ? formatPercent(r.percentValue, prefs, 2)
-                      : `${formatTimeValue(r.timeValueSeconds, prefs, 1)}s`}
+                      : r.valueType === 'FIXED_TIME'
+                        ? `${formatTimeValue(r.timeValueSeconds, prefs, 1)}s`
+                        : '—'}
                     <span className="text-[10px] text-muted-foreground">
                       {r.status === 'CUSTOM'
                         ? '(اختصاصی)'

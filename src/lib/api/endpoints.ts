@@ -163,7 +163,8 @@ export interface ResolvedAllowanceRowDto {
   title: string
   code: string | null
   status: 'INHERITED' | 'OVERRIDDEN' | 'CUSTOM' | 'EXCLUDED'
-  valueType: 'PERCENT' | 'FIXED_TIME'
+  /** برای ردیف EXCLUDED ممکن است null باشد (نوع خنثی — الزام ۴) */
+  valueType: 'PERCENT' | 'FIXED_TIME' | null
   percentValue: number | null
   timeValueSeconds: number | null
   applicationBasis: 'PER_ELEMENT_EXECUTION' | 'PER_CYCLE' | null
@@ -171,7 +172,11 @@ export interface ResolvedAllowanceRowDto {
   sourceScopeLabel: string | null
   hasLocalDecision: boolean
   parentValue: number | null
+  parentValueType: 'PERCENT' | 'FIXED_TIME' | null
+  parentApplicationBasis: 'PER_ELEMENT_EXECUTION' | 'PER_CYCLE' | null
   parentScopeType: string | null
+  parentDecisionExists: boolean
+  parentMode: 'ACTIVE' | 'EXCLUDE' | null
   needsAggregationRule: boolean
   note: string | null
 }
