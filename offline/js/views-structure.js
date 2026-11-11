@@ -229,12 +229,19 @@
     return ids;
   }
 
-  /** فعال‌سازی Drag & Drop روی یک ردیف با هایلایت drop-target */
-  function makeSortable(row, type, id, scope, onReorder) {
-    row.setAttribute('draggable', 'true');
+  /** نشانه‌گذاری ردیف برای هدف‌یابی درگ — همیشه اعمال می‌شود (حتی در حالت قفل)؛
+   * شناسه/نوع/scope ردیف برای تست‌پذیری و معناشناسی نشانه‌گذاری می‌شود
+   * بدون اتصال شنونده یا draggable (بازبینی تکمیلی ج۱ §۶). */
+  function markSortTarget(row, type, id, scope) {
     row.setAttribute('data-sort-type', type);
     row.setAttribute('data-sort-id', id);
     row.setAttribute('data-sort-scope', scope);
+  }
+
+  /** فعال‌سازی Drag & Drop روی یک ردیف با هایلایت drop-target */
+  function makeSortable(row, type, id, scope, onReorder) {
+    markSortTarget(row, type, id, scope);
+    row.setAttribute('draggable', 'true');
     row.addEventListener('dragstart', function (e) {
       _drag = { type: type, id: id, scope: scope };
       if (e.dataTransfer) {
@@ -245,6 +252,10 @@
     row.addEventListener('dragend', function () {
       _drag = null;
       row.classList.remove('drop-target');
+      // لغو درگ (Esc/خروج از پنجره): هایلایت هر مقصد باقی‌مانده نیز پاک شود —
+      // dragleave در همه حالت‌های لغو تضمین‌شده نیست (بازبینی تکمیلی ج۱ §۶)
+      var stale = document.querySelectorAll('.drop-target');
+      for (var si = 0; si < stale.length; si++) stale[si].classList.remove('drop-target');
     });
     row.addEventListener('dragover', function (e) {
       if (!_drag || _drag.type !== type || _drag.scope !== scope || _drag.id === id) return;
@@ -697,7 +708,8 @@
     if (isOpen) {
       node.appendChild(U.h('div', { class: 't2-acts' }, activitiesSubList(st, allActs, ctx, hasSearch)));
     }
-    // مرتب‌سازی فقط بدون فیلتر فعال می‌شود؛ callback همیشه آرایه کامل را می‌گیرد.
+    // نشانه‌گذاری همیشه + مرتب‌سازی فقط بدون فیلتر؛ callback آرایه کامل را می‌گیرد.
+    markSortTarget(card, 'station', st.id, ctx.projectId);
     if (!hasSearch) {
       makeSortable(card, 'station', st.id, ctx.projectId, function (fromId, toId) {
         var ids = stations.map(function (s) { return s.id; });
@@ -797,7 +809,8 @@
       node.appendChild(elsList);
     }
 
-    // مرتب‌سازی فقط بدون فیلتر فعال می‌شود؛ callback همیشه آرایه کامل را می‌گیرد.
+    // نشانه‌گذاری همیشه + مرتب‌سازی فقط بدون فیلتر؛ callback آرایه کامل را می‌گیرد.
+    markSortTarget(row, 'activity', a.id, station.id);
     if (!hasSearch) {
       makeSortable(row, 'activity', a.id, station.id, function (fromId, toId) {
         var ids = acts.map(function (x) { return x.id; });
@@ -846,7 +859,8 @@
     row.addEventListener('mouseenter', function () { row.lastChild.style.opacity = '1'; });
     row.addEventListener('mouseleave', function () { row.lastChild.style.opacity = '0'; });
 
-    // مرتب‌سازی فقط بدون فیلتر فعال می‌شود؛ callback همیشه آرایه کامل را می‌گیرد.
+    // نشانه‌گذاری همیشه + مرتب‌سازی فقط بدون فیلتر؛ callback آرایه کامل را می‌گیرد.
+    markSortTarget(row, 'element', e.id, activity.id);
     if (!hasSearch) {
       makeSortable(row, 'element', e.id, activity.id, function (fromId, toId) {
         var ids = els.map(function (x) { return x.id; });

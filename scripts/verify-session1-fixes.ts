@@ -419,6 +419,138 @@ async function main() {
     check('D3. computeElementStandardTime دو موتور + مقادیر مرجع سند یکسان‌اند', stEqual)
   }
 
+  // ═══ §E — مبنای نمایشی زمان ثابت در ردیف EXCLUDED (بازبینی تکمیلی ج۱ §۳) ═══
+  console.log('\n── §E مبنای نمایشی EXCLUDED — displayApplicationBasis ──')
+  {
+    const proj = await req('POST', '/api/projects', { name: 'تست مبنای نمایشی — تکمیلی ج۱', lineName: 'خط تست', productName: 'محصول تست' })
+    const projectId: string = proj.data?.project?.id ?? proj.data?.id
+    const s1 = await req('POST', `/api/projects/${projectId}/stations`, { name: 'ایستگاه' })
+    const stationId = s1.data?.station?.id
+    const a1 = await req('POST', `/api/stations/${stationId}/activities`, { name: 'فعالیت' })
+    const activityId = a1.data?.activity?.id
+
+    const defT = await req('POST', `/api/projects/${projectId}/allowance-definitions`, { title: 'زمانی مبنادار', defaultValueType: 'FIXED_TIME', defaultTimeSeconds: 45 })
+    const defTId = defT.data?.definition?.id
+    const defC = await req('POST', `/api/projects/${projectId}/allowance-definitions`, { title: 'زمانی فقط پیش‌فرض', defaultValueType: 'FIXED_TIME', defaultTimeSeconds: 20 })
+    const defCId = defC.data?.definition?.id
+    const defP = await req('POST', `/api/projects/${projectId}/allowance-definitions`, { title: 'درصدی', defaultValueType: 'PERCENT', defaultValuePercent: 0.05 })
+    const defPId = defP.data?.definition?.id
+
+    // E1: والد ACTIVE با FIXED_TIME/PER_CYCLE → EXCLUDE در سطح پایین‌تر
+    await putOps('PROJECT', projectId, [{ definitionId: defTId, action: 'SET', valueType: 'FIXED_TIME', timeValueSeconds: 60, applicationBasis: 'PER_CYCLE' }])
+    await putOps('STATION', stationId, [{ definitionId: defTId, action: 'EXCLUDE' }])
+    {
+      const row = rowOf(await getScope('ACTIVITY', activityId), defTId)
+      check('E1. والد FIXED_TIME/PER_CYCLE → EXCLUDE: نوع نمایشی FIXED_TIME', row?.status === 'EXCLUDED' && row?.valueType === 'FIXED_TIME', { s: row?.status, vt: row?.valueType })
+      check('E1b. مبنای نمایشی PER_CYCLE از والد منتقل شد (applicationBasis خود تخصیص null ماند)', row?.displayApplicationBasis === 'PER_CYCLE' && row?.applicationBasis === null, { d: row?.displayApplicationBasis, a: row?.applicationBasis })
+    }
+
+    // E2: والد ACTIVE با FIXED_TIME/PER_ELEMENT_EXECUTION → همان EXCLUDE
+    await putOps('PROJECT', projectId, [{ definitionId: defTId, action: 'SET', valueType: 'FIXED_TIME', timeValueSeconds: 90, applicationBasis: 'PER_ELEMENT_EXECUTION' }])
+    {
+      const row = rowOf(await getScope('ACTIVITY', activityId), defTId)
+      check('E2. والد PER_ELEMENT_EXECUTION → EXCLUDE: مبنای نمایشی همان مبنا', row?.displayApplicationBasis === 'PER_ELEMENT_EXECUTION', row?.displayApplicationBasis)
+    }
+    await putOps('STATION', stationId, [{ definitionId: defTId, action: 'RESTORE' }])
+
+    // E3: هیچ والد ACTIVE — فقط پیش‌فرض تعریف مرکزی FIXED_TIME
+    await putOps('PROJECT', projectId, [{ definitionId: defCId, action: 'EXCLUDE' }])
+    {
+      const row = rowOf(await getScope('STATION', stationId), defCId)
+      check('E3. بدون والد فعال + پیش‌فرض مرکزی FIXED_TIME: نوع نمایشی FIXED_TIME', row?.status === 'EXCLUDED' && row?.valueType === 'FIXED_TIME', { s: row?.status, vt: row?.valueType })
+      check('E3b. مبنای نمایشی null — نه PER_ELEMENT_EXECUTION ساختگی، نه PER_CYCLE', row?.displayApplicationBasis === null, row?.displayApplicationBasis)
+    }
+    await putOps('PROJECT', projectId, [{ definitionId: defCId, action: 'RESTORE' }])
+
+    // E4: درصدی EXCLUDED — بدون مبنای زمانی
+    await putOps('PROJECT', projectId, [{ definitionId: defPId, action: 'SET', valueType: 'PERCENT', percentValue: 0.05 }])
+    await putOps('STATION', stationId, [{ definitionId: defPId, action: 'EXCLUDE' }])
+    {
+      const row = rowOf(await getScope('ACTIVITY', activityId), defPId)
+      check('E4. درصدی EXCLUDED: بدون مبنای زمانی (نوع درصدی، مبنا null)', row?.status === 'EXCLUDED' && row?.valueType === 'PERCENT' && row?.displayApplicationBasis === null, { vt: row?.valueType, d: row?.displayApplicationBasis })
+    }
+
+    // E5: ردیف فعال — مبنای نمایشی = مبنای واقعی تخصیص
+    {
+      const rowT = rowOf(await getScope('ACTIVITY', activityId), defTId)
+      check('E5. ردیف فعال (ارثی): displayApplicationBasis = applicationBasis واقعی', rowT?.status === 'INHERITED' && rowT?.displayApplicationBasis === rowT?.applicationBasis && rowT?.applicationBasis === 'PER_ELEMENT_EXECUTION', { s: rowT?.status, d: rowT?.displayApplicationBasis, a: rowT?.applicationBasis })
+    }
+
+    // E6: هم‌ارزی دو موتور روی fixture مبنای نمایشی (همان ورودی، همان خروجی)
+    {
+      const { resolveEffectiveAllowances } = await import('../src/calculation/effective-allowances')
+      // @ts-expect-error — فایل UMD آفلاین (IIFE روی globalThis)
+      await import('../offline/js/formulas.js')
+      const T2F = (globalThis as any).T2F
+      const definitions = [
+        { id: 'x1', title: 'زمانی', isActive: true, sortOrder: 0, defaultValueType: 'FIXED_TIME', defaultValuePercent: null, defaultTimeSeconds: 45 },
+        { id: 'x2', title: 'فقط پیش‌فرض', isActive: true, sortOrder: 1, defaultValueType: 'FIXED_TIME', defaultValuePercent: null, defaultTimeSeconds: 20 },
+        { id: 'x3', title: 'درصدی', isActive: true, sortOrder: 2, defaultValueType: 'PERCENT', defaultValuePercent: 0.05, defaultTimeSeconds: null },
+      ]
+      const assignments = [
+        { definitionId: 'x1', scopeType: 'PROJECT', scopeId: 'p1', mode: 'ACTIVE', valueType: 'FIXED_TIME', percentValue: null, timeValueSeconds: 60, applicationBasis: 'PER_CYCLE' },
+        { definitionId: 'x1', scopeType: 'STATION', scopeId: 's1', mode: 'EXCLUDE', valueType: 'FIXED_TIME', percentValue: null, timeValueSeconds: null, applicationBasis: null },
+        { definitionId: 'x2', scopeType: 'PROJECT', scopeId: 'p1', mode: 'EXCLUDE', valueType: 'FIXED_TIME', percentValue: null, timeValueSeconds: null, applicationBasis: null },
+        { definitionId: 'x3', scopeType: 'PROJECT', scopeId: 'p1', mode: 'ACTIVE', valueType: 'PERCENT', percentValue: 0.05, timeValueSeconds: null, applicationBasis: null },
+        { definitionId: 'x3', scopeType: 'STATION', scopeId: 's1', mode: 'EXCLUDE', valueType: 'PERCENT', percentValue: null, timeValueSeconds: null, applicationBasis: null },
+        { definitionId: 'x3', scopeType: 'ACTIVITY', scopeId: 'a1', mode: 'ACTIVE', valueType: 'PERCENT', percentValue: 0.07, timeValueSeconds: null, applicationBasis: null },
+      ]
+      const chain = [
+        { type: 'PROJECT', id: 'p1', label: 'خط' },
+        { type: 'STATION', id: 's1', label: 'ایستگاه' },
+        { type: 'ACTIVITY', id: 'a1', label: 'فعالیت' },
+      ]
+      const a = resolveEffectiveAllowances({ definitions: definitions as any, assignments: assignments as any, chain: chain as any })
+      const b = T2F.resolveEffectiveAllowances({ definitions, assignments, chain })
+      check('E6. هم‌ارزی دو موتور روی fixture مبنای نمایشی (شامل displayApplicationBasis)', JSON.stringify(a.rows) === JSON.stringify(b.rows) && JSON.stringify(a.summary) === JSON.stringify(b.summary))
+    }
+
+    // ═══ §F — Restore در حالت والد EXCLUDE + فرزند SET (بازبینی تکمیلی ج۱ §۵) ═══
+    console.log('\n── §F Restore با والد EXCLUDE (بازفعال‌سازی فرزند) ──')
+    {
+      // وضعیت فعلی defP: خط ACTIVE 0.05 → ایستگاه EXCLUDE (از E4)
+      await putOps('ACTIVITY', activityId, [{ definitionId: defPId, action: 'SET', valueType: 'PERCENT', percentValue: 0.07 }])
+      {
+        const row = rowOf(await getScope('ACTIVITY', activityId), defPId)
+        check('F1. والد EXCLUDE + فرزند SET: OVERRIDDEN با parentMode=EXCLUDE (شرط متن جدید Restore)', row?.status === 'OVERRIDDEN' && row?.parentMode === 'EXCLUDE', { s: row?.status, pm: row?.parentMode })
+        check('F1b. مقدار فرزند فعال است (0.07) — بازفعال‌سازی صریح', close(row?.percentValue, 0.07), row?.percentValue)
+      }
+
+      // F2/F3: اجرای Restore — فقط تخصیص محلی حذف می‌شود؛ EXCLUDE والد دست‌نخورده
+      const stationExcludeBefore = await db.allowanceAssignment.findFirst({ where: { definitionId: defPId, scopeType: 'STATION', scopeId: stationId } })
+      await putOps('ACTIVITY', activityId, [{ definitionId: defPId, action: 'RESTORE' }])
+      {
+        const row = rowOf(await getScope('ACTIVITY', activityId), defPId)
+        check('F2. Restore: تخصیص محلی حذف شد → وضعیت EXCLUDED والد دوباره برقرار', row?.status === 'EXCLUDED', row?.status)
+        const localAfter = await db.allowanceAssignment.findFirst({ where: { definitionId: defPId, scopeType: 'ACTIVITY', scopeId: activityId } })
+        check('F2b. تخصیص محلی فعالیت کاملاً حذف شد', localAfter === null, localAfter ?? 'deleted')
+        const stationExcludeAfter = await db.allowanceAssignment.findFirst({ where: { definitionId: defPId, scopeType: 'STATION', scopeId: stationId } })
+        check('F3. تخصیص EXCLUDE والد دست‌نخورده ماند (همان رکورد، همان حالت)', Boolean(stationExcludeAfter) && stationExcludeAfter?.mode === 'EXCLUDE' && stationExcludeAfter?.id === stationExcludeBefore?.id, { m: stationExcludeAfter?.mode, same: stationExcludeAfter?.id === stationExcludeBefore?.id })
+        const projectSet = await db.allowanceAssignment.findFirst({ where: { definitionId: defPId, scopeType: 'PROJECT', scopeId: projectId } })
+        check('F3b. تخصیص ACTIVE خط نیز دست‌نخورده ماند (0.05)', Boolean(projectSet) && close(projectSet?.percentValue ?? -1, 0.05))
+      }
+
+      // F4: والد ACTIVE + فرزند SET → شرط متن کلاسیک
+      await putOps('STATION', stationId, [{ definitionId: defPId, action: 'RESTORE' }])
+      await putOps('ACTIVITY', activityId, [{ definitionId: defPId, action: 'SET', valueType: 'PERCENT', percentValue: 0.09 }])
+      {
+        const row = rowOf(await getScope('ACTIVITY', activityId), defPId)
+        check('F4. والد ACTIVE + فرزند SET: OVERRIDDEN با parentMode=ACTIVE (متن کلاسیک «بازگردانی به مقدار والد»)', row?.status === 'OVERRIDDEN' && row?.parentMode === 'ACTIVE', { s: row?.status, pm: row?.parentMode })
+      }
+
+      // F5: ایستایی متن‌های UI در منبع آنلاین (تست DOM تعاملی در مرورگر — گزارش)
+      {
+        const fs = await import('node:fs')
+        const src = fs.readFileSync(new URL('../src/views/project/allowances/AllowanceSection.tsx', import.meta.url), 'utf-8')
+        check('F5. منبع آنلاین: متن Restore حالت والد-EXCLUDE موجود است', src.includes('بازگردانی به وضعیت والد (حذف تخصیص محلی)'))
+        check('F5b. منبع آنلاین: پیام موفقیت حالت والد-EXCLUDE موجود است', src.includes('وضعیت حذف از ارث‌بری والد دوباره برقرار شد'))
+        check('F5c. منبع آنلاین: مبنا هرگز به‌صورت پیش‌فرض «هر اجرا» نمی‌شود (مبنا نامشخص)', src.includes('مبنا نامشخص') && src.includes('displayApplicationBasis'))
+      }
+
+      await req('DELETE', `/api/projects/${projectId}`)
+    }
+  }
+
   await db.$disconnect()
 
   console.log('\n════════════════════════════════════════════════')

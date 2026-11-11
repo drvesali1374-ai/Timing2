@@ -284,6 +284,130 @@ console.log('\n── §P هم‌ارزی عددی resolver آفلاین ↔ آ�
   ok(stEqual, 'P3. computeElementStandardTime دو موتور + مقادیر مرجع یکسان');
 }
 
+// ═══ §E — مبنای نمایشی زمان ثابت در ردیف EXCLUDED (بازبینی تکمیلی ج۱ §۳) ═══
+console.log('\n── §E مبنای نمایشی EXCLUDED — displayApplicationBasis ──');
+{
+  const pE = DB.createProject({ name: 'تست مبنای نمایشی آفلاین', lineName: 'خط تست', productName: 'محصول تست' });
+  const pEId = pE.id ?? pE.project?.id;
+  const sE = DB.createStation(pEId, { name: 'ایستگاه' });
+  const sEId = sE.id ?? sE.station?.id;
+  const aE = DB.createActivity(sEId, { name: 'فعالیت' });
+  const aEId = aE.id ?? aE.activity?.id;
+
+  const defT = DB.createAllowanceDefinition(pEId, { title: 'زمانی مبنادار', defaultValueType: 'FIXED_TIME', defaultTimeSeconds: 45, isActive: true, sortOrder: 0 });
+  const defTId = defT.id ?? defT.definition?.id;
+  const defC = DB.createAllowanceDefinition(pEId, { title: 'زمانی فقط پیش‌فرض', defaultValueType: 'FIXED_TIME', defaultTimeSeconds: 20, isActive: true, sortOrder: 1 });
+  const defCId = defC.id ?? defC.definition?.id;
+  const defP = DB.createAllowanceDefinition(pEId, { title: 'درصدی', defaultValueType: 'PERCENT', defaultValuePercent: 0.05, isActive: true, sortOrder: 2 });
+  const defPId = defP.id ?? defP.definition?.id;
+
+  // E1: والد ACTIVE با FIXED_TIME/PER_CYCLE → EXCLUDE پایین‌تر
+  put('PROJECT', pEId, [{ definitionId: defTId, action: 'SET', valueType: 'FIXED_TIME', timeValueSeconds: 60, applicationBasis: 'PER_CYCLE' }]);
+  put('STATION', sEId, [{ definitionId: defTId, action: 'EXCLUDE' }]);
+  {
+    const row = rowOf(get('ACTIVITY', aEId), defTId);
+    ok(row.status === 'EXCLUDED' && row.valueType === 'FIXED_TIME', 'E1. والد FIXED_TIME/PER_CYCLE → EXCLUDE: نوع نمایشی FIXED_TIME', { s: row.status, vt: row.valueType });
+    ok(row.displayApplicationBasis === 'PER_CYCLE' && row.applicationBasis === null, 'E1b. مبنای نمایشی PER_CYCLE از والد منتقل شد (applicationBasis تخصیص null ماند)', { d: row.displayApplicationBasis, a: row.applicationBasis });
+  }
+
+  // E2: والد ACTIVE با PER_ELEMENT_EXECUTION
+  put('PROJECT', pEId, [{ definitionId: defTId, action: 'SET', valueType: 'FIXED_TIME', timeValueSeconds: 90, applicationBasis: 'PER_ELEMENT_EXECUTION' }]);
+  {
+    const row = rowOf(get('ACTIVITY', aEId), defTId);
+    ok(row.displayApplicationBasis === 'PER_ELEMENT_EXECUTION', 'E2. والد PER_ELEMENT_EXECUTION → EXCLUDE: مبنای نمایشی همان مبنا', row.displayApplicationBasis);
+  }
+  put('STATION', sEId, [{ definitionId: defTId, action: 'RESTORE' }]);
+
+  // E3: هیچ والد فعال — فقط پیش‌فرض مرکزی FIXED_TIME
+  put('PROJECT', pEId, [{ definitionId: defCId, action: 'EXCLUDE' }]);
+  {
+    const row = rowOf(get('STATION', sEId), defCId);
+    ok(row.status === 'EXCLUDED' && row.valueType === 'FIXED_TIME', 'E3. بدون والد فعال + پیش‌فرض مرکزی FIXED_TIME: نوع نمایشی FIXED_TIME', { s: row.status, vt: row.valueType });
+    ok(row.displayApplicationBasis === null, 'E3b. مبنای نمایشی null — نه PER_ELEMENT_EXECUTION ساختگی، نه PER_CYCLE', row.displayApplicationBasis);
+  }
+  put('PROJECT', pEId, [{ definitionId: defCId, action: 'RESTORE' }]);
+
+  // E4: درصدی EXCLUDED — بدون مبنای زمانی
+  put('PROJECT', pEId, [{ definitionId: defPId, action: 'SET', valueType: 'PERCENT', percentValue: 0.05 }]);
+  put('STATION', sEId, [{ definitionId: defPId, action: 'EXCLUDE' }]);
+  {
+    const row = rowOf(get('ACTIVITY', aEId), defPId);
+    ok(row.status === 'EXCLUDED' && row.valueType === 'PERCENT' && row.displayApplicationBasis === null, 'E4. درصدی EXCLUDED: بدون مبنای زمانی', { vt: row.valueType, d: row.displayApplicationBasis });
+  }
+
+  // E5: ردیف فعال — مبنای نمایشی = مبنای واقعی تخصیص
+  {
+    const rowT = rowOf(get('ACTIVITY', aEId), defTId);
+    ok(rowT.status === 'INHERITED' && rowT.displayApplicationBasis === rowT.applicationBasis && rowT.applicationBasis === 'PER_ELEMENT_EXECUTION', 'E5. ردیف فعال: displayApplicationBasis = applicationBasis واقعی', { s: rowT.status, d: rowT.displayApplicationBasis });
+  }
+
+  // E6: هم‌ارزی با موتور آنلاین (TS) — همان ورودی، همان خروجی شامل فیلد جدید
+  {
+    const definitions = [
+      { id: 'x1', title: 'زمانی', isActive: true, sortOrder: 0, defaultValueType: 'FIXED_TIME', defaultValuePercent: null, defaultTimeSeconds: 45, code: null, description: null },
+      { id: 'x2', title: 'فقط پیش‌فرض', isActive: true, sortOrder: 1, defaultValueType: 'FIXED_TIME', defaultValuePercent: null, defaultTimeSeconds: 20, code: null, description: null },
+      { id: 'x3', title: 'درصدی', isActive: true, sortOrder: 2, defaultValueType: 'PERCENT', defaultValuePercent: 0.05, defaultTimeSeconds: null, code: null, description: null },
+    ];
+    const assignments = [
+      { definitionId: 'x1', scopeType: 'PROJECT', scopeId: 'p1', mode: 'ACTIVE', valueType: 'FIXED_TIME', percentValue: null, timeValueSeconds: 60, applicationBasis: 'PER_CYCLE' },
+      { definitionId: 'x1', scopeType: 'STATION', scopeId: 's1', mode: 'EXCLUDE', valueType: 'FIXED_TIME', percentValue: null, timeValueSeconds: null, applicationBasis: null },
+      { definitionId: 'x2', scopeType: 'PROJECT', scopeId: 'p1', mode: 'EXCLUDE', valueType: 'FIXED_TIME', percentValue: null, timeValueSeconds: null, applicationBasis: null },
+      { definitionId: 'x3', scopeType: 'PROJECT', scopeId: 'p1', mode: 'ACTIVE', valueType: 'PERCENT', percentValue: 0.05, timeValueSeconds: null, applicationBasis: null },
+      { definitionId: 'x3', scopeType: 'STATION', scopeId: 's1', mode: 'EXCLUDE', valueType: 'PERCENT', percentValue: null, timeValueSeconds: null, applicationBasis: null },
+      { definitionId: 'x3', scopeType: 'ACTIVITY', scopeId: 'a1', mode: 'ACTIVE', valueType: 'PERCENT', percentValue: 0.07, timeValueSeconds: null, applicationBasis: null },
+    ];
+    const chain = [
+      { type: 'PROJECT', id: 'p1', label: 'خط' },
+      { type: 'STATION', id: 's1', label: 'ایستگاه' },
+      { type: 'ACTIVITY', id: 'a1', label: 'فعالیت' },
+    ];
+    const a = TSENGINE.resolveEffectiveAllowances({ definitions, assignments, chain });
+    const b = F.resolveEffectiveAllowances({ definitions, assignments, chain });
+    ok(JSON.stringify(a.rows) === JSON.stringify(b.rows) && JSON.stringify(a.summary) === JSON.stringify(b.summary), 'E6. هم‌ارزی دو موتور روی fixture مبنای نمایشی (شامل displayApplicationBasis)');
+  }
+
+  // ═══ §F — Restore در حالت والد EXCLUDE + فرزند SET (بازبینی تکمیلی ج۱ §۵) ═══
+  console.log('\n── §F Restore با والد EXCLUDE (بازفعال‌سازی فرزند) ──');
+  {
+    // وضعیت فعلی defP: خط ACTIVE 0.05 → ایستگاه EXCLUDE (از E4)
+    put('ACTIVITY', aEId, [{ definitionId: defPId, action: 'SET', valueType: 'PERCENT', percentValue: 0.07 }]);
+    {
+      const row = rowOf(get('ACTIVITY', aEId), defPId);
+      ok(row.status === 'OVERRIDDEN' && row.parentMode === 'EXCLUDE', 'F1. والد EXCLUDE + فرزند SET: OVERRIDDEN با parentMode=EXCLUDE (شرط متن جدید Restore)', { s: row.status, pm: row.parentMode });
+      ok(Math.abs(row.percentValue - 0.07) < 1e-9, 'F1b. مقدار فرزند فعال است (0.07)', row.percentValue);
+    }
+
+    // F2/F3: Restore — فقط تخصیص محلی حذف؛ EXCLUDE والد دست‌نخورده
+    const before = DB.getState().allowanceAssignments.find((r) => r.definitionId === defPId && r.scopeType === 'STATION' && r.scopeId === sEId);
+    put('ACTIVITY', aEId, [{ definitionId: defPId, action: 'RESTORE' }]);
+    {
+      const row = rowOf(get('ACTIVITY', aEId), defPId);
+      ok(row.status === 'EXCLUDED', 'F2. Restore: تخصیص محلی حذف شد → وضعیت EXCLUDED والد دوباره برقرار', row.status);
+      const localAfter = DB.getState().allowanceAssignments.find((r) => r.definitionId === defPId && r.scopeType === 'ACTIVITY' && r.scopeId === aEId);
+      ok(!localAfter, 'F2b. تخصیص محلی فعالیت کاملاً حذف شد');
+      const after = DB.getState().allowanceAssignments.find((r) => r.definitionId === defPId && r.scopeType === 'STATION' && r.scopeId === sEId);
+      ok(Boolean(after) && after.mode === 'EXCLUDE' && after.id === before.id && after.updatedAt === before.updatedAt, 'F3. تخصیص EXCLUDE والد دست‌نخورده ماند (همان رکورد بدون تغییر)', { m: after && after.mode });
+      const projSet = DB.getState().allowanceAssignments.find((r) => r.definitionId === defPId && r.scopeType === 'PROJECT' && r.scopeId === pEId);
+      ok(Boolean(projSet) && Math.abs(projSet.percentValue - 0.05) < 1e-9, 'F3b. تخصیص ACTIVE خط دست‌نخورده ماند (0.05)');
+    }
+
+    // F4: والد ACTIVE + فرزند SET → شرط متن کلاسیک
+    put('STATION', sEId, [{ definitionId: defPId, action: 'RESTORE' }]);
+    put('ACTIVITY', aEId, [{ definitionId: defPId, action: 'SET', valueType: 'PERCENT', percentValue: 0.09 }]);
+    {
+      const row = rowOf(get('ACTIVITY', aEId), defPId);
+      ok(row.status === 'OVERRIDDEN' && row.parentMode === 'ACTIVE', 'F4. والد ACTIVE + فرزند SET: OVERRIDDEN با parentMode=ACTIVE (متن کلاسیک)', { s: row.status, pm: row.parentMode });
+    }
+
+    // F5: ایستایی متن‌های UI در منبع آفلاین (تست DOM تعاملی در مرورگر — گزارش)
+    const fs2 = await import('node:fs');
+    const srcOff = fs2.readFileSync(new URL('../offline/js/views-allowances.js', import.meta.url), 'utf-8');
+    ok(srcOff.includes("'بازگردانی به وضعیت والد (حذف تخصیص محلی)'"), 'F5. منبع آفلاین: متن Restore حالت والد-EXCLUDE موجود است');
+    ok(srcOff.includes('وضعیت حذف از ارث‌بری والد دوباره برقرار شد'), 'F5b. منبع آفلاین: پیام موفقیت حالت والد-EXCLUDE موجود است');
+    ok(srcOff.includes('مبنا نامشخص') && srcOff.includes('displayApplicationBasis'), 'F5c. منبع آفلاین: null هرگز «هر اجرا» نمی‌شود (مبنا نامشخص)');
+  }
+}
+
 // ═══ §DnD — سلامت کد Drag & Drop (آزمون رویدادی واقعی در مرورگر — گزارش جدا) ═══
 console.log('\n── §DnD بررسی ایستایی کد درگ (مکمل آزمون مرورگر) ──');
 {
@@ -293,6 +417,13 @@ console.log('\n── §DnD بررسی ایستایی کد درگ (مکمل آز
   ok(!/\/\/[^\n]*var _drag/.test(code), 'DnD2. var _drag دیگر داخل کامنت نیست (الگوی باگ اصلی)');
   ok(code.includes('data-sort-type') && code.includes('makeTouchSortable'), 'DnD3. زیرساخت درگ لمسی + data-attribute هدف موجود است');
   ok(code.includes("pointerdown") && code.includes('elementsFromPoint') && code.includes('t2-touch-ghost'), 'DnD4. Pointer Events + ghost + تشخیص هدف هنگام درگ لمسی موجود است');
+  // ── بازبینی تکمیلی ج۱ §۴: قفل مرتب‌سازی هنگام جست‌وجو ──
+  ok(code.includes('SORT_LOCK_HINT') && code.includes('برای مرتب‌سازی، ابتدا فیلتر جست‌وجو را پاک کنید.'), 'DnD5. راهنمای قفل مرتب‌سازی (SORT_LOCK_HINT) موجود است');
+  ok(/function elementTreeRow\(e, els, activity, ctx, hasSearch\)/.test(code), 'DnD6. ردیف عنصر درخت پرچم جست‌وجو دریافت می‌کند (قفل سه سطح)');
+  const guardCount = (code.match(/if \(!hasSearch\) \{\s*\n\s*makeSortable/g) || []).length;
+  ok(guardCount === 3, 'DnD7. makeSortable فقط بدون فیلتر فعال می‌شود — هر سه سطح (ایستگاه/فعالیت/عنصر)', { count: guardCount });
+  ok(code.includes('t2-sort-locked') && code.includes('t2-sort-hint'), 'DnD8. کلاس/CSS قفل دستگیره و راهنمای درخت موجود است');
+  ok(/stationNode\(st, stations, ctx, has\)/.test(code) && /activityTreeRow\(a, allActs, station, ctx, hasSearch\)/.test(code) && /elementTreeRow\(e, els, a, ctx, hasSearch\)/.test(code), 'DnD9. callback مرتب‌سازی همیشه آرایه کامل فرزندان را می‌گیرد (نه فیلترشده)');
 }
 
 console.log('\n════════════════════════════════════════════════');
