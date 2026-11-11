@@ -1,544 +1,762 @@
 /* ═══════════════════════════════════════════════════════════
-   views-allowances.js — «گروه‌ها و مجازها» (مرحله ۴ مطالعه)
-   گروه‌های فعالیت + دسته‌های مجاز — FR-04 / FR-15 / FR-23 / FR-26
-   • زبانه گروه‌ها: فهرست انتخابی ستون چپ (w-72 در lg) + پنل
-     جزئیات راست با ذخیره خودکار نام/شرح (debounce ۸۰۰ms) و
-     مقادیر مجاز هر دسته (debounce ۶۰۰ms) + جمع A دسته‌های فعال
-   • زبانه دسته‌ها: جدول وضعیت/شمارش وابستگی + ایجاد/ویرایش/حذف
-   • درصدها: کاربر عدد درصد می‌بیند؛ ذخیره به‌صورت مقدار اعشاری
+   نمای «مجازها و الونس‌ها» — بازطراحی جلسه اول
+   • زبانه تعریف‌های مرکزی: فهرست مرکزی الونس‌های پروژه
+     (تفکیک تعریف از تخصیص — §۲.۲) با ایجاد/ویرایش/آرشیو
+   • زبانه الونس‌های خط تولید: تخصیص سطح PROJECT از طریق
+     بخش واحد «الونس‌ها و زمان‌های مجاز» (§۶)
+   • زبانه گروه‌های فعالیت: فقط طبقه‌بندی — پس از migration
+     گروه‌ها دیگر منبع دوم اعمال الونس نیستند (§۵)
+   • _allowanceSection: کامپوننت مشترک برای چهار سطح
+     (خط/ایستگاه/فعالیت/عنصر) — mirrors AllowanceSection.tsx
+   پورت هم‌ارز از src/views/project/GroupsView.tsx +
+   src/views/project/allowances/AllowanceSection.tsx
    ═══════════════════════════════════════════════════════════ */
 (function (g) {
   'use strict';
-  var U = g.T2U, DB = g.T2DB, UI = g.T2UI;
-  g.T2VIEWS = g.T2VIEWS || {};
+  var U = g.T2U, UI = g.T2UI, DB = g.T2DB;
 
-  function appNavigate(hash) { if (g.T2APP) g.T2APP.navigate(hash); }
+  var activeTab = 'definitions';
 
-  // انتخاب زبانه/گروه بین رندرها حفظ می‌شود (closure سطح ماژول)
-  var activeTab = 'groups';
-  var selectedGroupId = null;
+  // ── محتوای راهنمای آیکونی ──
+  var DEFINITIONS_HELP = {
+    what: 'فهرست مرکزی الونس‌های پروژه؛ تعریف (عنوان/کد/مقدار پیش‌فرض) از تخصیص به سطوح جدا است. هر تعریف با ID پایدار به سطوح خط/ایستگاه/فعالیت/عنصر تخصیص می‌یابد.',
+    input: 'عنوان الزامی است؛ کد، توضیحات و مقدار پیش‌فرض اختیاری‌اند. مقدار پیش‌فرض صرفاً پیشنهاد اولیه فرم تخصیص است.',
+    example: '«نیازهای شخصی» (کد PP-۱، پیش‌فرض ۵٪) یا «استراحت شیفت» (زمان ثابت ۳۰۰ ثانیه، هر چرخه).',
+    note: 'حذف تعریف دارای تخصیص/سابقه، به‌جای نابودی سوابق، آن را بایگانی می‌کند؛ تغییر عنوان ارتباط تخصیص‌ها را از بین نمی‌برد (ارتباط با ID است).',
+  };
+  var PROJECT_SCOPE_HELP = {
+    what: 'الونس‌های این سطح به همه ایستگاه‌ها، فعالیت‌ها و عناصر کاری پروژه ارث می‌رسند؛ مگر آنکه در سطح پایین‌تر جایگزین یا حذف از ارث‌بری شوند.',
+    input: 'با «افزودن الونس» از فهرست مرکزی انتخاب کنید؛ درصد یا زمان ثابت با مبنا ثبت می‌شود.',
+    example: 'الونس نیازهای شخصی ۵٪ در سطح خط = پیش‌فرض کل خط؛ یک ایستگاه خاص می‌تواند مقدار خودش را جایگزین کند.',
+    note: 'الونس زمانی سطح خط را با مبنا «هر چرخه» ثبت کنید تا در زمان تک‌تک عناصر ضرب نشود.',
+  };
+  var GROUPS_HELP = {
+    what: 'گروه‌های فعالیت صرفاً برای طبقه‌بندی و برچسب‌گذاری فعالیت‌های مشابه‌اند. پس از مهاجرت به مدل سلسله‌مراتبی، مقادیر الونس از سطوح خط/ایستگاه/فعالیت/عنصر resolve می‌شوند و گروه منبع دوم محاسبه نیست.',
+    input: 'گروه بسازید و در فرم «مشخصات فعالیت» به فعالیت‌ها نسبت دهید.',
+    example: 'گروه «کار دستی سبک» یا «کار ماشینی سنگین».',
+    note: 'مقادیر قدیمی گروه‌ها در زمان مهاجرت به تخصیص سطح فعالیت تبدیل شده‌اند تا نتیجه پروژه‌های موجود حفظ شود.',
+  };
+  var DEFAULT_VALUE_HELP = {
+    what: 'مقدار پیش‌فرض فقط پیشنهاد اولیه فرم تخصیص است؛ به‌تنهایی به معنی اعمال الونس نیست و تغییر آن تخصیص‌های قبلی را تغییر نمی‌دهد.',
+    input: 'نوع (درصدی/زمان ثابت) و مقدار متناظر را وارد کنید یا «بدون مقدار» بگذارید.',
+    example: 'پیش‌فرض ۵٪ → فرم تخصیص پیشنهاد ۵٪ را نشان می‌دهد.',
+    note: 'زمان پیش‌فرض برحسب ثانیه ذخیره می‌شود؛ واحد دقیقه در فرم تخصیص به ثانیه تبدیل می‌شود.',
+  };
+  var BASIS_HELP = {
+    what: 'مبنای وقوع، مشخص می‌کند زمان ثابت الونس چه زمانی به زمان استاندارد افزوده می‌شود.',
+    input: '«به‌ازای هر اجرای عنصر» برای زمان‌هایی مثل ابزاربرداری هر قطعه؛ «یک‌بار در هر چرخه» برای زمان‌های شخصی/شیفتی مثل استراحت.',
+    example: 'استراحت ۵ دقیقه‌ای هر چرخه = زمان ثابت با مبنا «هر چرخه»؛ بازرسی قالب هر قطعه = «هر اجرا».',
+    note: 'الونس «هر چرخه» فقط یک‌بار در سطح چرخه اعمال می‌شود و در زمان استاندارد تک‌تک عناصر ضرب نمی‌شود.',
+  };
+  var SECTION_HELP = {
+    what: 'الونس‌ها (زمان‌های مجاز) به‌صورت سلسله‌مراتبی از خط تولید به ایستگاه، فعالیت و عنصر کاری ارث می‌رسند. در هر سطح می‌توانید مقدار را جایگزین کنید، آن را از ارث‌بری حذف کنید یا مقدار اختصاصی ثبت کنید.',
+    input: 'با «افزودن الونس» از فهرست مرکزی پروژه انتخاب کنید؛ مقدار پیش‌فرض تعریف صرفاً پیشنهاد اولیه است.',
+    example: 'استراحت و نیازهای شخصی ۵٪ در سطح خط + ابزاربرداری ۳۰ ثانیه برای یک عنصر خاص.',
+    note: 'نزدیک‌ترین تخصیص به عنصر ملاک است؛ حذف از ارث‌بری در یک سطح، همان الونس را در کل زیرشاخه غیرفعال می‌کند.',
+  };
 
-  // کلاس lg:w-72 در app.css موجود نیست؛ معادل آن یک‌بار تزریق می‌شود
-  function ensureStyles() {
-    if (document.getElementById('t2a-styles')) return;
-    var st = document.createElement('style');
-    st.id = 't2a-styles';
-    st.textContent =
-      '.t2a-split{display:flex;flex-direction:column;gap:16px;align-items:flex-start;}' +
-      '.t2a-side{width:100%;min-width:0;}' +
-      '.t2a-main{flex:1 1 0%;min-width:0;width:100%;}' +
-      '@media (min-width:1024px){.t2a-split{flex-direction:row;}' +
-      '.t2a-side{width:288px;flex:0 0 288px;}}';
-    document.head.appendChild(st);
+  /** تبدیل ردیف آرایه‌ای به <tr> — سازگار با UI.table */
+  function tr(cells) {
+    return U.h('tr', null, cells.map(function (c) { return U.h('td', null, c === undefined || c === null ? null : c); }));
   }
 
-  // ── محتوای راهنمای آیکونی (عیناً از مشخصات) ──
-  var GROUP_HELP = {
-    what: 'گروه فعالیت، بسته‌ای از مقادیر مجاز است که هر فعالیت می‌تواند به آن تخصیص یابد و مقادیر را از آن به ارث ببرد؛ در سطح فعالیت هر دسته قابل بازنویسی است.',
-    input: 'گروه بسازید، دسته‌های مجاز را درصدگذاری کنید و فعالیت‌ها را از مرحله «ساختار تولید» به گروه تخصیص دهید.',
-    example: 'گروه «کار دستی» یا «کار ماشینی» — یا گروه‌های اختصاصی شرکت شما.',
-    note: 'مجموع A فقط از دسته‌های فعال ساخته می‌شود؛ منبع هر مقدار (ارث‌رسیده از گروه یا اختصاصی فعالیت) در صفحه فعالیت مشخص می‌شود.',
-  };
-  var GROUP_NAME_HELP = {
-    what: 'نامی گویا برای بسته مجازهای فعالیت؛ فعالیت‌ها در ساختار تولید به این گروه تخصیص می‌یابند.',
-    input: 'نام کوتاه و معنادار.',
-    example: '«کار دستی»، «کار ماشینی» یا گروه اختصاصی شرکت.',
-  };
-  var GROUP_ALLOW_HELP = {
-    what: 'مقدار درصدی هر دسته مجاز برای این گروه؛ فعالیت‌های این گروه این مقادیر را به ارث می‌برند و می‌توانند هر دسته را بازنویسی کنند.',
-    input: 'عدد درصد وارد کنید (۰ تا ۹۹٫۹۹)؛ خالی بگذارید تا آن دسته مقداری نداشته باشد.',
-    example: 'استراحت شخصی ۵٪ + نیازهای طبیعی ۳٪ ⇒ A=۸٪ — صرفاً مثال؛ نرخ مصوب شرکت شما جایگزین شود',
-    note: 'فقط دسته‌های فعال در مجموع A لحاظ می‌شوند؛ درصدها به‌صورت مقدار اعشاری (۰٫۱۵ برای ۱۵٪) ذخیره می‌شوند.',
-  };
-  var CATEGORY_HELP = {
-    what: 'دسته مجاز، جزء تشکیل‌دهنده مجموع A است که در سطح گروه درصدگذاری می‌شود و فعالیت می‌تواند مقدار آن را بازنویسی کند.',
-    input: 'نام و کد اختیاری وارد کنید؛ ترتیب نمایش با فیلد «ترتیب» تنظیم می‌شود.',
-    example: 'دسته‌هایی مانند استراحت شخصی یا نیازهای طبیعی — درصد نمونه صرفاً مثال است و نرخ مصوب شرکت نیست.',
-    note: 'حذف دسته، مقدار آن در گروه‌ها و بازنویسی‌های فعالیت را نیز حذف می‌کند؛ دسته غیرفعال در مجموع A لحاظ نمی‌شود.',
-  };
-  var SORT_HELP = {
-    what: 'ترتیب نمایش دسته در جدول‌های گروه و گزارش‌ها؛ عدد کوچک‌تر بالاتر.',
-    input: 'عدد صحیح بین ۰ تا ۹۹۹۹.',
+  var SCOPE_TITLES = {
+    PROJECT: 'سطح خط تولید (همه ایستگاه‌ها و فعالیت‌ها)',
+    STATION: 'سطح ایستگاه (فعالیت‌ها و عناصر زیرمجموعه)',
+    ACTIVITY: 'سطح فعالیت (عناصر کاری زیرمجموعه)',
+    WORK_ELEMENT: 'سطح عنصر کاری',
   };
 
-  g.T2VIEWS.allowances = function (container, projectId) {
-    ensureStyles();
+  function render(container, projectId) {
+    U.clear(container);
+    var defs = DB.listAllowanceDefinitions(projectId);
+    var groups = DB.getState().activityGroups.filter(function (x) { return x.projectId === projectId; });
+    var activeCount = defs.filter(function (d) { return d.isActive && !d.isArchived; }).length;
+    var archivedCount = defs.filter(function (d) { return d.isArchived; }).length;
 
-    // ═══════════ رندر کل نما ═══════════
-    function renderAll() {
-      U.clear(container);
-      var groups = DB.listGroups(projectId);
-      var categories = DB.listCategories(projectId);
+    var header = U.h('header', { class: 'flex flex-wrap items-center justify-between gap-3' },
+      U.h('div', { class: 'flex items-center gap-3' },
+        U.h('span', { class: 'chip-icon brand', 'aria-hidden': 'true' }, U.icon('tags')),
+        U.h('div', null,
+          U.h('h1', { class: 'text-xl font-extrabold', text: 'مجازها و الونس‌ها' }),
+          U.h('p', { class: 'num text-xs text-muted' },
+            activeCount.toLocaleString('fa-IR') + ' تعریف فعال' +
+            (archivedCount > 0 ? ' · ' + archivedCount.toLocaleString('fa-IR') + ' بایگانی‌شده' : '') +
+            ' · ' + groups.length.toLocaleString('fa-IR') + ' گروه فعالیت'))));
 
-      container.appendChild(U.h('div', { class: 'flex flex-wrap items-center justify-between gap-3' },
-        U.h('div', { class: 'flex items-center gap-3' },
-          U.h('span', { class: 'chip-icon' }, U.icon('layers')),
+    var tabs = UI.tabsBar([
+      { key: 'definitions', label: 'تعریف‌های مرکزی', icon: 'layers' },
+      { key: 'project', label: 'الونس‌های خط تولید', icon: 'listPlus' },
+      { key: 'groups', label: 'گروه‌های فعالیت', icon: 'folderTree' },
+    ], activeTab, function (k) { activeTab = k; render(container, projectId); });
+
+    var body = U.h('div', { class: 'space-y-4' });
+    if (activeTab === 'definitions') renderDefinitionsTab(body, projectId);
+    else if (activeTab === 'project') renderProjectTab(body, projectId);
+    else renderGroupsTab(body, projectId);
+
+    container.appendChild(U.h('div', { class: 'space-y-5 animate-view-in' }, header, tabs, body));
+  }
+  g.T2VIEWS.allowances = render;
+
+  // ═══════════════ زبانه تعریف‌های مرکزی — §۲.۲ ═══════════════
+
+  function renderDefinitionsTab(body, projectId) {
+    var state = DB.getState();
+    var showArchived = false;
+    var wrap = U.h('div', null);
+    body.appendChild(wrap);
+
+    function draw() {
+      U.clear(wrap);
+      var defs = DB.listAllowanceDefinitions(projectId);
+      var archivedCount = defs.filter(function (d) { return d.isArchived; }).length;
+      var visible = showArchived ? defs : defs.filter(function (d) { return !d.isArchived; });
+
+      var head = U.h('div', { class: 'card-head flex flex-wrap items-center justify-between gap-3 p-4 pb-3' },
+        U.h('div', { class: 'flex items-center gap-2.5' },
+          U.h('span', { class: 'chip-icon brand', 'aria-hidden': 'true' }, U.icon('layers')),
           U.h('div', null,
-            U.h('h1', { class: 'text-xl font-extrabold', text: 'گروه‌ها و مجازها' }),
-            U.h('p', { class: 'text-sm text-muted' },
-              U.formatInt(groups.length) + ' گروه · ' + U.formatInt(categories.length) + ' دسته مجاز')))));
+            U.h('h2', { class: 'text-sm font-extrabold', text: 'تعریف‌های مرکزی الونس' }),
+            U.h('p', { class: 'text-[11px] text-muted', text: 'فهرست مشترک پروژه — تعریف از تخصیص جدا است' })),
+          UI.helpDot('تعریف‌های مرکزی', DEFINITIONS_HELP)),
+        U.h('div', { class: 'flex items-center gap-2' },
+          archivedCount > 0 ? U.h('button', {
+            class: 'btn btn-ghost btn-sm gap-1.5 text-xs', type: 'button',
+            'aria-pressed': String(showArchived), onclick: function () { showArchived = !showArchived; draw(); },
+          }, U.icon('archive'), showArchived ? 'پنهان‌سازی بایگانی' : 'بایگانی (' + archivedCount.toLocaleString('fa-IR') + ')') : null,
+          U.h('button', { class: 'btn btn-brand btn-sm gap-1.5', type: 'button', onclick: function () { openDefinitionDialog(projectId, null, draw); } },
+            U.icon('plus'), 'تعریف جدید')));
 
-      container.appendChild(U.h('div', { class: 'mt-4' }, UI.tabsBar([
-        { key: 'groups', label: 'گروه‌های فعالیت' },
-        { key: 'categories', label: 'دسته‌های مجاز' },
-      ], activeTab, function (k) { activeTab = k; renderAll(); })));
+      var content = U.h('div', { class: 'p-4 pt-3' });
+      if (visible.length === 0) {
+        content.appendChild(U.h('div', { class: 'rounded-xl border border-dashed p-6 text-center', style: { borderColor: 'var(--border)' } },
+          U.h('p', { class: 'text-sm font-bold', text: showArchived ? 'هیچ تعریفی ثبت نشده است' : 'هنوز تعریف الونسی ثبت نشده است' }),
+          U.h('p', { class: 'mx-auto mt-1 max-w-lg text-xs leading-5 text-muted', text: 'تعریف مرکزی، الونس نام‌دار پروژه است (مثل «نیازهای شخصی» یا «استراحت شیفت»). پس از ساخت، از زبانه «الونس‌های خط تولید» یا فرم ایستگاه/فعالیت/عنصر قابل تخصیص است.' })));
+      } else {
+        var rows = visible.map(function (d) {
+          var defaultLabel = '—';
+          if (d.defaultValueType === 'PERCENT' && d.defaultValuePercent !== null) defaultLabel = U.formatPercent(d.defaultValuePercent);
+          else if (d.defaultValueType === 'FIXED_TIME' && d.defaultTimeSeconds !== null) defaultLabel = U.formatTimeValue(d.defaultTimeSeconds) + ' ثانیه';
+          var statusBadge;
+          if (d.isArchived) statusBadge = UI.badge('بایگانی', 'muted');
+          else if (d.isActive) statusBadge = UI.badge('فعال', 'green');
+          else statusBadge = UI.badge('غیرفعال', 'amber');
+          var actions = U.h('div', { class: 'flex items-center justify-center gap-0.5' },
+            U.h('button', { class: 'icon-btn sm', 'aria-label': 'ویرایش تعریف ' + d.title, onclick: function () { openDefinitionDialog(projectId, d, draw); } }, U.icon('pencil')),
+            !d.isArchived ? U.h('button', { class: 'icon-btn sm danger', 'aria-label': 'حذف یا بایگانی تعریف ' + d.title, onclick: function () { confirmArchiveDefinition(projectId, d, draw); } }, U.icon('trash')) : null);
+          return [
+            U.h('div', { class: 'max-w-64 text-right' },
+              U.h('span', { class: 'text-[13px] font-bold', style: { display: 'block' }, text: d.title }),
+              d.code ? U.h('span', { class: 'num text-[10px] text-faint', dir: 'ltr', text: d.code }) : null),
+            U.h('div', { class: 'num text-xs' }, defaultLabel,
+              d.defaultValueType === 'PERCENT' ? U.h('span', { class: 'block text-[10px] text-faint', text: 'درصدی' }) :
+              d.defaultValueType === 'FIXED_TIME' ? U.h('span', { class: 'block text-[10px] text-faint', text: 'زمان ثابت' }) : null),
+            statusBadge,
+            U.h('span', { class: 'num text-xs', text: d.assignmentCount > 0 ? d.assignmentCount.toLocaleString('fa-IR') : '—' }),
+            U.h('span', { class: 'text-[11px] text-muted', text: U.formatDateTime(d.updatedAt) }),
+            actions,
+          ];
+        });
+        content.appendChild(UI.table(['عنوان و کد', 'پیش‌فرض', 'وضعیت', 'تخصیص‌ها', 'آخرین تغییر', ''], rows.map(tr)));
+      }
+      wrap.appendChild(U.h('section', { class: 'card card-premium overflow-hidden', 'aria-label': 'تعریف‌های مرکزی الونس' }, head, content));
+    }
+    draw();
+  }
 
-      var wrap = U.h('div', { class: 'mt-4 flex flex-col gap-4' });
-      container.appendChild(wrap);
-      if (activeTab === 'groups') renderGroupsTab(wrap, groups, categories);
-      else renderCategoriesTab(wrap, categories);
+  function openDefinitionDialog(projectId, def, onSaved) {
+    var isEdit = !!def;
+    var form = {
+      title: def ? def.title : '',
+      code: def && def.code ? def.code : '',
+      description: def && def.description ? def.description : '',
+      defaultValueType: def ? (def.defaultValueType || 'NONE') : 'NONE',
+      defaultPercent: def && def.defaultValuePercent !== null ? def.defaultValuePercent : null,
+      defaultSeconds: def && def.defaultTimeSeconds !== null ? def.defaultTimeSeconds : null,
+      isActive: def ? def.isActive : true,
+      sortOrder: def ? def.sortOrder : 0,
+    };
+    var saveInd = UI.saveIndicator('saved');
+    var dlg;
+
+    var titleInput = U.h('input', { class: 'input', id: 'def-title-input', value: form.title, placeholder: 'مثلاً: نیازهای شخصی' });
+    var codeInput = U.h('input', { class: 'input num ltr', id: 'def-code-input', dir: 'ltr', value: form.code, placeholder: 'PP-1' });
+    var descInput = U.h('textarea', { class: 'textarea', rows: 2, placeholder: 'توضیح اختیاری…' });
+    descInput.value = form.description;
+    var sortInput = UI.persianNumberInput({ value: form.sortOrder, decimals: false, min: 0, max: 9999, ariaLabel: 'ترتیب نمایش' });
+    var activeSwitch = UI.switchEl(form.isActive, function (v) { form.isActive = v; }, 'تعریف فعال باشد');
+    var defaultTypeSelect = UI.selectEl([
+      { value: 'NONE', label: 'بدون مقدار' },
+      { value: 'PERCENT', label: 'درصدی' },
+      { value: 'FIXED_TIME', label: 'زمان ثابت' },
+    ], form.defaultValueTypeType = form.defaultValueType, function (v) {
+      form.defaultValueType = v;
+      drawDefaultFields();
+    });
+    var defaultWrap = U.h('div', { class: 'space-y-2' });
+
+    function drawDefaultFields() {
+      U.clear(defaultWrap);
+      if (form.defaultValueType === 'PERCENT') {
+        defaultWrap.appendChild(UI.field('درصد پیشنهادی', UI.percentInput({
+          value: form.defaultPercent,
+          onChange: function (v) { form.defaultPercent = v; },
+          ariaLabel: 'درصد پیشنهادی',
+        })));
+      } else if (form.defaultValueType === 'FIXED_TIME') {
+        defaultWrap.appendChild(UI.field('زمان پیشنهادی (ثانیه)', UI.persianNumberInput({
+          value: form.defaultSeconds, decimals: true, min: 0,
+          onChange: function (v) { form.defaultSeconds = v; },
+          ariaLabel: 'زمان پیشنهادی ثانیه',
+        })));
+      }
+    }
+    drawDefaultFields();
+
+    function submit() {
+      if (!form.title.trim()) { UI.toastError(new Error('عنوان الزامی است.')); return; }
+      if (form.defaultValueType === 'PERCENT' && form.defaultPercent === null) { UI.toastError(new Error('درصد پیش‌فرض را وارد کنید یا نوع پیش‌فرض را «بدون مقدار» بگذارید.')); return; }
+      if (form.defaultValueType === 'FIXED_TIME' && form.defaultSeconds === null) { UI.toastError(new Error('زمان پیش‌فرض را وارد کنید یا نوع پیش‌فرض را «بدون مقدار» بگذارید.')); return; }
+      var payload = {
+        title: form.title.trim(),
+        code: form.code.trim() || null,
+        description: descInput.value.trim() || null,
+        defaultValueType: form.defaultValueType === 'NONE' ? null : form.defaultValueType,
+        defaultValuePercent: form.defaultValueType === 'PERCENT' ? form.defaultPercent : null,
+        defaultTimeSeconds: form.defaultValueType === 'FIXED_TIME' ? form.defaultSeconds : null,
+        isActive: form.isActive,
+        sortOrder: form.sortOrder === null ? 0 : form.sortOrder,
+      };
+      try {
+        if (isEdit) {
+          DB.updateAllowanceDefinition(def.id, payload);
+          saveInd.setSaved();
+          if (onSaved) onSaved();
+          dlg.close();
+        } else {
+          DB.createAllowanceDefinition(projectId, payload);
+          g.T2Toast('تعریف ساخته شد و بلافاصله قابل تخصیص است', { type: 'success' });
+          if (onSaved) onSaved();
+          dlg.close();
+        }
+      } catch (err) { UI.toastError(err); }
     }
 
-    // ═══════════ زبانه گروه‌های فعالیت — FR-04 ═══════════
-    function renderGroupsTab(wrap, groups, categories) {
-      var split = U.h('div', { class: 't2a-split' });
-      var side = U.h('div', { class: 't2a-side flex flex-col gap-2', 'aria-label': 'فهرست گروه‌های فعالیت' });
-      var main = U.h('div', { class: 't2a-main' });
-      split.appendChild(side);
-      split.appendChild(main);
-      wrap.appendChild(split);
+    dlg = UI.dialog({
+      title: isEdit ? 'ویرایش تعریف — «' + def.title + '»' : 'تعریف جدید الونس',
+      desc: isEdit
+        ? 'تغییر عنوان ارتباط تخصیص‌ها را از بین نمی‌برد (ارتباط با ID است).'
+        : 'تعریف در فهرست مرکزی پروژه ثبت می‌شود و بلافاصله در فرم‌های تخصیص قابل انتخاب است.',
+      bodyBuilder: function (body) {
+        body.appendChild(U.h('div', { class: 'space-y-4' },
+          UI.field('عنوان (الزامی)', titleInput),
+          U.h('div', { class: 'grid grid-cols-2 gap-3' },
+            UI.field('کد (اختیاری)', codeInput),
+            UI.field('ترتیب نمایش', sortInput)),
+          UI.field('توضیحات (اختیاری)', descInput),
+          U.h('div', { class: 'rounded-xl p-3 space-y-2', style: { background: 'var(--surface-2)' } },
+            UI.field('مقدار پیش‌فرض (اختیاری)', defaultTypeSelect, DEFAULT_VALUE_HELP),
+            defaultWrap,
+            U.h('p', { class: 'text-[10px] leading-4 text-muted', text: 'مقدار پیش‌فرض با برچسب «پیشنهادی» در فرم تخصیص نمایش داده می‌شود؛ ایجاد یا تغییر آن تخصیص‌های قبلی را تغییر نمی‌دهد.' })),
+          UI.field('وضعیت تعریف', U.h('div', { class: 'flex items-center gap-2' }, activeSwitch,
+            U.h('span', { class: 'text-[11px] text-muted', text: form.isActive ? 'فعال — قابل تخصیص' : 'غیرفعال — از محاسبات کنار گذاشته می‌شود' })))));
+      },
+      footerBuilder: function () {
+        return U.h('div', { class: 'dialog-footer' },
+          isEdit ? saveInd.el : null,
+          U.h('button', { class: 'btn btn-outline', type: 'button', onclick: function () { dlg.close(); } }, 'انصراف'),
+          U.h('button', { class: 'btn btn-brand gap-1.5', type: 'button', onclick: submit }, U.icon('check'), isEdit ? 'ذخیره' : 'ثبت تعریف'));
+      },
+    });
+  }
 
-      // ردیف بالای ستون چپ
-      side.appendChild(U.h('div', { class: 'flex items-center gap-2' },
-        U.h('h3', { class: 'font-bold', text: 'گروه‌ها' }),
-        U.h('div', { class: 'spacer' }),
-        U.h('button', {
-          class: 'btn btn-brand btn-sm', type: 'button',
-          onclick: function () { openCreateGroup(); },
-        }, U.icon('plus'), 'گروه جدید')));
-
-      if (groups.length === 0) {
-        side.appendChild(UI.emptyState({
-          icon: 'layers',
-          title: 'گروهی تعریف نشده',
-          desc: 'گروه‌های دلخواه مانند کار دستی یا کار ماشینی بسازید؛ فعالیت‌ها مجازهای گروه را به ارث می‌برند و امکان بازنویسی دارند.',
-          actionLabel: 'ثبت اولین گروه',
-          onAction: function () { openCreateGroup(); },
-        }));
-        side.appendChild(U.h('div', { class: 'flex justify-center' },
-          UI.helpDot('گروه فعالیت', GROUP_HELP)));
-        main.appendChild(U.h('div', { class: 'banner info' }, U.icon('info'),
-          U.h('div', { text: 'گروهی را از فهرست انتخاب کنید' })));
-        return;
-      }
-
-      // گروه انتخاب‌شده (بدون انتخاب خودکار — تا رندر نشان «گروهی را انتخاب کنید» بدهد)
-      var sel = null;
-      groups.forEach(function (x) { if (x.group.id === selectedGroupId) sel = x; });
-
-      var nameEls = {};   // به‌روزرسانی هدفمند نام گروه در فهرست پس از ذخیره خودکار
-      var badgeEls = {};  // به‌روزرسانی نشان «جمع A» پس از ذخیره مقدار مجاز
-      groups.forEach(function (gr) {
-        var isSel = gr.group.id === selectedGroupId;
-        var nameDiv = U.h('div', { class: 'font-semibold text-sm truncate' });
-        nameDiv.textContent = gr.group.name;
-        var badgeEl = UI.badge('جمع A: ' + U.formatPercent(gr.totalA), 'brand');
-        nameEls[gr.group.id] = nameDiv;
-        badgeEls[gr.group.id] = badgeEl;
-        side.appendChild(U.h('div', {
-          class: 'list-row cursor-pointer', role: 'button', tabindex: '0',
-          'aria-pressed': isSel ? 'true' : 'false',
-          'aria-label': 'انتخاب گروه ' + gr.group.name,
-          style: isSel ? { outline: '2px solid var(--brand)' } : null,
-          onclick: function () { selectedGroupId = gr.group.id; renderAll(); },
-          onkeydown: function (e) {
-            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectedGroupId = gr.group.id; renderAll(); }
-          },
-        },
-          U.h('div', { class: 'flex-1 min-w-0' },
-            nameDiv,
-            U.h('div', { class: 'text-xs text-muted truncate', title: gr.group.description || '' },
-              gr.group.description || 'بدون توضیح')),
-          U.h('div', { class: 'flex flex-col items-end gap-1 shrink-0' },
-            badgeEl,
-            U.h('span', { class: 'text-xs text-faint' }, U.formatInt(gr.activitiesCount) + ' فعالیت'))));
-      });
-
-      if (!sel) {
-        main.appendChild(U.h('div', { class: 'banner info' }, U.icon('info'),
-          U.h('div', { text: 'گروهی را از فهرست انتخاب کنید' })));
-      } else {
-        main.appendChild(buildGroupDetail(sel, categories, nameEls, badgeEls));
-      }
-    }
-
-    // ═══════════ پنل جزئیات گروه انتخاب‌شده ═══════════
-    function buildGroupDetail(gr, categories, nameEls, badgeEls) {
-      var groupId = gr.group.id;
-      var panel = U.h('div', { class: 'flex flex-col gap-4' });
-
-      // ── ۱) جزئیات گروه — ذخیره خودکار نام/شرح (debounce ۸۰۰ms) ──
-      var allowTitleSpan = U.h('span', { text: 'مجازهای گروه «' + gr.group.name + '»' });
-      var metaIndHost = U.h('span');
-      function setMetaInd(state) {
-        U.clear(metaIndHost);
-        var el = UI.saveIndicator(state);
-        if (el) metaIndHost.appendChild(el);
-      }
-
-      var nameVal = gr.group.name;
-      var descVal = gr.group.description || '';
-      var nameInput = U.h('input', { class: 'input', value: nameVal, 'aria-label': 'نام گروه' });
-      var descTa = U.h('textarea', { class: 'textarea', 'aria-label': 'شرح گروه' });
-      descTa.value = descVal;
-
-      var saveMeta = U.debounce(function () {
-        if (!String(nameVal).trim()) return; // نام خالی معتبر نیست؛ تا تکمیل نام ذخیره نمی‌شود
-        setMetaInd('saving');
-        try {
-          var nm = String(nameVal).trim();
-          DB.updateGroup(groupId, { name: nm, description: String(descVal).trim() || null });
-          setMetaInd('saved');
-          allowTitleSpan.textContent = 'مجازهای گروه «' + nm + '»';
-          if (nameEls[groupId]) nameEls[groupId].textContent = nm;
-          setTimeout(function () { setMetaInd(null); }, 2400);
-        } catch (err) { setMetaInd('error'); UI.toastError(err); }
-      }, 800);
-
-      nameInput.addEventListener('input', function () { nameVal = nameInput.value; setMetaInd('dirty'); saveMeta(); });
-      descTa.addEventListener('input', function () { descVal = descTa.value; setMetaInd('dirty'); saveMeta(); });
-
-      panel.appendChild(U.h('div', { class: 'card p-4' },
-        U.h('div', { class: 'flex flex-wrap items-center justify-between gap-2' },
-          U.h('h3', { class: 'font-bold', text: 'جزئیات گروه' }),
-          metaIndHost),
-        U.h('div', { class: 'mt-4 flex flex-col gap-3' },
-          UI.field('نام گروه', nameInput, GROUP_NAME_HELP),
-          UI.field('شرح', descTa)),
-        U.h('div', { class: 'mt-4 pt-3 border-t flex items-center justify-end' },
-          U.h('button', {
-            class: 'btn btn-destructive-outline btn-sm', type: 'button',
-            'aria-label': 'حذف گروه ' + gr.group.name,
-            onclick: function () { deleteGroupFlow(gr); },
-          }, U.icon('trash'), 'حذف گروه'))));
-
-      // ── ۲) مجازهای گروه — ذخیره خودکار مقدار هر دسته (debounce ۶۰۰ms) ──
-      var allowIndHost = U.h('span');
-      function setAllowInd(state) {
-        U.clear(allowIndHost);
-        var el = UI.saveIndicator(state);
-        if (el) allowIndHost.appendChild(el);
-      }
-
-      var card2 = U.h('div', { class: 'card p-4' },
-        U.h('div', { class: 'flex flex-wrap items-center justify-between gap-2' },
-          U.h('h3', { class: 'font-bold flex items-center gap-1' }, allowTitleSpan,
-            UI.helpDot('مجازهای گروه', GROUP_ALLOW_HELP)),
-          allowIndHost));
-
-      var totalCell = null;
-      if (categories.length === 0) {
-        card2.appendChild(U.h('div', { class: 'banner info' }, U.icon('info'),
-          U.h('div', { class: 'flex flex-col items-start gap-2' },
-            U.h('span', { text: 'هنوز دسته مجازی برای این پروژه تعریف نشده است؛ ابتدا از زبانه «دسته‌های مجاز» دسته بسازید تا بتوانید برای این گروه مقدار تعیین کنید.' }),
-            U.h('button', {
-              class: 'btn btn-ghost btn-sm', type: 'button',
-              onclick: function () { activeTab = 'categories'; renderAll(); },
-            }, 'رفتن به دسته‌های مجاز'))));
-      } else {
-        var tbl = UI.table(['دسته مجاز', 'وضعیت', 'مقدار (درصد)'], function (tbody) {
-          categories.forEach(function (cat) {
-            var ga = null;
-            gr.allowances.forEach(function (x) { if (x.categoryId === cat.id) ga = x; });
-            var saveIt = U.debounce(function (v) {
-              setAllowInd('saving');
-              try {
-                DB.setGroupAllowance(groupId, cat.id, v);
-                setAllowInd('saved');
-                refreshTotals();
-                setTimeout(function () { setAllowInd(null); }, 2400);
-              } catch (err) { setAllowInd('error'); UI.toastError(err); }
-            }, 600);
-            var pInput = UI.percentInput({
-              value: ga ? ga.percentValue : null,
-              onChange: function (v) {
-                if (typeof v === 'number' && isNaN(v)) return; // ورودی نامعتبر — ذخیره نمی‌شود
-                setAllowInd('dirty');
-                saveIt(v);
-              },
-            });
-            pInput.setAttribute('aria-label', 'درصد مجاز دسته ' + cat.name);
-            tbody.appendChild(U.h('tr', null,
-              U.h('td', null,
-                U.h('span', { class: 'font-medium' }, cat.name),
-                cat.code ? U.h('span', { class: 'ms-2' }, UI.badge(cat.code, 'muted')) : null),
-              U.h('td', null, cat.isActive ? UI.badge('فعال', 'green') : UI.badge('غیرفعال', 'muted')),
-              U.h('td', null, pInput)));
+  function confirmArchiveDefinition(projectId, def, onSaved) {
+    var deps = {};
+    if (def.assignmentCount > 0) deps['تخصیص ثبت‌شده (بایگانی می‌شود، سوابق حفظ می‌شود)'] = def.assignmentCount;
+    UI.confirmDelete({
+      title: def.assignmentCount > 0 ? 'بایگانی تعریف دارای سابقه' : 'حذف تعریف',
+      name: def.title,
+      deps: deps,
+      desc: def.assignmentCount > 0
+        ? 'این تعریف تخصیص/سابقه دارد؛ برای حفظ سوابق تاریخی به‌جای حذف، بایگانی و از محاسبات کنار گذاشته می‌شود.'
+        : 'تعریف بدون تخصیص است و واقعاً حذف می‌شود.',
+    }).then(function (yes) {
+      if (!yes) return;
+      try {
+        var res = DB.deleteAllowanceDefinition(def.id);
+        if (res.archived) {
+          g.T2Toast('تعریف «' + def.title + '» بایگانی شد', {
+            type: 'success',
+            description: 'این تعریف ' + res.assignmentCount.toLocaleString('fa-IR') + ' تخصیص داشت؛ برای حفظ سوابق تاریخی بایگانی شد.',
           });
-        });
-        totalCell = U.h('td', { class: 'font-bold' });
-        totalCell.textContent = U.formatPercent(gr.totalA);
-        tbl.querySelector('table').appendChild(U.h('tfoot', null,
-          U.h('tr', { style: { background: 'var(--surface-2)' } },
-            U.h('td', { colspan: '2', class: 'font-bold' }, 'جمع A (دسته‌های فعال)'),
-            totalCell)));
-        card2.appendChild(tbl);
-      }
-      panel.appendChild(card2);
+        } else g.T2Toast('تعریف «' + def.title + '» حذف شد', { type: 'success' });
+        if (onSaved) onSaved();
+      } catch (err) { UI.toastError(err); }
+    });
+  }
 
-      // به‌روزرسانی هدفمند جمع A (بدون رندر مجدد برای از دست نرفتن فوکوس ورودی‌ها)
-      function refreshTotals() {
-        var g2 = null;
-        DB.listGroups(projectId).forEach(function (x) { if (x.group.id === groupId) g2 = x; });
-        if (!g2) return;
-        if (totalCell) totalCell.textContent = U.formatPercent(g2.totalA);
-        if (badgeEls[groupId]) badgeEls[groupId].textContent = 'جمع A: ' + U.formatPercent(g2.totalA);
-      }
+  // ═══════════════ زبانه الونس‌های خط تولید ═══════════════
 
-      // ── ۳) فعالیت‌های این گروه ──
-      var acts = [];
-      DB.sortStations(projectId).forEach(function (st) {
-        DB.sortActivities(st.id).forEach(function (a) { if (a.groupId === groupId) acts.push({ a: a, st: st }); });
+  function renderProjectTab(body, projectId) {
+    body.appendChild(U.h('div', { class: 'card card-premium p-4' },
+      U.h('div', { class: 'flex flex-wrap items-start justify-between gap-2' },
+        UI.helpDot('الونس‌های سطح خط تولید', PROJECT_SCOPE_HELP),
+        U.h('span', { class: 'text-xs leading-6 text-muted', text: 'این الونس‌ها به تمام ایستگاه‌ها، فعالیت‌ها و عناصر کاری ارث می‌رسند؛ در هر سطح پایین‌تر قابل جایگزینی یا حذف از ارث‌بری‌اند.' }))));
+    var sectionEl = U.h('div');
+    body.appendChild(sectionEl);
+    g.T2VIEWS._allowanceSection(sectionEl, projectId, 'PROJECT', projectId);
+  }
+
+  // ═══════════════ زبانه گروه‌های فعالیت — فقط طبقه‌بندی ═══════════════
+
+  function renderGroupsTab(body, projectId) {
+    var wrap = U.h('div');
+    body.appendChild(wrap);
+
+    function draw() {
+      U.clear(wrap);
+      var state = DB.getState();
+      var groups = state.activityGroups.filter(function (x) { return x.projectId === projectId; });
+      var actsByGroup = {};
+      state.activities.forEach(function (a) {
+        if (!a.groupId) return;
+        if (!actsByGroup[a.groupId]) actsByGroup[a.groupId] = [];
+        var st = state.stations.find(function (s) { return s.id === a.stationId; });
+        actsByGroup[a.groupId].push({ id: a.id, name: a.name, stationName: st ? st.name : '؟' });
       });
-      var card3 = U.h('div', { class: 'card' },
-        U.h('div', { class: 'px-4 pt-4' }, U.h('h3', { class: 'font-bold', text: 'فعالیت‌های این گروه' })));
-      if (acts.length === 0) {
-        card3.appendChild(U.h('p', {
-          class: 'p-4 text-sm text-muted leading-relaxed',
-          text: 'فعالیتی به این گروه تخصیص داده نشده است؛ تخصیص گروه از مرحله «ساختار تولید» و در جزئیات فعالیت انجام می‌شود.',
-        }));
-      } else {
-        var list = U.h('div', { class: 'flex flex-col gap-2 p-4' });
-        acts.forEach(function (x) {
-          list.appendChild(U.h('div', { class: 'list-row' },
-            U.h('div', { class: 'flex-1 min-w-0' },
-              U.h('div', { class: 'text-sm font-medium truncate' }, x.a.name),
-              U.h('div', { class: 'text-xs text-muted truncate' }, x.st.name)),
-            U.h('div', { class: 'spacer' }),
-            U.h('button', {
-              class: 'btn btn-ghost btn-sm shrink-0', type: 'button',
-              'aria-label': 'مشاهده فعالیت ' + x.a.name,
-              onclick: function () { appNavigate('/p/' + projectId + '/activity/' + x.a.id); },
-            }, U.icon('arrowLeft'), 'مشاهده')));
-        });
-        card3.appendChild(list);
-      }
-      panel.appendChild(card3);
 
-      return panel;
+      var head = U.h('div', { class: 'card-head flex flex-wrap items-center justify-between gap-3 p-4 pb-3' },
+        U.h('div', { class: 'flex items-center gap-2.5' },
+          U.h('span', { class: 'chip-icon cyan', 'aria-hidden': 'true' }, U.icon('folderTree')),
+          U.h('div', null,
+            U.h('h2', { class: 'text-sm font-extrabold', text: 'گروه‌های فعالیت' }),
+            U.h('p', { class: 'text-[11px] text-muted', text: 'طبقه‌بندی فعالیت‌های مشابه — منبع محاسبه نیست' })),
+          UI.helpDot('گروه‌های فعالیت', GROUPS_HELP)),
+        U.h('button', { class: 'btn btn-brand btn-sm gap-1.5', type: 'button', onclick: openCreateGroup },
+          U.icon('plus'), 'گروه جدید'));
+
+      var content = U.h('div', { class: 'p-4 pt-3' });
+      if (groups.length === 0) {
+        content.appendChild(U.h('div', { class: 'rounded-xl border border-dashed p-6 text-center', style: { borderColor: 'var(--border)' } },
+          U.h('p', { class: 'text-sm font-bold', text: 'هنوز گروه فعالیتی ثبت نشده است' }),
+          U.h('p', { class: 'mx-auto mt-1 max-w-lg text-xs leading-5 text-muted', text: 'گروه‌ها صرفاً برچسب طبقه‌بندی فعالیت‌ها هستند؛ الونس‌ها از مدل سلسله‌مراتبی (خط → ایستگاه → فعالیت → عنصر) اعمال می‌شوند.' }),
+          U.h('button', { class: 'btn btn-brand btn-sm mt-3 gap-1.5', type: 'button', onclick: openCreateGroup }, U.icon('plus'), 'اولین گروه')));
+      } else {
+        var grid = U.h('div', { class: 'grid gap-2 sm:grid-cols-2' });
+        groups.forEach(function (grp) {
+          var acts = actsByGroup[grp.id] || [];
+          var actList = U.h('ul', { class: 'mt-2.5 space-y-1 pt-2', style: { borderTop: '1px solid var(--border)' } });
+          acts.slice(0, 4).forEach(function (a) {
+            actList.appendChild(U.h('li', null,
+              U.h('button', {
+                class: 'w-full truncate rounded-md px-1.5 py-1 text-right text-xs hover:bg-brand-soft',
+                onclick: function () { g.T2APP.navigate('/p/' + projectId + '/activity/' + a.id); },
+              }, a.name, U.h('span', { class: 'text-faint', text: ' — ' + a.stationName }))));
+          });
+          if (acts.length > 4) actList.appendChild(U.h('li', { class: 'num px-1.5 text-[10px] text-faint', text: 'و ' + (acts.length - 4).toLocaleString('fa-IR') + ' فعالیت دیگر…' }));
+          grid.appendChild(U.h('div', { class: 'rounded-xl p-3.5', style: { border: '1px solid var(--border)', background: 'var(--surface-2)' } },
+            U.h('div', { class: 'flex items-start justify-between gap-2' },
+              U.h('div', { class: 'min-w-0 flex-1' },
+                U.h('p', { class: 'truncate text-sm font-bold', text: grp.name }),
+                grp.description ? U.h('p', { class: 'mt-0.5 text-xs leading-5 text-muted', text: grp.description }) : null,
+                U.h('p', { class: 'num mt-1.5 text-[11px] text-faint', text: acts.length.toLocaleString('fa-IR') + ' فعالیت · ساخته‌شده ' + U.formatDateTime(grp.createdAt) })),
+              U.h('button', { class: 'icon-btn sm danger shrink-0', 'aria-label': 'حذف گروه ' + grp.name, onclick: function () { confirmDeleteGroup(grp, acts, draw); } }, U.icon('trash'))),
+            acts.length > 0 ? actList : null));
+        });
+        content.appendChild(grid);
+      }
+      wrap.appendChild(U.h('section', { class: 'card card-premium overflow-hidden', 'aria-label': 'گروه‌های فعالیت' }, head, content));
     }
 
-    // ═══════════ دیالوگ گروه جدید ═══════════
     function openCreateGroup() {
-      var nameVal = '', descVal = '';
-      var nameInput = U.h('input', { class: 'input', placeholder: 'مثلاً: کار دستی سبک', 'aria-label': 'نام گروه' });
-      nameInput.addEventListener('input', function () { nameVal = nameInput.value; });
-      var descTa = U.h('textarea', { class: 'textarea', 'aria-label': 'شرح گروه (اختیاری)' });
-      descTa.addEventListener('input', function () { descVal = descTa.value; });
-      UI.dialog({
-        title: 'گروه جدید',
+      var nameInput = U.h('input', { class: 'input', placeholder: 'مثلاً: کار دستی سبک' });
+      var descInput = U.h('textarea', { class: 'textarea', rows: 2, placeholder: 'توضیح اختیاری…' });
+      var dlg = UI.dialog({
+        title: 'گروه فعالیت جدید',
+        desc: 'گروه فقط برای طبقه‌بندی فعالیت‌هاست؛ مقادیر الونس در سطوح خط/ایستگاه/فعالیت/عنصر تعیین می‌شوند.',
         bodyBuilder: function (body) {
-          body.appendChild(UI.field('نام گروه', nameInput));
-          body.appendChild(UI.field('شرح (اختیاری)', descTa));
+          body.appendChild(U.h('div', { class: 'space-y-4' },
+            UI.field('نام گروه (الزامی)', nameInput),
+            UI.field('توضیحات (اختیاری)', descInput)));
         },
-        footerBuilder: function (close) {
+        footerBuilder: function () {
           return U.h('div', { class: 'dialog-footer' },
-            U.h('button', { class: 'btn', type: 'button', text: 'انصراف', onclick: close }),
-            U.h('div', { class: 'spacer' }),
+            U.h('button', { class: 'btn btn-outline', type: 'button', onclick: function () { dlg.close(); } }, 'انصراف'),
             U.h('button', {
-              class: 'btn btn-brand', type: 'button',
+              class: 'btn btn-brand gap-1.5', type: 'button',
               onclick: function () {
-                if (!nameVal.trim()) { UI.toast('نام گروه الزامی است', { type: 'error' }); return; }
-                var grp = DB.createGroup(projectId, { name: nameVal.trim(), description: descVal.trim() || null });
-                close();
-                selectedGroupId = grp.id;
-                UI.toast('گروه ایجاد شد');
-                renderAll();
+                if (!nameInput.value.trim()) { UI.toastError(new Error('نام گروه الزامی است')); return; }
+                try {
+                  DB.createGroup(projectId, { name: nameInput.value.trim(), description: descInput.value.trim() || null });
+                  g.T2Toast('گروه فعالیت ایجاد شد', { type: 'success' });
+                  dlg.close(); draw();
+                } catch (err) { UI.toastError(err); }
               },
             }, U.icon('plus'), 'ثبت گروه'));
         },
       });
     }
 
-    // ═══════════ حذف گروه — FR-26 ═══════════
-    function deleteGroupFlow(gr) {
-      // پیش‌نمایش وابستگی‌ها پیش از حذف (ساختار خروجی DB.deleteGroup)
+    function confirmDeleteGroup(grp, acts, onDone) {
       UI.confirmDelete({
         title: 'حذف گروه فعالیت',
-        name: gr.group.name,
-        deps: {
-          'مقدار مجاز ثبت‌شده در این گروه (حذف می‌شود)': gr.allowances.length,
-          'فعالیت — فقط بدون گروه می‌شوند؛ داده آن‌ها حذف نمی‌شود': gr.activitiesCount,
-        },
-      }).then(function (ok) {
-        if (!ok) return;
-        try { DB.deleteGroup(gr.group.id); } catch (err) { UI.toastError(err); return; }
-        UI.toast('گروه حذف شد');
-        if (selectedGroupId === gr.group.id) selectedGroupId = null;
-        renderAll();
+        name: grp.name,
+        deps: acts.length > 0 ? { 'فعالیت — فقط بدون گروه می‌شوند؛ داده آن‌ها حذف نمی‌شود': acts.length } : {},
+      }).then(function (yes) {
+        if (!yes) return;
+        try {
+          DB.deleteGroup(grp.id);
+          g.T2Toast('گروه «' + grp.name + '» حذف شد', {
+            type: 'success',
+            description: acts.length.toLocaleString('fa-IR') + ' فعالیتِ این گروه بدون گروه شد؛ داده آن‌ها حذف نشد.',
+          });
+          onDone();
+        } catch (err) { UI.toastError(err); }
       });
     }
 
-    // ═══════════ زبانه دسته‌های مجاز — FR-04 ═══════════
-    function renderCategoriesTab(wrap, categories) {
-      wrap.appendChild(U.h('div', { class: 'flex flex-wrap items-center gap-2' },
-        U.h('h3', { class: 'font-bold', text: 'دسته‌های مجاز' }),
-        U.h('div', { class: 'spacer' }),
-        U.h('button', {
-          class: 'btn btn-brand btn-sm', type: 'button',
-          onclick: function () { openCreateCategory(); },
-        }, U.icon('plus'), 'دسته مجاز جدید'),
-        UI.helpDot('دسته مجاز', CATEGORY_HELP)));
+    draw();
+  }
 
-      if (categories.length === 0) {
-        wrap.appendChild(UI.emptyState({
-          icon: 'percent',
-          title: 'دسته مجازی تعریف نشده',
-          desc: 'دسته‌های مجاز اجزای مجموع A هستند؛ مانند استراحت شخصی یا نیازهای طبیعی. برای درصدگذاری گروه‌ها ابتدا باید دسته بسازید.',
-          actionLabel: 'ثبت اولین دسته',
-          onAction: function () { openCreateCategory(); },
-        }));
+  // ═══════════════ بخش «الونس‌ها و زمان‌های مجاز» — کامپوننت مشترک چهار سطح (§۶) ═══════════════
+  // mirrors src/views/project/allowances/AllowanceSection.tsx
+
+  var STATUS_BADGES = {
+    INHERITED: { label: 'ارث‌رسیده', tone: 'brand' },
+    OVERRIDDEN: { label: 'جایگزین‌شده', tone: 'amber' },
+    CUSTOM: { label: 'اختصاصی', tone: 'green' },
+    EXCLUDED: { label: 'حذف از ارث‌بری', tone: 'red' },
+  };
+
+  g.T2VIEWS._allowanceSection = function (container, projectId, scopeType, scopeId, opts) {
+    opts = opts || {};
+    var sectionEl = U.h('section', { class: opts.compact ? '' : 'card card-premium overflow-hidden', 'aria-label': 'الونس‌ها و زمان‌های مجاز' });
+    container.appendChild(sectionEl);
+
+    function fmtSeconds(v) { return v === null || v === undefined ? '—' : U.formatTimeValue(v) + ' ثانیه'; }
+
+    function draw() {
+      var data;
+      try { data = DB.getScopeAllowances(scopeType, scopeId); }
+      catch (err) { sectionEl.textContent = ''; sectionEl.appendChild(U.h('div', { class: 'banner error' }, U.icon('alertTriangle'), U.h('span', { text: err.message }))); return; }
+
+      U.clear(sectionEl);
+      var rows = data.resolved.rows;
+      var summary = data.resolved.summary;
+      var needsAgg = rows.filter(function (r) { return r.needsAggregationRule; });
+
+      // هدر
+      var head = U.h('div', { class: 'card-head flex flex-wrap items-center justify-between gap-3 p-4 pb-3' },
+        U.h('div', { class: 'flex items-center gap-2.5' },
+          U.h('span', { class: 'chip-icon brand', 'aria-hidden': 'true' }, U.icon('tags')),
+          U.h('div', null,
+            U.h('h3', { class: 'text-sm font-extrabold', text: 'الونس‌ها و زمان‌های مجاز' }),
+            U.h('p', { class: 'text-[11px] text-muted', text: SCOPE_TITLES[scopeType] })),
+          UI.helpDot('الونس‌ها و زمان‌های مجاز', SECTION_HELP)),
+        U.h('div', { class: 'flex items-center gap-2' },
+          UI.badge(data.settings.methodLabel, 'outline'),
+          U.h('button', { class: 'btn btn-brand btn-sm gap-1.5', type: 'button', onclick: openAddPopover },
+            U.icon('plus'), 'افزودن الونس')));
+
+      var content = U.h('div', { class: (opts.compact ? '' : 'p-4 pt-3') + ' space-y-3' });
+
+      if (rows.length === 0) {
+        content.appendChild(U.h('div', { class: 'rounded-xl border border-dashed p-4 text-center', style: { borderColor: 'var(--border)', background: 'var(--surface-2)' } },
+          U.h('p', { class: 'text-sm font-bold', text: 'هنوز الونسی برای این سطح تعریف نشده است' }),
+          U.h('p', { class: 'mx-auto mt-1 max-w-md text-xs leading-5 text-muted', text: 'الونس‌های تعریف‌شده در سطوح بالاتر (خط تولید/ایستگاه/فعالیت) به‌طور خودکار به این سطح ارث می‌رسند. با «افزودن الونس» می‌توانید مقدار اختصاصی همین سطح را ثبت کنید.' })));
       } else {
-        var st = DB.getState();
-        wrap.appendChild(UI.table(
-          ['دسته مجاز', 'وضعیت', 'مقادیر گروه', 'بازنویسی فعالیت', 'آخرین تغییر', ''],
-          function (tbody) {
-            categories.forEach(function (cat) {
-              var gv = st.groupAllowances.filter(function (r) { return r.categoryId === cat.id; }).length;
-              var ov = st.activityAllowanceOverrides.filter(function (r) { return r.categoryId === cat.id; }).length;
-              tbody.appendChild(U.h('tr', null,
-                U.h('td', null,
-                  U.h('span', { class: 'font-semibold' }, cat.name),
-                  cat.code ? U.h('span', { class: 'ms-2' }, UI.badge(cat.code, 'muted')) : null),
-                U.h('td', null, UI.switchEl(cat.isActive, function (v) { toggleCategory(cat, v); },
-                  (cat.isActive ? 'غیرفعال‌سازی' : 'فعال‌سازی') + ' دسته ' + cat.name)),
-                U.h('td', { class: 'text-muted' }, U.formatInt(gv)),
-                U.h('td', { class: 'text-muted' }, U.formatInt(ov)),
-                U.h('td', { class: 'text-xs text-muted' }, U.formatDateTime(cat.updatedAt)),
-                U.h('td', null, U.h('div', { class: 'flex', style: { justifyContent: 'flex-end', gap: '4px' } },
-                  U.h('button', {
-                    class: 'icon-btn sm', type: 'button', 'aria-label': 'ویرایش دسته ' + cat.name,
-                    onclick: function () { openEditCategory(cat); },
-                  }, U.icon('pencil')),
-                  U.h('button', {
-                    class: 'icon-btn sm danger', type: 'button', 'aria-label': 'حذف دسته ' + cat.name,
-                    onclick: function () { deleteCategoryFlow(cat); },
-                  }, U.icon('trash'))))));
-            });
-          }));
+        var tableRows = rows.map(function (row) {
+          var badge = STATUS_BADGES[row.status];
+          var excluded = row.status === 'EXCLUDED';
+          var menu = UI.dropdownMenu([
+            { label: 'جایگزینی مقدار…', icon: 'pencil', onClick: function () { openEditor(row, null); } },
+            row.valueType === 'FIXED_TIME' && !excluded ? { label: 'تغییر مبنای زمان ثابت…', icon: 'timer', onClick: function () { openBasisDialog(row); } } : null,
+            !excluded ? { label: 'حذف از ارث‌بری', icon: 'ban', onClick: function () { confirmExclude(row); } } : null,
+            row.hasLocalDecision ? '-' : null,
+            row.hasLocalDecision ? { label: row.status === 'CUSTOM' ? 'حذف تخصیص محلی' : 'بازگردانی به مقدار والد', icon: 'rotateCcw', destructive: true, onClick: function () { runOp({ definitionId: row.definitionId, action: 'RESTORE' }, 'تخصیص محلی «' + row.title + '» حذف شد و مقدار والد بازگشت'); } } : null,
+          ].filter(Boolean), { class: 'icon-btn sm', 'aria-label': 'عملیات الونس ' + row.title });
+          return [
+            U.h('div', { class: 'max-w-56 text-right' },
+              U.h('span', { class: 'text-[13px] font-bold', style: { display: 'block' }, text: row.title }),
+              row.code ? U.h('span', { class: 'num text-[10px] text-faint', dir: 'ltr', text: row.code }) : null),
+            U.h('span', { class: 'text-xs' }, row.valueType === 'PERCENT' ? 'درصدی' : 'زمان ثابت',
+              row.valueType === 'FIXED_TIME' ? U.h('span', { class: 'block text-[10px] text-muted', text: row.applicationBasis === 'PER_CYCLE' ? 'هر چرخه' : 'هر اجرا' }) : null),
+            U.h('span', { class: 'num font-bold' },
+              excluded ? '—' :
+              row.valueType === 'PERCENT' ? U.h('span', { class: 'text-brand', text: U.formatPercent(row.percentValue) }) :
+              fmtSeconds(row.timeValueSeconds)),
+            U.h('span', { class: 'text-xs text-muted' }, row.sourceScopeLabel || '—',
+              row.sourceScopeType ? U.h('span', { class: 'block text-[10px] text-faint', text: DB.CONST.ALLOWANCE_SCOPE_LABELS[row.sourceScopeType] || '' }) : null),
+            U.h('span', null, UI.badge(badge.label, badge.tone),
+              row.note ? U.h('span', { class: 'mt-0.5 block max-w-44 text-[10px] leading-4 text-faint', title: row.note, text: row.note }) : null),
+            menu,
+          ];
+        });
+        content.appendChild(UI.table(['عنوان الونس', 'نوع و مبنا', 'مقدار مؤثر', 'مبدأ', 'وضعیت', 'عملیات'], tableRows.map(tr)));
+
+        // خلاصه — §۶
+        content.appendChild(U.h('div', { class: 'flex flex-wrap items-center gap-x-4 gap-y-1.5 rounded-xl px-3.5 py-2.5 text-xs', style: { background: 'var(--surface-2)' } },
+          U.h('span', { class: 'font-bold' }, 'خلاصه: ',
+            U.h('span', { class: 'num text-brand', text: summary.count.toLocaleString('fa-IR') + ' الونس مؤثر' })),
+          U.h('span', { class: 'num' }, 'جمع درصدها (A): ', U.h('b', { class: 'text-brand', text: U.formatPercent(summary.totalPercent) })),
+          U.h('span', { class: 'num' }, 'زمان ثابت هر اجرا: ', U.h('b', { text: fmtSeconds(summary.perExecutionSeconds) })),
+          U.h('span', { class: 'num' }, 'زمان ثابت هر چرخه: ', U.h('b', { text: fmtSeconds(summary.perCycleSeconds) }),
+            U.h('span', { class: 'text-faint', text: ' (جدا از ST عناصر)' })),
+          UI.badge(data.settings.formula, 'outline')));
+
+        // نیازمند قاعده تجمیع — §۲.۳
+        if (needsAgg.length > 0) {
+          var ul = U.h('ul', { class: 'mt-1 list-disc space-y-0.5 text-xs text-muted', style: { listStylePosition: 'inside', paddingRight: '0', background: 'transparent' } });
+          needsAgg.forEach(function (r) {
+            ul.appendChild(U.h('li', { class: 'num', text: '«' + r.title + '» — ' + fmtSeconds(r.timeValueSeconds) + ' از سطح «' + (r.sourceScopeLabel || '—') + '»؛ تا تعریف قاعده تجمیع مهندسی، بی‌صدا حذف یا چندبار اعمال نمی‌شود.' }));
+          });
+          content.appendChild(U.h('div', { class: 'rounded-xl p-3 text-xs leading-6', style: { background: 'var(--amber-soft)' } },
+            U.h('p', { class: 'flex items-center gap-1.5 font-bold', style: { color: 'var(--amber)' } }, U.icon('alertTriangle'),
+              needsAgg.length.toLocaleString('fa-IR') + ' الونس زمان ثابت «هر اجرا» در سطح بالاتر از عنصر — نیازمند قاعده تجمیع'),
+            ul));
+        }
       }
 
-      // نکته پایین — روش اعمال مجاز — FR-15
-      var calc = DB.getCalcSettings(projectId);
-      var methodLabel = DB.CONST.ALLOWANCE_METHOD_LABELS[calc.allowanceMethod] || calc.allowanceMethod;
-      var formula = DB.CONST.ALLOWANCE_METHOD_FORMULAS[calc.allowanceMethod] || '';
-      wrap.appendChild(U.h('div', { class: 'banner plain' }, U.icon('info'),
-        U.h('div', null,
-          'روش اعمال مجاز: «' + methodLabel + '» با فرمول ',
-          U.h('code', { class: 'inline', dir: 'ltr' }, formula),
-          calc.allowanceMethod === 'SHARE_OF_ST'
-            ? ' — در این روش مجموع A باید کمتر از ۱۰۰٪ باشد؛ در غیر این صورت محاسبه ممنوع است.'
-            : '')));
+      sectionEl.appendChild(head);
+      sectionEl.appendChild(content);
     }
 
-    // ═══════════ فعال/غیرفعال‌سازی دسته ═══════════
-    function toggleCategory(cat, v) {
+    function runOp(op, successMsg) {
       try {
-        DB.updateCategory(cat.id, { isActive: v });
-        if (v) UI.toast('دسته «' + cat.name + '» فعال شد');
-        else UI.toast('دسته «' + cat.name + '» غیرفعال شد — از مجموع A کنار گذاشته می‌شود', { type: 'warning' });
+        DB.putScopeAllowanceOps(scopeType, scopeId, [op]);
+        if (successMsg) g.T2Toast(successMsg, { type: 'success' });
+        draw();
+        if (opts.onChange) opts.onChange();
       } catch (err) { UI.toastError(err); }
-      renderAll();
     }
 
-    // ═══════════ دیالوگ دسته مجاز جدید ═══════════
-    function openCreateCategory() {
-      var nameVal = '', codeVal = '', isActive = true;
-      var nameInput = U.h('input', { class: 'input', placeholder: 'مثلاً: استراحت شخصی', 'aria-label': 'نام دسته' });
-      nameInput.addEventListener('input', function () { nameVal = nameInput.value; });
-      var codeInput = U.h('input', { class: 'input ltr', placeholder: 'مثلاً: PF', 'aria-label': 'کد دسته' });
-      codeInput.addEventListener('input', function () { codeVal = codeInput.value; });
-      UI.dialog({
-        title: 'دسته مجاز جدید',
+    // افزودن از فهرست مرکزی — popover با جست‌وجو (§۶)
+    function openAddPopover() {
+      var data = DB.getScopeAllowances(scopeType, scopeId);
+      var available = data.definitions.filter(function (d) { return d.isActive && !d.isArchived; });
+      var rowDefIds = {};
+      data.resolved.rows.forEach(function (r) { rowDefIds[r.definitionId] = true; });
+      var searchInput = U.h('input', { class: 'input', placeholder: 'جست‌وجوی عنوان یا کد…' });
+      var listEl = U.h('div', { class: 'max-h-64 overflow-y-auto space-y-0.5' });
+
+      function drawList() {
+        U.clear(listEl);
+        var q = searchInput.value.trim();
+        var matches = available.filter(function (d) { return !q || d.title.indexOf(q) >= 0 || (d.code || '').indexOf(q) >= 0; });
+        if (matches.length === 0) {
+          listEl.appendChild(U.h('p', { class: 'py-4 text-center text-xs text-muted', text: 'تعریف فعالی یافت نشد؛ تعریف جدید بسازید.' }));
+        }
+        matches.forEach(function (d) {
+          var defTip = d.defaultValueType === 'PERCENT' ? 'پیشنهادی: ' + U.formatPercent(d.defaultValuePercent)
+            : d.defaultValueType === 'FIXED_TIME' ? 'پیشنهادی: ' + U.formatTimeValue(d.defaultTimeSeconds) + ' ثانیه'
+            : 'بدون مقدار پیش‌فرض';
+          listEl.appendChild(U.h('button', {
+            class: 'flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-2 text-right hover:bg-brand-soft',
+            type: 'button',
+            onclick: function () { dlg.close(); openEditor(null, d); },
+          },
+            U.h('span', { class: 'min-w-0 flex-1' },
+              U.h('span', { class: 'block truncate text-xs font-bold', text: d.title }),
+              U.h('span', { class: 'block text-[10px] text-muted', text: defTip })),
+            rowDefIds[d.id] ? UI.badge('فعال', 'brand') : null));
+        });
+      }
+      searchInput.addEventListener('input', drawList);
+      drawList();
+
+      var dlg = UI.dialog({
+        title: 'افزودن الونس از فهرست مرکزی',
+        desc: 'تعریف مرکزی پروژه را انتخاب کنید یا تعریف جدید بسازید.',
         bodyBuilder: function (body) {
-          body.appendChild(UI.field('نام دسته (الزامی)', nameInput));
-          body.appendChild(UI.field('کد (اختیاری)', codeInput));
-          body.appendChild(U.h('div', { class: 'flex items-center justify-between rounded p-3 bg-surface-2' },
-            U.h('div', null,
-              U.h('span', { class: 'field-label', text: 'دسته فعال باشد' }),
-              U.h('p', { class: 'hint', text: 'دسته غیرفعال در مجموع A لحاظ نمی‌شود.' })),
-            UI.switchEl(isActive, function (v) { isActive = v; }, 'دسته فعال باشد')));
-        },
-        footerBuilder: function (close) {
-          return U.h('div', { class: 'dialog-footer' },
-            U.h('button', { class: 'btn', type: 'button', text: 'انصراف', onclick: close }),
-            U.h('div', { class: 'spacer' }),
+          body.appendChild(U.h('div', { class: 'space-y-2' },
+            searchInput, listEl,
             U.h('button', {
-              class: 'btn btn-brand', type: 'button',
+              class: 'flex w-full items-center gap-1.5 rounded-lg border border-dashed px-2.5 py-2 text-xs font-bold hover:bg-brand-soft',
+              style: { borderColor: 'var(--border)', color: 'var(--brand)' },
+              type: 'button',
               onclick: function () {
-                if (!nameVal.trim()) { UI.toast('نام دسته الزامی است', { type: 'error' }); return; }
-                DB.createCategory(projectId, {
-                  name: nameVal.trim(), code: codeVal.trim() || null, isActive: isActive,
-                });
-                close();
-                UI.toast('دسته ایجاد شد');
-                renderAll();
+                dlg.close();
+                openDefinitionDialog(projectId, null, function () { draw(); });
               },
-            }, U.icon('plus'), 'ثبت دسته'));
+            }, U.icon('circlePlus'), 'ایجاد تعریف جدید در همین فرم…')));
+        },
+        footerBuilder: function () {
+          return U.h('div', { class: 'dialog-footer' },
+            U.h('button', { class: 'btn btn-outline', type: 'button', onclick: function () { dlg.close(); } }, 'بستن'));
         },
       });
     }
 
-    // ═══════════ دیالوگ ویرایش دسته مجاز ═══════════
-    function openEditCategory(cat) {
-      var nameVal = cat.name, codeVal = cat.code || '', sortVal = cat.sortOrder;
-      var nameInput = U.h('input', { class: 'input', value: nameVal, 'aria-label': 'نام دسته' });
-      nameInput.addEventListener('input', function () { nameVal = nameInput.value; });
-      var codeInput = U.h('input', { class: 'input ltr', value: codeVal, 'aria-label': 'کد دسته' });
-      codeInput.addEventListener('input', function () { codeVal = codeInput.value; });
-      var sortInput = UI.persianNumberInput({
-        value: cat.sortOrder, decimals: false, min: 0, max: 9999,
-        onChange: function (v) { sortVal = v; },
-        ariaLabel: 'ترتیب نمایش دسته',
+    // ویرایشگر مقدار — جایگزینی/افزودن (§۶ ورودی‌ها)
+    function openEditor(row, def) {
+      var definition = def || data_def(row.definitionId);
+      function data_def(id) {
+        return DB.listAllowanceDefinitions(projectId).find(function (d) { return d.id === id; }) || { id: id, title: row.title, defaultValueType: null, defaultValuePercent: null, defaultTimeSeconds: null };
+      }
+      var current = row && row.status !== 'EXCLUDED' ? row : null;
+      var initialType = current ? current.valueType : (definition.defaultValueType || 'PERCENT');
+      var state = {
+        valueType: initialType,
+        percent: initialType === 'PERCENT' ? (current ? current.percentValue : definition.defaultValuePercent) : null,
+        seconds: initialType === 'FIXED_TIME' ? (current ? current.timeValueSeconds : definition.defaultTimeSeconds) : null,
+        unit: 'sec',
+        basis: current && current.applicationBasis ? current.applicationBasis : (scopeType === 'WORK_ELEMENT' ? 'PER_ELEMENT_EXECUTION' : 'PER_CYCLE'),
+      };
+      var typeSelect, percentWrap = U.h('div'), timeWrap = U.h('div'), basisWrap = U.h('div');
+
+      function drawTypeFields() {
+        U.clear(percentWrap); U.clear(timeWrap); U.clear(basisWrap);
+        percentWrap.style.display = state.valueType === 'PERCENT' ? '' : 'none';
+        timeWrap.style.display = state.valueType === 'FIXED_TIME' ? '' : 'none';
+        basisWrap.style.display = state.valueType === 'FIXED_TIME' ? '' : 'none';
+        if (state.valueType === 'PERCENT') {
+          percentWrap.appendChild(U.h('div', { class: 'flex items-center gap-1' },
+            U.h('label', { class: 'field-label', for: 'alw-pct', text: 'مقدار درصدی' }),
+            definition.defaultValueType === 'PERCENT' && definition.defaultValuePercent !== null
+              ? UI.badge('پیشنهادی: ' + U.formatPercent(definition.defaultValuePercent), 'muted') : null));
+          percentWrap.appendChild(UI.percentInput({
+            value: state.percent,
+            onChange: function (v) { state.percent = v; },
+            ariaLabel: 'درصد الونس ' + definition.title,
+          }));
+        } else {
+          timeWrap.appendChild(U.h('div', { class: 'flex items-center gap-1' },
+            U.h('label', { class: 'field-label', text: 'مقدار زمان ثابت' }),
+            definition.defaultValueType === 'FIXED_TIME' && definition.defaultTimeSeconds !== null
+              ? UI.badge('پیشنهادی: ' + U.formatTimeValue(definition.defaultTimeSeconds) + ' ثانیه', 'muted') : null));
+          var amountInput = UI.persianNumberInput({ value: state.seconds, decimals: true, min: 0, onChange: function (v) { state.seconds = v; }, ariaLabel: 'زمان ثابت الونس ' + definition.title });
+          var unitSelect = UI.selectEl([{ value: 'sec', label: 'ثانیه' }, { value: 'min', label: 'دقیقه' }], state.unit, function (v) {
+            if (state.seconds !== null && state.seconds !== undefined) state.seconds = v === 'min' ? state.seconds / 60 : state.seconds * 60;
+            state.unit = v;
+            var old = amountInput.parentNode;
+            redrawAmount();
+          });
+          function redrawAmount() {
+            U.clear(timeWrap);
+            timeWrap.appendChild(U.h('div', { class: 'flex items-center gap-1' },
+              U.h('label', { class: 'field-label', text: 'مقدار زمان ثابت' }),
+              definition.defaultValueType === 'FIXED_TIME' && definition.defaultTimeSeconds !== null
+                ? UI.badge('پیشنهادی: ' + U.formatTimeValue(definition.defaultTimeSeconds) + ' ثانیه', 'muted') : null));
+            amountInput = UI.persianNumberInput({ value: state.seconds, decimals: true, min: 0, onChange: function (v) { state.seconds = v; }, ariaLabel: 'زمان ثابت الونس ' + definition.title });
+            unitSelect = UI.selectEl([{ value: 'sec', label: 'ثانیه' }, { value: 'min', label: 'دقیقه' }], state.unit, function (v) {
+              if (state.seconds !== null && state.seconds !== undefined) state.seconds = v === 'min' ? state.seconds / 60 : state.seconds * 60;
+              state.unit = v;
+              redrawAmount();
+            });
+            timeWrap.appendChild(U.h('div', { class: 'flex gap-2' }, U.h('div', { class: 'min-w-0 flex-1' }, amountInput), U.h('div', { class: 'w-24' }, unitSelect)));
+            timeWrap.appendChild(basisWrap);
+          }
+          timeWrap.appendChild(U.h('div', { class: 'flex gap-2' }, U.h('div', { class: 'min-w-0 flex-1' }, amountInput), U.h('div', { class: 'w-24' }, unitSelect)));
+
+          basisWrap.appendChild(U.h('div', { class: 'space-y-1.5 mt-2' },
+            U.h('div', { class: 'flex items-center gap-1' }, U.h('label', { class: 'field-label', text: 'مبنای وقوع' }), UI.helpDot('مبنای وقوع زمان ثابت', BASIS_HELP)),
+            UI.selectEl([
+              { value: 'PER_ELEMENT_EXECUTION', label: 'به‌ازای هر اجرای عنصر' },
+              { value: 'PER_CYCLE', label: 'یک‌بار در هر چرخه' },
+            ], state.basis, function (v) { state.basis = v; }),
+            state.basis === 'PER_ELEMENT_EXECUTION' && scopeType !== 'WORK_ELEMENT'
+              ? U.h('p', { class: 'rounded-lg p-2 text-[11px] leading-5', style: { background: 'var(--amber-soft)', color: 'var(--amber)' }, text: 'زمان ثابت «هر اجرا» در سطح بالاتر از عنصر، نیازمند قاعده تجمیع مهندسی است؛ تا تعیین قاعده، در ST عناصر اعمال نمی‌شود (بی‌صدا حذف یا چندبار اعمال نمی‌شود).' })
+              : null));
+          timeWrap.appendChild(basisWrap);
+        }
+      }
+
+      typeSelect = UI.selectEl([{ value: 'PERCENT', label: 'درصدی' }, { value: 'FIXED_TIME', label: 'زمان ثابت' }], state.valueType, function (v) {
+        state.valueType = v;
+        if (v === 'PERCENT') state.percent = current ? current.percentValue : definition.defaultValuePercent;
+        else { state.seconds = current ? current.timeValueSeconds : definition.defaultTimeSeconds; state.unit = 'sec'; state.basis = current && current.applicationBasis ? current.applicationBasis : (scopeType === 'WORK_ELEMENT' ? 'PER_ELEMENT_EXECUTION' : 'PER_CYCLE'); }
+        drawTypeFields();
       });
-      UI.dialog({
-        title: 'ویرایش دسته مجاز',
+
+      var dlg = UI.dialog({
+        title: (row ? 'جایگزینی مقدار' : 'افزودن الونس') + ' — «' + definition.title + '»',
+        desc: 'در ' + (DB.getScopeAllowances(scopeType, scopeId).scope.label) + ' ثبت می‌شود؛ مقدار فعلی والد (در صورت وجود) جایگزین می‌شود.',
         bodyBuilder: function (body) {
-          body.appendChild(UI.field('نام دسته', nameInput));
-          body.appendChild(UI.field('کد', codeInput));
-          body.appendChild(UI.field('ترتیب نمایش', sortInput, SORT_HELP));
+          body.appendChild(U.h('div', { class: 'space-y-4' },
+            UI.field('نوع مقدار', typeSelect),
+            percentWrap, timeWrap,
+            row && row.parentValue !== null && row.parentValue !== undefined && row.status !== 'CUSTOM'
+              ? U.h('p', { class: 'text-[11px] text-muted' }, 'مقدار فعلی والد: ',
+                  U.h('b', { class: 'num', text: row.valueType === 'PERCENT' ? U.formatPercent(row.parentValue) : row.parentValue + ' ثانیه' }))
+              : null));
         },
-        footerBuilder: function (close) {
+        footerBuilder: function () {
           return U.h('div', { class: 'dialog-footer' },
-            U.h('button', { class: 'btn', type: 'button', text: 'انصراف', onclick: close }),
-            U.h('div', { class: 'spacer' }),
+            U.h('button', { class: 'btn btn-outline', type: 'button', onclick: function () { dlg.close(); } }, 'انصراف'),
             U.h('button', {
-              class: 'btn btn-brand', type: 'button',
+              class: 'btn btn-brand gap-1.5', type: 'button',
               onclick: function () {
-                if (!String(nameVal).trim()) { UI.toast('نام دسته الزامی است', { type: 'error' }); return; }
-                try {
-                  DB.updateCategory(cat.id, {
-                    name: String(nameVal).trim(),
-                    code: String(codeVal).trim() || null,
-                    sortOrder: (sortVal === null || (typeof sortVal === 'number' && isNaN(sortVal))) ? 0 : sortVal,
-                  });
-                } catch (err) { UI.toastError(err); return; }
-                close();
-                UI.toast('دسته به‌روزرسانی شد');
-                renderAll();
+                var op;
+                if (state.valueType === 'PERCENT') {
+                  if (state.percent === null || state.percent === undefined) { UI.toastError(new Error('مقدار درصدی الزامی است.')); return; }
+                  op = { definitionId: definition.id, action: 'SET', valueType: 'PERCENT', percentValue: state.percent };
+                } else {
+                  var secs = state.seconds === null || state.seconds === undefined ? null : (state.unit === 'min' ? state.seconds * 60 : state.seconds);
+                  if (secs === null) { UI.toastError(new Error('مقدار زمان ثابت الزامی است.')); return; }
+                  op = { definitionId: definition.id, action: 'SET', valueType: 'FIXED_TIME', timeValueSeconds: Math.round(secs * 10000) / 10000, applicationBasis: state.basis };
+                }
+                runOp(op, row ? 'مقدار «' + definition.title + '» جایگزین شد' : 'الونس «' + definition.title + '» اضافه شد');
+                dlg.close();
               },
-            }, 'ذخیره'));
+            }, U.icon('check'), 'ذخیره'));
+        },
+      });
+      drawTypeFields();
+    }
+
+    // تأیید حذف از ارث‌بری — نام الونس + زیرشاخه متأثر (§۶)
+    function confirmExclude(row) {
+      var data = DB.getScopeAllowances(scopeType, scopeId);
+      var desc = 'این الونس در سطح ' + SCOPE_TITLES[scopeType] + ' از ارث‌بری حذف می‌شود و در تمام زیرشاخه‌های همین سطح غیرفعال خواهد بود. تعریف مرکزی حذف نمی‌شود.';
+      var deps = {};
+      if (data.descendants.activities > 0) deps['فعالیت'] = data.descendants.activities;
+      if (data.descendants.elements > 0) deps['عنصر کاری'] = data.descendants.elements;
+      UI.confirmDialog({
+        title: 'حذف «' + row.title + '» از ارث‌بری',
+        desc: desc,
+        body: (data.descendants.activities > 0 || data.descendants.elements > 0)
+          ? U.h('div', { class: 'rounded-xl p-3 text-xs', style: { background: 'var(--amber-soft)' } },
+              U.h('p', { class: 'mb-1 font-bold', style: { color: 'var(--amber)' }, text: 'زیرشاخه‌های متأثر:' }),
+              U.h('ul', { class: 'list-disc space-y-0.5 text-muted', style: { listStylePosition: 'inside' } },
+                data.descendants.stations > 0 ? U.h('li', { class: 'num', text: data.descendants.stations.toLocaleString('fa-IR') + ' ایستگاه' }) : null,
+                data.descendants.activities > 0 ? U.h('li', { class: 'num', text: data.descendants.activities.toLocaleString('fa-IR') + ' فعالیت' }) : null,
+                data.descendants.elements > 0 ? U.h('li', { class: 'num', text: data.descendants.elements.toLocaleString('fa-IR') + ' عنصر کاری' }) : null))
+          : null,
+        cancelLabel: 'انصراف',
+        confirmLabel: 'حذف از ارث‌بری',
+        destructive: true,
+      }).then(function (yes) {
+        if (!yes) return;
+        runOp({ definitionId: row.definitionId, action: 'EXCLUDE' }, '«' + row.title + '» از ارث‌بری حذف شد');
+      });
+    }
+
+    // تغییر مبنای زمان ثابت (§۶)
+    function openBasisDialog(row) {
+      var current = row.applicationBasis || (scopeType === 'WORK_ELEMENT' ? 'PER_ELEMENT_EXECUTION' : 'PER_CYCLE');
+      var sel = UI.selectEl([
+        { value: 'PER_ELEMENT_EXECUTION', label: 'به‌ازای هر اجرای عنصر' },
+        { value: 'PER_CYCLE', label: 'یک‌بار در هر چرخه' },
+      ], current, function (v) {
+        runOp({
+          definitionId: row.definitionId, action: 'SET', valueType: 'FIXED_TIME',
+          timeValueSeconds: row.timeValueSeconds || 0, applicationBasis: v,
+        }, 'مبنای وقوع تغییر کرد');
+        dlg.close();
+      });
+      var dlg = UI.dialog({
+        title: 'تغییر مبنای «' + row.title + '»',
+        desc: 'مبنای وقوع این زمان ثابت را انتخاب کنید.',
+        bodyBuilder: function (body) { body.appendChild(UI.field('مبنای وقوع', sel)); },
+        footerBuilder: function () {
+          return U.h('div', { class: 'dialog-footer' },
+            U.h('button', { class: 'btn btn-outline', type: 'button', onclick: function () { dlg.close(); } }, 'بستن'));
         },
       });
     }
 
-    // ═══════════ حذف دسته — FR-26 ═══════════
-    function deleteCategoryFlow(cat) {
-      var st = DB.getState();
-      var gv = st.groupAllowances.filter(function (r) { return r.categoryId === cat.id; }).length;
-      var ov = st.activityAllowanceOverrides.filter(function (r) { return r.categoryId === cat.id; }).length;
-      UI.confirmDelete({
-        title: 'حذف دسته مجاز',
-        name: cat.name,
-        deps: { 'مقدار ثبت‌شده در گروه‌ها': gv, 'بازنویسی اختصاصی فعالیت‌ها': ov },
-      }).then(function (ok) {
-        if (!ok) return;
-        try { DB.deleteCategory(cat.id); } catch (err) { UI.toastError(err); return; }
-        UI.toast('دسته «' + cat.name + '» به‌طور دائمی حذف شد');
-        renderAll();
-      });
-    }
-
-    renderAll();
+    draw();
+    return { redraw: draw };
   };
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -33,7 +33,7 @@
       { key: 'info', label: 'مشخصات پروژه', desc: 'نام، خط تولید، محصول و تنظیمات محاسبات' },
       { key: 'structure', label: 'ساختار تولید', desc: 'ایستگاه‌ها، فعالیت‌ها و عناصر کاری' },
       { key: 'operators', label: 'اپراتورها', desc: 'معرفی اپراتورهای شرکت‌کننده در مطالعه' },
-      { key: 'allowances', label: 'گروه‌ها و مجازها', desc: 'گروه فعالیت، دسته‌های مجاز و بازنویسی' },
+      { key: 'allowances', label: 'مجازها و الونس‌ها', desc: 'تعریف مرکزی الونس، تخصیص سلسله‌مراتبی و گروه‌های فعالیت' },
       { key: 'westinghouse', label: 'ارزیابی وستینگهاوس', desc: 'جدول مرجع و ارزیابی عناصر کاری' },
       { key: 'timing', label: 'زمان‌سنجی', desc: 'جلسه، جدول چرخه‌محور، Paste از Excel' },
       { key: 'analysis', label: 'تحلیل نتایج', desc: 'آمار، داده غیرعادی و مقایسه اپراتورها' },
@@ -65,7 +65,13 @@
       'backup.autoEnabled': 'true', 'backup.intervalMinutes': '30', 'backup.retention': '10',
       'outlier.method': 'mad', 'outlier.threshold': '3.5',
     },
-    SCHEMA_VERSION: 1,
+    SCHEMA_VERSION: 2,
+    // ── جلسه اول: الونس‌های سلسله‌مراتبی ──
+    ALLOWANCE_SCOPE_LABELS: { PROJECT: 'خط تولید', STATION: 'ایستگاه', ACTIVITY: 'فعالیت', WORK_ELEMENT: 'عنصر کاری' },
+    ALLOWANCE_STATUS_LABELS: { INHERITED: 'ارث‌رسیده', OVERRIDDEN: 'جایگزین‌شده', CUSTOM: 'اختصاصی', EXCLUDED: 'حذف‌شده از ارث‌بری' },
+    ALLOWANCE_VALUE_TYPE_LABELS: { PERCENT: 'درصدی', FIXED_TIME: 'زمان ثابت' },
+    ALLOWANCE_BASIS_LABELS: { PER_ELEMENT_EXECUTION: 'به‌ازای هر اجرای عنصر', PER_CYCLE: 'یک‌بار در هر چرخه' },
+    MAX_FIXED_TIME_SECONDS: 86400,
   };
 
   // ═══════════ وضعیت و ماندگاری ═══════════
@@ -73,6 +79,7 @@
   var TABLES = [
     'projects', 'projectSettings', 'stations', 'activities', 'workElements',
     'activityGroups', 'allowanceCategories', 'groupAllowances', 'activityAllowanceOverrides',
+    'allowanceDefinitions', 'allowanceAssignments',
     'operators', 'studySessions', 'cycleObservations', 'timelineLanes', 'elementObservations',
     'ratingTables', 'ratingTableGrades', 'ratingAssessments',
     'calculationRuns', 'chartNodes', 'chartEdges', 'finalizationInfos',
@@ -97,10 +104,17 @@
         var parsed = JSON.parse(raw);
         var s = emptyState();
         TABLES.forEach(function (t) { if (Array.isArray(parsed[t])) s[t] = parsed[t]; });
+        // ارتقای schema درجا — v۱: مهاجرت الونس‌ها به مدل سلسله‌مراتبی (جلسه اول §۴)
+        migrateAllowancesAll(s);
         return s;
       }
     } catch (e) { storageOk = false; }
     return emptyState();
+  }
+
+  /** مهاجرت الونس‌های همه پروژه‌ها — v۱ → v۲ (قابل تکرار با مارکر) */
+  function migrateAllowancesAll(s) {
+    (s.projects || []).forEach(function (p) { migrateProjectAllowancesIfNeeded(p.id, s); });
   }
 
   function persist() {
@@ -247,8 +261,12 @@
     if (input.allowanceMethod === 'SHARE_OF_ST') {
       var violations = [];
       activitiesOfProject(projectId).forEach(function (a) {
-        var eff = getEffectiveAllowances(a.id);
-        if (eff.totalA >= 1) violations.push(a.name);
+        var resolution = resolveForActivity(a.id);
+        var violated = false;
+        Object.keys(resolution.elements).forEach(function (eid) {
+          if (resolution.elements[eid].summary.totalPercent >= 1) violated = true;
+        });
+        if (violated) violations.push(a.name);
       });
       if (violations.length > 0) {
         putProjectSettings(projectId, { 'calc.allowanceMethod': 'PERCENT_OF_NT' });
@@ -665,54 +683,366 @@
     if (grp) markProjectCalculationsStale(grp.projectId);
     commit();
   }
-  function getEffectiveAllowances(activityId) {
-    var a = byId('activities', activityId);
-    if (!a) throw new Error('فعالیت یافت نشد.');
-    var projectId = projectIdOfActivity(activityId);
-    var settings = getProjectSettings(projectId);
-    var method = settings['calc.allowanceMethod'];
-    var group = a.groupId ? byId('activityGroups', a.groupId) : null;
-    var gas = group ? filterBy('groupAllowances', 'groupId', group.id) : [];
-    var ovs = filterBy('activityAllowanceOverrides', 'activityId', activityId);
-    var cats = listCategories(projectId).map(function (c) {
-      var gv = gas.find(function (x) { return x.categoryId === c.id; });
-      var ov = ovs.find(function (x) { return x.categoryId === c.id; });
-      var groupValue = gv ? gv.percentValue : null;
-      var overrideValue = ov ? ov.percentValue : null;
-      var source = 'NONE', sourceLabel = 'بدون مقدار', effectiveValue = null;
-      if (overrideValue !== null) { source = 'OVERRIDE'; sourceLabel = 'اختصاصی فعالیت (بازنویسی)'; effectiveValue = overrideValue; }
-      else if (groupValue !== null) { source = 'GROUP'; sourceLabel = 'ارث‌رسیده از گروه «' + (group ? group.name : '') + '»'; effectiveValue = groupValue; }
-      return { categoryId: c.id, name: c.name, code: c.code, isActive: c.isActive, source: source, sourceLabel: sourceLabel, groupValue: groupValue, overrideValue: overrideValue, effectiveValue: effectiveValue };
-    });
-    var totalA = F.sumAllowances(cats.filter(function (c) { return c.isActive && c.effectiveValue !== null; }).map(function (c) { return { categoryId: c.categoryId, percentValue: c.effectiveValue || 0 }; }));
+  // ═══════════ الونس‌های سلسله‌مراتبی — جلسه اول ═══════════
+  // پورت دقیق از src/application/effective-allowance-service.ts
+  // تعریف مرکزی (allowanceDefinitions) از تخصیص (allowanceAssignments) جدا است.
+
+  var MIGRATION_MARKER_KEY = 'migration.allowanceModel';
+  var MIGRATION_MARKER_VALUE = 'v2';
+
+  function listAllowanceDefinitions(projectId) {
+    return state.allowanceDefinitions
+      .filter(function (d) { return d.projectId === projectId; })
+      .sort(function (a, b) { return a.sortOrder - b.sortOrder || (a.createdAt < b.createdAt ? -1 : 1); })
+      .map(function (d) {
+        return Object.assign({}, d, { assignmentCount: state.allowanceAssignments.filter(function (x) { return x.definitionId === d.id; }).length });
+      });
+  }
+  function createAllowanceDefinition(projectId, input) {
+    var def = {
+      id: U.uid(), projectId: projectId,
+      title: input.title, code: input.code || null, description: input.description || null,
+      defaultValueType: input.defaultValueType || null,
+      defaultValuePercent: input.defaultValueType === 'PERCENT' ? (input.defaultValuePercent ?? null) : null,
+      defaultTimeSeconds: input.defaultValueType === 'FIXED_TIME' ? (input.defaultTimeSeconds ?? null) : null,
+      isActive: input.isActive !== false, sortOrder: input.sortOrder || 0, isArchived: false,
+      createdAt: U.nowISO(), updatedAt: U.nowISO(),
+    };
+    if (!def.title || !def.title.trim()) throw new Error('عنوان الونس الزامی است.');
+    state.allowanceDefinitions.push(def);
+    recordAudit({ entityType: 'AllowanceDefinition', entityId: def.id, action: 'CREATE', entityName: def.title, after: { title: def.title }, projectId: projectId });
+    commit();
+    return Object.assign({}, def, { assignmentCount: 0 });
+  }
+  function updateAllowanceDefinition(definitionId, input) {
+    var d = byId('allowanceDefinitions', definitionId);
+    if (!d) throw new Error('تعریف الونس یافت نشد.');
+    if (input.title !== undefined) d.title = input.title;
+    if (input.code !== undefined) d.code = input.code;
+    if (input.description !== undefined) d.description = input.description;
+    if (input.isActive !== undefined) d.isActive = input.isActive;
+    if (input.sortOrder !== undefined) d.sortOrder = input.sortOrder;
+    if (input.isArchived !== undefined) d.isArchived = input.isArchived;
+    if (input.defaultValueType !== undefined) {
+      d.defaultValueType = input.defaultValueType || null;
+      d.defaultValuePercent = input.defaultValueType === 'PERCENT' ? (input.defaultValuePercent ?? null) : null;
+      d.defaultTimeSeconds = input.defaultValueType === 'FIXED_TIME' ? (input.defaultTimeSeconds ?? null) : null;
+    } else {
+      if (input.defaultValuePercent !== undefined) d.defaultValuePercent = input.defaultValuePercent;
+      if (input.defaultTimeSeconds !== undefined) d.defaultTimeSeconds = input.defaultTimeSeconds;
+    }
+    touch(d);
+    markProjectCalculationsStale(d.projectId);
+    recordAudit({ entityType: 'AllowanceDefinition', entityId: definitionId, action: 'UPDATE', entityName: d.title, projectId: d.projectId });
+    commit();
+    return Object.assign({}, d, { assignmentCount: state.allowanceAssignments.filter(function (x) { return x.definitionId === d.id; }).length });
+  }
+  /** حذف تعریف — سیاست آرشیو: دارای تخصیص/سابقه → بایگانی (§۲.۲) */
+  function deleteAllowanceDefinition(definitionId) {
+    var d = byId('allowanceDefinitions', definitionId);
+    if (!d) throw new Error('تعریف الونس یافت نشد.');
+    var assignmentCount = state.allowanceAssignments.filter(function (x) { return x.definitionId === definitionId; }).length;
+    if (assignmentCount > 0) {
+      d.isArchived = true; d.isActive = false; touch(d);
+      markProjectCalculationsStale(d.projectId);
+      recordAudit({ entityType: 'AllowanceDefinition', entityId: definitionId, action: 'UPDATE', entityName: d.title, before: { isArchived: false }, after: { isArchived: true, reason: 'حذف با سابقه → آرشیو' }, projectId: d.projectId });
+      commit();
+      return { archived: true, assignmentCount: assignmentCount };
+    }
+    state.allowanceDefinitions = state.allowanceDefinitions.filter(function (x) { return x.id !== definitionId; });
+    recordAudit({ entityType: 'AllowanceDefinition', entityId: definitionId, action: 'DELETE', entityName: d.title, projectId: d.projectId });
+    commit();
+    return { archived: false, assignmentCount: 0 };
+  }
+
+  /** بافت scope — زنجیره والد + شمارش زیرشاخه‌ها (§۵) */
+  function getScopeContext(scopeType, scopeId) {
+    if (scopeType === 'PROJECT') {
+      var p = byId('projects', scopeId);
+      if (!p) throw new Error('پروژه یافت نشد.');
+      var stCount = 0, actCount = 0;
+      state.stations.filter(function (s) { return s.projectId === scopeId; }).forEach(function (s) {
+        stCount++; actCount += state.activities.filter(function (a) { return a.stationId === s.id; }).length;
+      });
+      var elCount = state.workElements.filter(function (e) { return projectIdOfActivity(e.activityId) === scopeId; }).length;
+      return { projectId: p.id, scopeLabel: p.name, chain: [{ type: 'PROJECT', id: p.id, label: p.name }], descendants: { stations: stCount, activities: actCount, elements: elCount } };
+    }
+    if (scopeType === 'STATION') {
+      var st = byId('stations', scopeId);
+      if (!st) throw new Error('ایستگاه یافت نشد.');
+      var acts = state.activities.filter(function (a) { return a.stationId === scopeId; });
+      var els = state.workElements.filter(function (e) { return acts.some(function (a) { return a.id === e.activityId; }); });
+      return {
+        projectId: st.projectId, scopeLabel: st.name,
+        chain: [{ type: 'PROJECT', id: st.projectId, label: byId('projects', st.projectId) ? byId('projects', st.projectId).name : '؟' }, { type: 'STATION', id: st.id, label: st.name }],
+        descendants: { stations: 0, activities: acts.length, elements: els.length },
+      };
+    }
+    if (scopeType === 'ACTIVITY') {
+      var act = byId('activities', scopeId);
+      if (!act) throw new Error('فعالیت یافت نشد.');
+      var stA = byId('stations', act.stationId);
+      var prA = byId('projects', stA.projectId);
+      return {
+        projectId: stA.projectId, scopeLabel: act.name,
+        chain: [{ type: 'PROJECT', id: prA.id, label: prA.name }, { type: 'STATION', id: stA.id, label: stA.name }, { type: 'ACTIVITY', id: act.id, label: act.name }],
+        descendants: { stations: 0, activities: 0, elements: sortElements(scopeId).length },
+      };
+    }
+    var el = byId('workElements', scopeId);
+    if (!el) throw new Error('عنصر کاری یافت نشد.');
+    var actE = byId('activities', el.activityId);
+    var stE = byId('stations', actE.stationId);
+    var prE = byId('projects', stE.projectId);
     return {
-      method: method,
-      methodLabel: CONST.ALLOWANCE_METHOD_LABELS[method] || method,
-      formula: CONST.ALLOWANCE_METHOD_FORMULAS[method] || '',
-      hasGroup: !!group, groupId: a.groupId, groupName: group ? group.name : null,
-      totalA: totalA, categories: cats,
+      projectId: stE.projectId, scopeLabel: el.name,
+      chain: [{ type: 'PROJECT', id: prE.id, label: prE.name }, { type: 'STATION', id: stE.id, label: stE.name }, { type: 'ACTIVITY', id: actE.id, label: actE.name }, { type: 'WORK_ELEMENT', id: el.id, label: el.name }],
+      descendants: { stations: 0, activities: 0, elements: 0 },
     };
   }
-  function putActivityAllowances(activityId, overrides) {
-    var projectId = projectIdOfActivity(activityId);
-    overrides.forEach(function (v) {
-      var c = byId('allowanceCategories', v.categoryId);
-      if (!c || c.projectId !== projectId) throw new Error('یکی از دسته‌های انتخاب‌شده به این پروژه تعلق ندارد.');
-      if (v.percentValue === null) {
-        state.activityAllowanceOverrides = state.activityAllowanceOverrides.filter(function (o) { return !(o.activityId === activityId && o.categoryId === v.categoryId); });
+
+  /** بارگذاری بافت پروژه — self-heal migration + تعریف‌ها + تخصیص‌ها + روش */
+  function loadProjectAllowanceContext(projectId) {
+    migrateProjectAllowancesIfNeeded(projectId, state);
+    var settings = getProjectSettings(projectId);
+    var method = settings['calc.allowanceMethod'];
+    var definitions = state.allowanceDefinitions
+      .filter(function (d) { return d.projectId === projectId; })
+      .map(function (d) {
+        return {
+          id: d.id, title: d.title, code: d.code, description: d.description,
+          isActive: d.isActive && !d.isArchived, sortOrder: d.sortOrder,
+          defaultValueType: d.defaultValueType, defaultValuePercent: d.defaultValuePercent, defaultTimeSeconds: d.defaultTimeSeconds,
+        };
+      });
+    var defIds = {};
+    definitions.forEach(function (d) { defIds[d.id] = true; });
+    var assignments = state.allowanceAssignments
+      .filter(function (a) { return defIds[a.definitionId]; })
+      .map(function (a) {
+        return {
+          definitionId: a.definitionId, scopeType: a.scopeType, scopeId: a.scopeId, mode: a.mode,
+          valueType: a.valueType, percentValue: a.percentValue, timeValueSeconds: a.timeValueSeconds, applicationBasis: a.applicationBasis,
+        };
+      });
+    return { projectId: projectId, method: method, definitions: definitions, assignments: assignments };
+  }
+
+  /** الونس‌های یک scope: resolve کامل + تعریف‌ها + تخصیص‌های محلی (§۵/۶) */
+  function getScopeAllowances(scopeType, scopeId) {
+    var ctx = getScopeContext(scopeType, scopeId);
+    var context = loadProjectAllowanceContext(ctx.projectId);
+    var resolved = F.resolveEffectiveAllowances({ definitions: context.definitions, assignments: context.assignments, chain: ctx.chain });
+    var locals = state.allowanceAssignments.filter(function (a) { return a.scopeType === scopeType && a.scopeId === scopeId; });
+    var lastModifiedAt = null;
+    locals.forEach(function (a) { if (a.updatedAt > (lastModifiedAt || '')) lastModifiedAt = a.updatedAt; });
+    return {
+      scope: { type: scopeType, id: scopeId, label: ctx.scopeLabel, projectId: ctx.projectId },
+      chain: ctx.chain,
+      descendants: ctx.descendants,
+      settings: { method: context.method, methodLabel: CONST.ALLOWANCE_METHOD_LABELS[context.method], formula: CONST.ALLOWANCE_METHOD_FORMULAS[context.method] },
+      definitions: listAllowanceDefinitions(ctx.projectId),
+      resolved: { rows: resolved.rows, summary: resolved.summary },
+      localAssignments: locals.map(function (a) {
+        return { definitionId: a.definitionId, mode: a.mode, valueType: a.valueType, percentValue: a.percentValue, timeValueSeconds: a.timeValueSeconds, applicationBasis: a.applicationBasis, updatedAt: a.updatedAt };
+      }),
+      lastModifiedAt: lastModifiedAt,
+    };
+  }
+
+  /** پیش‌فرض مبنا: عنصر → هر اجرا؛ سطح‌های بالاتر → هر چرخه (§۲.۳) */
+  function defaultBasisForScope(scopeType) {
+    return scopeType === 'WORK_ELEMENT' ? 'PER_ELEMENT_EXECUTION' : 'PER_CYCLE';
+  }
+
+  /** اعمال عملیات روی فهرست در حافظه — برای اعتبارسنجی پیش از commit */
+  function applyOpsInMemory(assignments, ops, scopeType, scopeId) {
+    var map = {};
+    assignments.forEach(function (a) { map[a.definitionId + '|' + a.scopeType + '|' + a.scopeId] = a; });
+    ops.forEach(function (op) {
+      var k = op.definitionId + '|' + scopeType + '|' + scopeId;
+      if (op.action === 'SET') {
+        var vt = op.valueType;
+        var basis = vt === 'FIXED_TIME' ? (op.applicationBasis || defaultBasisForScope(scopeType)) : null;
+        map[k] = { definitionId: op.definitionId, scopeType: scopeType, scopeId: scopeId, mode: 'ACTIVE', valueType: vt, percentValue: vt === 'PERCENT' ? (op.percentValue ?? null) : null, timeValueSeconds: vt === 'FIXED_TIME' ? (op.timeValueSeconds ?? null) : null, applicationBasis: basis };
+      } else if (op.action === 'EXCLUDE') {
+        map[k] = { definitionId: op.definitionId, scopeType: scopeType, scopeId: scopeId, mode: 'EXCLUDE', valueType: 'PERCENT', percentValue: null, timeValueSeconds: null, applicationBasis: null };
       } else {
-        var existing = state.activityAllowanceOverrides.find(function (o) { return o.activityId === activityId && o.categoryId === v.categoryId; });
-        if (existing) { existing.percentValue = v.percentValue; touch(existing); }
-        else state.activityAllowanceOverrides.push({ id: U.uid(), activityId: activityId, categoryId: v.categoryId, percentValue: v.percentValue, updatedAt: U.nowISO() });
+        delete map[k];
       }
     });
-    var eff = getEffectiveAllowances(activityId);
-    var err = F.allowanceError(eff.totalA, eff.method);
-    if (err) { commit(); throw new Error(err); }
-    markProjectCalculationsStale(projectId);
-    recordAudit({ entityType: 'Activity', entityId: activityId, action: 'UPDATE', entityName: byId('activities', activityId).name, after: { allowanceOverrides: overrides }, projectId: projectId });
+    return Object.keys(map).map(function (k) { return map[k]; });
+  }
+
+  /** اعتبارسنجی روش ۲ روی عناصر متأثر scope (§۳) */
+  function validateShareOfStForScope(ctx, definitions, assignments, method) {
+    if (method !== 'SHARE_OF_ST') return;
+    var elements;
+    if (ctx.chain[ctx.chain.length - 1].type === 'PROJECT') elements = state.workElements.filter(function (e) { return projectIdOfActivity(e.activityId) === ctx.projectId; });
+    else if (ctx.chain[ctx.chain.length - 1].type === 'STATION') elements = state.workElements.filter(function (e) { var a = byId('activities', e.activityId); return a && a.stationId === ctx.chain[1].id; });
+    else if (ctx.chain[ctx.chain.length - 1].type === 'ACTIVITY') elements = state.workElements.filter(function (e) { return e.activityId === ctx.chain[2].id; });
+    else elements = [byId('workElements', ctx.chain[3].id)];
+    var violations = [];
+    elements.forEach(function (el) {
+      var act = byId('activities', el.activityId);
+      var st = byId('stations', act.stationId);
+      var r = F.resolveEffectiveAllowances({
+        definitions: definitions, assignments: assignments,
+        chain: [ctx.chain[0], { type: 'STATION', id: st.id, label: st.name }, { type: 'ACTIVITY', id: act.id, label: act.name }, { type: 'WORK_ELEMENT', id: el.id, label: el.name }],
+      });
+      if (r.summary.totalPercent >= 1) violations.push('«' + el.name + '» (' + act.name + ')');
+    });
+    if (violations.length > 0) {
+      throw new Error('در روش «سهم از زمان استاندارد» مجموع مجازها باید کمتر از ۱۰۰٪ باشد. ' + violations.length + ' عنصر کاری زیرمجموعه دارای مجموع غیرمجاز است: ' + violations.slice(0, 5).join('، ') + (violations.length > 5 ? ' و …' : ''));
+    }
+  }
+
+  /** ثبت عملیات تخصیص روی یک scope (§۶) */
+  function putScopeAllowanceOps(scopeType, scopeId, ops, expectedUpdatedAt) {
+    var ctx = getScopeContext(scopeType, scopeId);
+    var context = loadProjectAllowanceContext(ctx.projectId);
+    var method = context.method;
+
+    // کنترل هم‌زمانی — آخرین تغییر تخصیص‌های همین scope
+    if (expectedUpdatedAt) {
+      var locals = state.allowanceAssignments.filter(function (a) { return a.scopeType === scopeType && a.scopeId === scopeId; });
+      if (locals.length > 0) {
+        var latest = locals.reduce(function (m, a) { return a.updatedAt > m ? a.updatedAt : m; }, '');
+        if (Math.abs(new Date(latest).getTime() - new Date(expectedUpdatedAt).getTime()) > 1000) {
+          throw new Error('تخصیص‌های این بخش جای دیگری تغییر کرده؛ تازه‌سازی کنید.');
+        }
+      }
+    }
+
+    // اعتبارسنجی تعلق تعریف‌ها به پروژه (§۵)
+    ops.forEach(function (op) {
+      var def = state.allowanceDefinitions.find(function (d) { return d.id === op.definitionId; });
+      if (!def) throw new Error('تعریف الونس یافت نشد.');
+      if (def.projectId !== ctx.projectId) throw new Error('تعریف الونس به این پروژه تعلق ندارد.');
+    });
+
+    // اعتبارسنجی مقدار و مجموع — قبل از commit
+    ops.forEach(function (op) {
+      if (op.action !== 'SET') return;
+      var basis = op.valueType === 'FIXED_TIME' ? (op.applicationBasis || defaultBasisForScope(scopeType)) : null;
+      F.validateAssignmentValue({ mode: 'ACTIVE', valueType: op.valueType, percentValue: op.percentValue ?? null, timeValueSeconds: op.timeValueSeconds ?? null, applicationBasis: basis });
+    });
+    var virtualAssignments = applyOpsInMemory(context.assignments, ops, scopeType, scopeId);
+    validateShareOfStForScope(ctx, context.definitions, virtualAssignments, method);
+
+    ops.forEach(function (op) {
+      var existing = state.allowanceAssignments.find(function (a) { return a.definitionId === op.definitionId && a.scopeType === scopeType && a.scopeId === scopeId; });
+      if (op.action === 'SET') {
+        var basis = op.valueType === 'FIXED_TIME' ? (op.applicationBasis || defaultBasisForScope(scopeType)) : null;
+        var data = { mode: 'ACTIVE', valueType: op.valueType, percentValue: op.valueType === 'PERCENT' ? op.percentValue : null, timeValueSeconds: op.valueType === 'FIXED_TIME' ? op.timeValueSeconds : null, applicationBasis: basis };
+        if (existing) { Object.assign(existing, data); touch(existing); }
+        else state.allowanceAssignments.push(Object.assign({ id: U.uid(), definitionId: op.definitionId, scopeType: scopeType, scopeId: scopeId, createdAt: U.nowISO() }, data, { updatedAt: U.nowISO() }));
+      } else if (op.action === 'EXCLUDE') {
+        var dataX = { mode: 'EXCLUDE', valueType: 'PERCENT', percentValue: null, timeValueSeconds: null, applicationBasis: null };
+        if (existing) { Object.assign(existing, dataX); touch(existing); }
+        else state.allowanceAssignments.push(Object.assign({ id: U.uid(), definitionId: op.definitionId, scopeType: scopeType, scopeId: scopeId, createdAt: U.nowISO() }, dataX, { updatedAt: U.nowISO() }));
+      } else {
+        state.allowanceAssignments = state.allowanceAssignments.filter(function (a) { return !(a.definitionId === op.definitionId && a.scopeType === scopeType && a.scopeId === scopeId); });
+      }
+    });
+
+    markProjectCalculationsStale(ctx.projectId);
+    recordAudit({ entityType: 'AllowanceAssignment', entityId: scopeType + ':' + scopeId, action: 'UPDATE', entityName: 'تخصیص الونس — ' + CONST.ALLOWANCE_SCOPE_LABELS[scopeType] + ' «' + ctx.scopeLabel + '»', after: { ops: ops }, projectId: ctx.projectId });
     commit();
-    return eff;
+    return getScopeAllowances(scopeType, scopeId);
+  }
+
+  /** resolve برای تحلیل — سطح فعالیت + هر عنصر (§۳) */
+  function resolveForActivity(activityId) {
+    var activity = byId('activities', activityId);
+    if (!activity) throw new Error('فعالیت یافت نشد.');
+    var station = byId('stations', activity.stationId);
+    var project = byId('projects', station.projectId);
+    var context = loadProjectAllowanceContext(project.id);
+    var pl = { type: 'PROJECT', id: project.id, label: project.name };
+    var sl = { type: 'STATION', id: station.id, label: station.name };
+    var al = { type: 'ACTIVITY', id: activity.id, label: activity.name };
+    var activityResolution = F.resolveEffectiveAllowances({ definitions: context.definitions, assignments: context.assignments, chain: [pl, sl, al] });
+    var elements = {};
+    sortElements(activityId).forEach(function (el) {
+      elements[el.id] = F.resolveEffectiveAllowances({ definitions: context.definitions, assignments: context.assignments, chain: [pl, sl, al, { type: 'WORK_ELEMENT', id: el.id, label: el.name }] });
+    });
+    return { projectId: project.id, method: context.method, methodLabel: CONST.ALLOWANCE_METHOD_LABELS[context.method], formula: CONST.ALLOWANCE_METHOD_FORMULAS[context.method], activity: activityResolution, elements: elements };
+  }
+
+  /**
+   * مهاجرت مدل قدیمی → سلسله‌مراتبی (§۴) — قابل تکرار با مارکر.
+   * s اختیاری است (برای migration در load قبل از انتساب state).
+   */
+  function migrateProjectAllowancesIfNeeded(projectId, s) {
+    var store = s || state;
+    if (!store) return { projectId: projectId, migrated: false };
+    var marker = (store.projectSettings || []).find(function (x) { return x.projectId === projectId && x.key === MIGRATION_MARKER_KEY; });
+    if (marker && marker.value === MIGRATION_MARKER_VALUE) {
+      return { projectId: projectId, migrated: false, definitionsCreated: 0, assignmentsCreated: 0, issues: [] };
+    }
+    var issues = [];
+    var definitionsCreated = 0, assignmentsCreated = 0, skippedInactive = 0;
+    var categories = (store.allowanceCategories || []).filter(function (c) { return c.projectId === projectId; });
+    var activities = (store.activities || []).filter(function (a) { return projectIdOfActivityIn(a, store) === projectId; });
+
+    // ۱. دسته‌ها → تعریف مرکزی (حفظ ID — §۴.۱.۳)
+    categories.forEach(function (cat) {
+      var exists = (store.allowanceDefinitions || []).some(function (d) { return d.id === cat.id; });
+      if (exists) return;
+      store.allowanceDefinitions.push({
+        id: cat.id, projectId: projectId, title: cat.name, code: cat.code || null, description: null,
+        defaultValueType: null, defaultValuePercent: null, defaultTimeSeconds: null,
+        isActive: cat.isActive, sortOrder: cat.sortOrder, isArchived: false,
+        createdAt: cat.createdAt || U.nowISO(), updatedAt: U.nowISO(),
+      });
+      definitionsCreated++;
+    });
+
+    // ۲. مقدار مؤثر قدیم فعالیت‌ها → تخصیص ACTIVITY (§۴.۱.۵/۶)
+    activities.forEach(function (activity) {
+      var group = activity.groupId ? (store.activityGroups || []).find(function (x) { return x.id === activity.groupId; }) : null;
+      var gas = group ? (store.groupAllowances || []).filter(function (x) { return x.groupId === group.id; }) : [];
+      var ovs = (store.activityAllowanceOverrides || []).filter(function (x) { return x.activityId === activity.id; });
+      categories.forEach(function (cat) {
+        if (!cat.isActive) {
+          if (gas.some(function (x) { return x.categoryId === cat.id; }) || ovs.some(function (x) { return x.categoryId === cat.id; })) skippedInactive++;
+          return;
+        }
+        var gv = gas.find(function (x) { return x.categoryId === cat.id; });
+        var ov = ovs.find(function (x) { return x.categoryId === cat.id; });
+        var effective = ov ? ov.percentValue : (gv ? gv.percentValue : null);
+        if (effective === null || effective === undefined) return;
+        var exists = (store.allowanceAssignments || []).some(function (x) { return x.definitionId === cat.id && x.scopeType === 'ACTIVITY' && x.scopeId === activity.id; });
+        if (exists) return; // اجرای مجدد داده را دوبرابر نمی‌کند (§۱۰.۳)
+        store.allowanceAssignments.push({
+          id: U.uid(), definitionId: cat.id, scopeType: 'ACTIVITY', scopeId: activity.id,
+          mode: 'ACTIVE', valueType: 'PERCENT', percentValue: effective, timeValueSeconds: null, applicationBasis: null,
+          createdAt: U.nowISO(), updatedAt: U.nowISO(),
+        });
+        assignmentsCreated++;
+      });
+    });
+
+    // ۳. مارکر — تکرارپذیری
+    var existingMarker = (store.projectSettings || []).find(function (x) { return x.projectId === projectId && x.key === MIGRATION_MARKER_KEY; });
+    if (existingMarker) { existingMarker.value = MIGRATION_MARKER_VALUE; touch(existingMarker); }
+    else (store.projectSettings || []).push({ id: U.uid(), projectId: projectId, key: MIGRATION_MARKER_KEY, value: MIGRATION_MARKER_VALUE, version: 1, updatedAt: U.nowISO() });
+
+    if (skippedInactive > 0) issues.push(skippedInactive + ' مقدار متنعلق به دسته غیرفعال نادیده گرفته شد (مطابق قاعده قدیمی).');
+    if (definitionsCreated > 0 || assignmentsCreated > 0) {
+      (store.auditEvents || []).push({
+        id: U.uid(), entityType: 'Project', entityId: projectId, action: 'UPDATE',
+        entityName: 'مهاجرت الونس‌ها به مدل سلسله‌مراتبی',
+        afterJson: JSON.stringify({ definitionsCreated: definitionsCreated, assignmentsCreated: assignmentsCreated }),
+        projectId: projectId, actor: 'کاربر محلی', occurredAt: U.nowISO(),
+      });
+    }
+    return { projectId: projectId, migrated: true, definitionsCreated: definitionsCreated, assignmentsCreated: assignmentsCreated, skippedInactive: skippedInactive, issues: issues };
+  }
+  function projectIdOfActivityIn(a, store) {
+    var st = (store.stations || []).find(function (x) { return x.id === a.stationId; });
+    return st ? st.projectId : null;
   }
 
   // ═══════════ وستینگهاوس ═══════════
@@ -1392,7 +1722,7 @@
     var settingsRaw = getProjectSettings(projectId);
     var allowanceMethod = settingsRaw['calc.allowanceMethod'];
     var aggregationMethod = settingsRaw['calc.aggregationMethod'];
-    var allowances = getEffectiveAllowances(activityId);
+    var allowanceResolution = resolveForActivity(activityId);
     var outlierConfig = getOutlierConfig();
     var sessions = listSessions(activityId);
     var cycles = [];
@@ -1457,9 +1787,16 @@
       }
       var ot = agg.value;
       var nt = ot !== null && ratingDto !== null ? F.round12(ot * ratingDto.totalFactor) : null;
-      var st = null, stError = null;
+      // الونس‌های مؤثر این عنصر — resolve سلسله‌مراتبی (§۳)
+      var elResolution = allowanceResolution.elements[el.id];
+      var elFactors = {
+        totalPercent: elResolution ? elResolution.summary.totalPercent : 0,
+        perExecutionSeconds: elResolution ? elResolution.summary.perExecutionSeconds : 0,
+        perCycleSeconds: elResolution ? elResolution.summary.perCycleSeconds : 0,
+      };
+      var st = null, stError = null, stExplanation = null;
       if (nt !== null) {
-        try { st = F.computeStandardTime(nt, allowances.totalA, allowanceMethod); }
+        try { var stRes = F.computeElementStandardTime(nt, elFactors, allowanceMethod); st = stRes.st; stExplanation = stRes.explanation; }
         catch (err) { stError = err.message; }
       }
       var operators = [];
@@ -1468,7 +1805,7 @@
         var opMean = opStats.mean;
         var opNt = opMean !== null && ratingDto !== null ? F.round12(opMean * ratingDto.totalFactor) : null;
         var opSt = null;
-        if (opNt !== null) { try { opSt = F.computeStandardTime(opNt, allowances.totalA, allowanceMethod); } catch (e) { opSt = null; } }
+        if (opNt !== null) { try { opSt = F.computeElementStandardTime(opNt, elFactors, allowanceMethod).st; } catch (e) { opSt = null; } }
         var opRows = rows.filter(function (r) { return r.ctx.session.operatorId === oid; });
         operators.push({
           operatorId: oid, operatorName: operatorById[oid] ? operatorById[oid].displayName : 'اپراتور حذف‌شده',
@@ -1495,6 +1832,13 @@
         stats: stats, ot: ot, otAggregationMethod: aggregationMethod,
         otAggregationMethodLabel: CONST.AGGREGATION_METHOD_LABELS[aggregationMethod],
         rating: ratingDto, nt: nt, st: st, stError: stError,
+        allowances: {
+          totalPercent: elFactors.totalPercent,
+          perExecutionSeconds: elFactors.perExecutionSeconds,
+          perCycleSeconds: elFactors.perCycleSeconds,
+          needsAggregationCount: elResolution ? elResolution.summary.needsAggregationCount : 0,
+        },
+        stExplanation: stExplanation,
         operators: operators, trend: trend, histogram: buildHistogram(values),
       };
     });
@@ -1541,7 +1885,33 @@
           reason: 'زمان استاندارد ' + missing.length + ' عنصر از ' + elementDtos.length + ' عنصر قابل محاسبه نیست (' + missing.slice(0, 3).map(function (e) { return '«' + e.name + '»'; }).join('، ') + (missing.length > 3 ? ' و …' : '') + '). علت رایج: نبود دادهٔ معتبر، نبود ارزیابی وستینگهاوس یا خطای مجازها.',
         };
       } else {
-        activityTotal = { st: F.round12(elementDtos.reduce(function (s, e) { return s + e.st; }, 0)), status: 'OK', reason: 'فعالیت کاملاً ترتیبی است؛ زمان استاندارد کل = جمع زمان استاندارد عناصر.' };
+        // الونس‌های «هر چرخه» دقیقاً یک‌بار در سطح چرخه (§۳.۲) —
+        // ردیف‌های per-cycle سطح فعالیت/ایستگاه/پروژه یک‌بار + ردیف‌های محلی عناصر (dedupe با ID)
+        var actPerCycleRows = allowanceResolution.activity.rows.filter(function (r) {
+          return r.status !== 'EXCLUDED' && !r.needsAggregationRule && r.valueType === 'FIXED_TIME' && r.applicationBasis === 'PER_CYCLE' && r.timeValueSeconds !== null;
+        });
+        var perCycleTotal = F.round12(actPerCycleRows.reduce(function (s, r) { return s + r.timeValueSeconds; }, 0));
+        var seenPerCycleDefs = {};
+        actPerCycleRows.forEach(function (r) { seenPerCycleDefs[r.definitionId] = true; });
+        elementDtos.forEach(function (ed) {
+          var elRes = allowanceResolution.elements[ed.id];
+          if (!elRes) return;
+          elRes.rows.forEach(function (r) {
+            if (r.sourceScopeType !== 'WORK_ELEMENT') return;
+            if (r.status === 'EXCLUDED' || r.needsAggregationRule) return;
+            if (r.valueType !== 'FIXED_TIME' || r.applicationBasis !== 'PER_CYCLE' || r.timeValueSeconds === null) return;
+            if (seenPerCycleDefs[r.definitionId]) return;
+            seenPerCycleDefs[r.definitionId] = true;
+            perCycleTotal = F.round12(perCycleTotal + r.timeValueSeconds);
+          });
+        });
+        var elementsSt = F.round12(elementDtos.reduce(function (s, e) { return s + e.st; }, 0));
+        activityTotal = {
+          st: F.round12(elementsSt + perCycleTotal), status: 'OK',
+          reason: perCycleTotal > 0
+            ? 'فعالیت کاملاً ترتیبی است؛ زمان استاندارد کل = جمع زمان استاندارد عناصر (' + elementsSt + ') + الونس‌های زمانی «هر چرخه» که دقیقاً یک‌بار افزوده شدند (' + perCycleTotal + ' ثانیه).'
+            : 'فعالیت کاملاً ترتیبی است؛ زمان استاندارد کل = جمع زمان استاندارد عناصر.',
+        };
       }
     }
 
@@ -1578,7 +1948,38 @@
         outlierMethod: outlierConfig.method === 'iqr' ? 'iqr' : 'mad',
         outlierThreshold: outlierConfig.threshold,
       },
-      allowances: allowances, sampleProgress: sampleProgress, elements: elementDtos,
+      allowances: {
+        method: allowanceResolution.method,
+        methodLabel: allowanceResolution.methodLabel,
+        formula: allowanceResolution.formula,
+        rows: allowanceResolution.activity.rows,
+        summary: allowanceResolution.activity.summary,
+        perCycleTotal: (function () {
+          var rows = allowanceResolution.activity.rows.filter(function (r) {
+            return r.status !== 'EXCLUDED' && !r.needsAggregationRule && r.valueType === 'FIXED_TIME' && r.applicationBasis === 'PER_CYCLE' && r.timeValueSeconds !== null;
+          });
+          var seen = {}; var total = 0;
+          rows.forEach(function (r) { seen[r.definitionId] = true; total += r.timeValueSeconds; });
+          Object.keys(allowanceResolution.elements).forEach(function (eid) {
+            allowanceResolution.elements[eid].rows.forEach(function (r) {
+              if (r.sourceScopeType !== 'WORK_ELEMENT') return;
+              if (r.status === 'EXCLUDED' || r.needsAggregationRule) return;
+              if (r.valueType !== 'FIXED_TIME' || r.applicationBasis !== 'PER_CYCLE' || r.timeValueSeconds === null) return;
+              if (seen[r.definitionId]) return;
+              seen[r.definitionId] = true; total += r.timeValueSeconds;
+            });
+          });
+          return F.round12(total);
+        })(),
+        needsAggregation: (function () {
+          var out = [];
+          allowanceResolution.activity.rows.concat(Object.keys(allowanceResolution.elements).reduce(function (acc, eid) { return acc.concat(allowanceResolution.elements[eid].rows); }, [])).forEach(function (r) {
+            if (r.needsAggregationRule) out.push({ title: r.title, sourceScopeLabel: r.sourceScopeLabel, timeValueSeconds: r.timeValueSeconds || 0 });
+          });
+          return out;
+        })(),
+      },
+      sampleProgress: sampleProgress, elements: elementDtos,
       cycleStats: cycleStats, elementTypeTotals: elementTypeTotals, activityTotal: activityTotal,
       suspects: suspects, generatedAt: U.nowISO(),
     };
@@ -1601,13 +2002,22 @@
     return {
       id: a.activity.id, name: a.activity.name, stationName: a.activity.stationName, groupName: a.activity.groupName,
       sampleProgress: { validCycles: a.sampleProgress.validCycles, totalCycles: a.sampleProgress.totalCycles, targetSampleCount: a.sampleProgress.targetSampleCount },
-      totalA: a.allowances.totalA,
+      // snapshot الونس‌ها — بازتولید تاریخچه (§۴.۲)
+      allowances: {
+        method: a.allowances.method,
+        rows: a.allowances.rows.map(function (r) {
+          return { definitionId: r.definitionId, title: r.title, status: r.status, valueType: r.valueType, percentValue: r.percentValue, timeValueSeconds: r.timeValueSeconds, applicationBasis: r.applicationBasis, sourceScopeType: r.sourceScopeType, sourceScopeLabel: r.sourceScopeLabel };
+        }),
+        summary: a.allowances.summary,
+        perCycleTotal: a.allowances.perCycleTotal,
+      },
       activityTotal: { st: a.activityTotal.st, status: a.activityTotal.status },
       elements: a.elements.map(function (e) {
         return {
           id: e.id, name: e.name, elementType: e.elementType,
           counts: { calcBasis: e.counts.calcBasis, suspect: e.counts.suspect, excluded: e.counts.excluded },
           ot: e.ot, nt: e.nt, st: e.st, stError: e.stError, ratingFactor: e.rating ? e.rating.totalFactor : null,
+          allowanceP: e.allowances.totalPercent, allowanceT: e.allowances.perExecutionSeconds,
         };
       }),
       cycleStats: { count: a.cycleStats.count, mean: a.cycleStats.stats.mean },
@@ -2194,6 +2604,7 @@
     projects: 'project', projectSettings: 'projectSetting', stations: 'station', activities: 'activity',
     workElements: 'workElement', activityGroups: 'activityGroup', allowanceCategories: 'allowanceCategory',
     groupAllowances: 'groupAllowance', activityAllowanceOverrides: 'activityAllowanceOverride',
+    allowanceDefinitions: 'allowanceDefinition', allowanceAssignments: 'allowanceAssignment',
     operators: 'operator', studySessions: 'studySession', cycleObservations: 'cycleObservation',
     timelineLanes: 'timelineLane', elementObservations: 'elementObservation',
     ratingTables: 'ratingTable', ratingTableGrades: 'ratingTableGrade', ratingAssessments: 'ratingAssessment',
@@ -2201,7 +2612,7 @@
   };
   var PLURAL = {};
   Object.keys(SINGULAR).forEach(function (p) { PLURAL[SINGULAR[p]] = p; });
-  var DOMAIN_ORDER = ['projects', 'projectSettings', 'stations', 'activityGroups', 'allowanceCategories', 'operators', 'ratingTables', 'activities', 'ratingTableGrades', 'groupAllowances', 'activityAllowanceOverrides', 'workElements', 'studySessions', 'ratingAssessments', 'cycleObservations', 'timelineLanes', 'elementObservations', 'chartNodes', 'chartEdges', 'calculationRuns', 'finalizationInfos'];
+  var DOMAIN_ORDER = ['projects', 'projectSettings', 'stations', 'activityGroups', 'allowanceDefinitions', 'allowanceCategories', 'operators', 'ratingTables', 'activities', 'ratingTableGrades', 'groupAllowances', 'activityAllowanceOverrides', 'workElements', 'allowanceAssignments', 'studySessions', 'ratingAssessments', 'cycleObservations', 'timelineLanes', 'elementObservations', 'chartNodes', 'chartEdges', 'calculationRuns', 'finalizationInfos'];
 
   function dumpDomain(projectId) {
     var snap = {};
@@ -2209,7 +2620,7 @@
       var rows = state[plural];
       if (projectId) {
         if (plural === 'projects') rows = rows.filter(function (r) { return r.id === projectId; });
-        else if (['projectSettings', 'stations', 'activityGroups', 'allowanceCategories', 'operators', 'ratingTables', 'chartNodes', 'chartEdges', 'calculationRuns', 'finalizationInfos'].indexOf(plural) >= 0) {
+        else if (['projectSettings', 'stations', 'activityGroups', 'allowanceCategories', 'allowanceDefinitions', 'operators', 'ratingTables', 'chartNodes', 'chartEdges', 'calculationRuns', 'finalizationInfos'].indexOf(plural) >= 0) {
           rows = rows.filter(function (r) { return r.projectId === projectId; });
         } else if (plural === 'activities') {
           var stIds = {};
@@ -2227,6 +2638,10 @@
           var gIds = {};
           filterBy('activityGroups', 'projectId', projectId).forEach(function (x) { gIds[x.id] = true; });
           rows = rows.filter(function (r) { return gIds[r.groupId]; });
+        } else if (plural === 'allowanceAssignments') {
+          var defIds = {};
+          filterBy('allowanceDefinitions', 'projectId', projectId).forEach(function (d) { defIds[d.id] = true; });
+          rows = rows.filter(function (r) { return defIds[r.definitionId]; });
         } else if (plural === 'ratingAssessments') {
           var eIds = {};
           activitiesOfProject(projectId).forEach(function (a) { sortElements(a.id).forEach(function (e) { eIds[e.id] = true; }); });
@@ -2302,9 +2717,10 @@
 
   var FK_MAP = {
     project: [], projectSetting: ['projectId'], station: ['projectId'], activityGroup: ['projectId'],
-    allowanceCategory: ['projectId'], operator: ['projectId'], ratingTable: ['projectId'],
+    allowanceCategory: ['projectId'], allowanceDefinition: ['projectId'], operator: ['projectId'], ratingTable: ['projectId'],
     activity: ['stationId', 'groupId'], ratingTableGrade: ['ratingTableId'],
     groupAllowance: ['groupId', 'categoryId'], activityAllowanceOverride: ['activityId', 'categoryId'],
+    allowanceAssignment: ['definitionId'],
     workElement: ['activityId'], studySession: ['activityId', 'operatorId'],
     ratingAssessment: ['workElementId', 'ratingTableId'], cycleObservation: ['sessionId'],
     timelineLane: ['cycleId'], elementObservation: ['cycleId', 'workElementId', 'laneId'],
@@ -2312,8 +2728,9 @@
     calculationRun: ['projectId'], finalizationInfo: ['projectId'],
   };
   var NULLABLE_FKS = { 'activity.groupId': true, 'chartNode.activityId': true, 'elementObservation.laneId': true };
+  var ASSIGNMENT_SCOPE_TABLE = { PROJECT: 'project', STATION: 'station', ACTIVITY: 'activity', WORK_ELEMENT: 'workElement' };
   function reverseFkTable(fk) {
-    return { projectId: 'project', stationId: 'station', groupId: 'activityGroup', categoryId: 'allowanceCategory', activityId: 'activity', ratingTableId: 'ratingTable', operatorId: 'operator', workElementId: 'workElement', sessionId: 'studySession', cycleId: 'cycleObservation', laneId: 'timelineLane', sourceNodeId: 'chartNode', targetNodeId: 'chartNode' }[fk];
+    return { projectId: 'project', stationId: 'station', groupId: 'activityGroup', categoryId: 'allowanceCategory', definitionId: 'allowanceDefinition', activityId: 'activity', ratingTableId: 'ratingTable', operatorId: 'operator', workElementId: 'workElement', sessionId: 'studySession', cycleId: 'cycleObservation', laneId: 'timelineLane', sourceNodeId: 'chartNode', targetNodeId: 'chartNode' }[fk];
   }
   function remapProjectData(data) {
     var idMap = {};
@@ -2338,6 +2755,12 @@
           else if (NULLABLE_FKS[table + '.' + fk]) newRow[fk] = null;
           else drop = true;
         });
+        if (!drop && table === 'allowanceAssignment') {
+          var scopeTable = ASSIGNMENT_SCOPE_TABLE[row.scopeType];
+          var mappedScope = scopeTable ? idMap[scopeTable + ':' + row.scopeId] : undefined;
+          if (mappedScope) newRow.scopeId = mappedScope;
+          else drop = true;
+        }
         if (!drop) kept.push(newRow);
       });
       out[table] = kept;
@@ -2363,6 +2786,7 @@
     loadDomainData(data);
     var newProjectId = data.project && data.project[0] ? data.project[0].id : '';
     if (!data.ratingTable || data.ratingTable.length === 0) getOrCreateSeedTable(newProjectId);
+    migrateProjectAllowancesIfNeeded(newProjectId, state);
     recordAudit({ entityType: 'Project', entityId: newProjectId, action: 'IMPORT', entityName: newName, after: { source: parsed.manifest.projectName }, projectId: newProjectId });
     commit();
     return { projectId: newProjectId, name: newName };
@@ -2373,7 +2797,7 @@
     var selected = ['project', 'projectSetting'];
     if (sections.structure) selected = selected.concat(['station', 'activity', 'workElement', 'activityAllowanceOverride', 'chartNode', 'chartEdge']);
     if (sections.operators) selected.push('operator');
-    if (sections.groupsAndAllowances) selected = selected.concat(['activityGroup', 'allowanceCategory', 'groupAllowance']);
+    if (sections.groupsAndAllowances) selected = selected.concat(['activityGroup', 'allowanceCategory', 'groupAllowance', 'allowanceDefinition', 'allowanceAssignment']);
     if (sections.ratingTables) selected = selected.concat(['ratingTable', 'ratingTableGrade', 'ratingAssessment']);
     if (sections.rawObservations) selected = selected.concat(['studySession', 'cycleObservation', 'timelineLane', 'elementObservation']);
     var full = dumpDomain(projectId);
@@ -2389,6 +2813,8 @@
     loadDomainData(remapped);
     var newId = remapped.project && remapped.project[0] ? remapped.project[0].id : '';
     if (!remapped.ratingTable || remapped.ratingTable.length === 0) getOrCreateSeedTable(newId);
+    // مبدأ مهاجرت‌نشده (داده قدیمی) — مهاجرت idempotent (§۴)
+    migrateProjectAllowancesIfNeeded(newId, state);
     recordAudit({ entityType: 'Project', entityId: newId, action: 'DUPLICATE', entityName: newProjectName, after: { sourceProjectId: projectId, sections: sections }, projectId: newId });
     commit();
     return { projectId: newId };
@@ -2528,14 +2954,18 @@
     var st1 = createStation(projectId, { name: 'ایستگاه مونتاژ بدنه', description: 'مونتاژ بدنه و روتور پمپ' });
     var st2 = createStation(projectId, { name: 'ایستگاه کنترل نهایی', description: 'بازرسی عملکرد و آب‌بندی' });
 
-    var cat1 = createCategory(projectId, { name: 'استراحت شخصی', code: 'PF', isActive: true, sortOrder: 0 });
-    var cat2 = createCategory(projectId, { name: 'نیازهای طبیعی', code: 'NF', isActive: true, sortOrder: 1 });
-    var cat3 = createCategory(projectId, { name: 'مزاحمت کاری', code: 'WI', isActive: true, sortOrder: 2 });
+    // الونس‌ها — مدل سلسله‌مراتبی (جلسه اول): تعریف مرکزی + گروه فقط طبقه‌بندی
+    var def1 = createAllowanceDefinition(projectId, { title: 'استراحت شخصی', code: 'PF', defaultValueType: 'PERCENT', defaultValuePercent: 0.05, sortOrder: 0 });
+    var def2 = createAllowanceDefinition(projectId, { title: 'نیازهای طبیعی', code: 'NF', defaultValueType: 'PERCENT', defaultValuePercent: 0.03, sortOrder: 1 });
+    var def3 = createAllowanceDefinition(projectId, { title: 'مزاحمت کاری', code: 'WI', isActive: true, sortOrder: 2 });
     var grp = createGroup(projectId, { name: 'کار دستی سبک', description: 'مونتاژ با ابزار دستی و پیچ‌گوشتی برقی' });
-    setGroupAllowance(grp.id, cat1.id, 0.05);
-    setGroupAllowance(grp.id, cat2.id, 0.03);
 
     var act1 = createActivity(st1.id, { name: 'بستن درب پنل', description: 'بستن ۴ پیچ با پیچ‌گوشتی برقی', processType: 'OPERATION', groupId: grp.id, targetSampleCount: 10 });
+    // معادل مقادیر قدیمی گروه: ۵٪ + ۳٪ → تخصیص سطح فعالیت (P=0.08)
+    putScopeAllowanceOps('ACTIVITY', act1.id, [
+      { definitionId: def1.definition ? def1.definition.id : def1.id, action: 'SET', valueType: 'PERCENT', percentValue: 0.05 },
+      { definitionId: def2.definition ? def2.definition.id : def2.id, action: 'SET', valueType: 'PERCENT', percentValue: 0.03 },
+    ]);
     var act2 = createActivity(st1.id, { name: 'پرس اتوماتیک روتور', description: 'پرس کوبی روتور روی شفت', processType: 'OPERATION' });
     var act3 = createActivity(st2.id, { name: 'کنترل کیفیت نهایی', description: 'بازرسی عملکرد و آب‌بندی', processType: 'INSPECTION' });
 
@@ -2676,7 +3106,11 @@
     listCategories: listCategories, createCategory: createCategory, updateCategory: updateCategory, deleteCategory: deleteCategory,
     listGroups: listGroups, createGroup: createGroup, updateGroup: updateGroup, deleteGroup: deleteGroup,
     setGroupAllowance: setGroupAllowance,
-    getEffectiveAllowances: getEffectiveAllowances, putActivityAllowances: putActivityAllowances,
+    // ── الونس‌های سلسله‌مراتبی — جلسه اول ──
+    listAllowanceDefinitions: listAllowanceDefinitions, createAllowanceDefinition: createAllowanceDefinition,
+    updateAllowanceDefinition: updateAllowanceDefinition, deleteAllowanceDefinition: deleteAllowanceDefinition,
+    getScopeAllowances: getScopeAllowances, putScopeAllowanceOps: putScopeAllowanceOps,
+    resolveForActivity: resolveForActivity, migrateProjectAllowancesIfNeeded: migrateProjectAllowancesIfNeeded,
 
     listRatingTables: listRatingTables, getOrCreateSeedTable: getOrCreateSeedTable,
     createRatingTableVersion: createRatingTableVersion, updateRatingTableMeta: updateRatingTableMeta,

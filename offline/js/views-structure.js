@@ -21,7 +21,8 @@
   var _selectedStation = {}; // projectId -> stationId | null
   var _stationOpen = {};     // stationId -> bool (پیش‌فرض: باز)
   var _activityTab = {};     // activityId -> 'info' | 'elements' | 'timing' | 'analysis'
-  var _drag = null;          // درگ جاری: { type, id, scope }
+  var _activityOpenTree = {}; // فعالیت‌های باز در درخت (پیش‌فرض: بسته) — جلسه اول §۷.۲
+  var _treeSearch = {}; // جست‌وجوی درخت per پروژه — §۷.۴  var _drag = null;          // درگ جاری: { type, id, scope }
 
   // ═══════════ محتوای راهنمای آیکونی (عیناً از مشخصات V2) ═══════════
   var LINE_HELP = {
@@ -43,23 +44,12 @@
     note: 'نوع رویداد فرایندی فعالیت در نمودارهای فرایند (فاز ۵) با نماد ASCME نمایش داده می‌شود.',
   };
   var GROUP_ASSIGN_HELP = {
-    what: 'گروه مجازها مجموعه‌ای از درصدهای مجاز (مانند نیازهای شخصی و خستگی) است که فعالیت‌های مشابه مقادیر آن را به ارث می‌برند.',
-    input: 'گروه مناسب ماهیت فعالیت را انتخاب کنید یا «بدون گروه» بگذارید.',
+    what: 'گروه فعالیت فقط برای طبقه‌بندی فعالیت‌های مشابه است؛ دیگر منبع اعمال الونس نیست. الونس‌ها به‌صورت سلسله‌مراتبی از خط ← ایستگاه ← فعالیت ← عنصر resolve می‌شوند.',
+    input: 'گروه دلخواه را انتخاب کنید یا «بدون گروه» بگذارید.',
     example: '«کار دستی سبک»، «کار ماشینی سنگین»',
-    note: 'بدون گروه، هیچ مجازی برای فعالیت اعمال نمی‌شود؛ در صفحه فعالیت می‌توانید مقدار هر دسته را بازنویسی کنید.',
+    note: 'مقادیر قدیمی گروه‌ها هنگام مهاجرت به تخصیص سطح فعالیت تبدیل شده‌اند تا نتیجه پروژه‌های موجود حفظ شود.',
   };
-  var TARGET_SAMPLE_HELP = {
-    what: 'تعداد نمونه هدف (تعداد چرخه‌هایی که باید از این فعالیت زمان‌گیری شود) در سطح کل فعالیت تعیین می‌شود، نه جداگانه برای هر اپراتور.',
-    input: 'عدد صحیح بزرگ‌تر یا مساوی ۱؛ خالی بگذارید تا هدفی تعیین نشده باشد.',
-    example: 'مثلاً ۱۵ چرخه برای کل فعالیت — هر اپراتور سهم خود را از همین هدف ثبت می‌کند.',
-    note: 'رسیدن به هدف صرفاً به معنای ثبت تعداد هدف است و معادل اثبات کفایت آماری نیست؛ شاخص‌های پراکندگی و عدم‌قطعیت در مرحله «تحلیل نتایج» نمایش داده می‌شوند.',
-  };
-  var ALLOWANCES_HELP = {
-    what: 'مقدار نهایی هر دسته مجاز برای این فعالیت: مقدار گروه به ارث می‌رسد مگر آنکه در ستون «بازنویسی اختصاصی» مقدار دیگری ثبت شود. منبع هر مقدار مشخص است.',
-    input: 'ستون بازنویسی را فقط برای دسته‌هایی که باید با گروه تفاوت داشته باشند پر کنید؛ خالی بگذارید تا مقدار گروه اعمال شود.',
-    example: 'استراحت شخصی ۵٪ + نیازهای طبیعی ۳٪ ⇒ A=۸٪؛ صرفاً مثال است و نرخ مصوب شرکت نیست.',
-    note: 'مجموع A فقط از دسته‌های فعال ساخته می‌شود؛ روش اعمال (درصد از زمان نرمال یا سهم از زمان استاندارد) در سطح پروژه انتخاب می‌شود.',
-  };
+
   var ELEMENT_NAME_HELP = {
     what: 'عنصر کاری کوچک‌ترین واحد قابل‌اندازه‌گیری فعالیت است؛ شناسه آن پایدار است و تغییر نام، ارتباط تاریخی و گره‌های نموداری را از بین نمی‌برد.',
     input: 'نامی کوتاه برای بخشی از کار که در یک حرکت اجرا می‌شود.',
@@ -71,6 +61,20 @@
     input: 'ماهیت غالب عنصر را انتخاب کنید؛ پیش‌فرض «دستی» است.',
     example: '«پرس اتوماتیک» → خودکار ماشین؛ «انتظار برای خشک‌شدن رنگ» → انتظار.',
     note: 'عنصر هم‌زمان/دارای هم‌پوشانی برای کار هم‌زمان اپراتور و ماشین است؛ با بازه شروع/پایان ثبت می‌شود (فاز ۳) و زمان سپری‌شده چرخه از گستره بازه‌ها محاسبه می‌شود نه جمع مدت‌ها.',
+  };
+
+  var TREE_HELP = {
+    what: 'درخت ساختار تولید با چهار سطح: خط تولید (ریشه پروژه) ← ایستگاه ← فعالیت ← عنصر کاری.',
+    input: 'کلیک روی نام هر گره آن را انتخاب می‌کند (فعالیت → صفحه اختصاصی؛ عنصر → دیالوگ ویرایش). باز/بسته کردن زیرشاخه فقط با فلش کنار گره انجام می‌شود.',
+    example: 'با جست‌وجو، ایستگاه/فعالیت/عنصرِ منطبق و مسیر والدش باز می‌شوند.',
+    note: 'جابه‌جایی با کشیدن دستگیره لبه راست هر ردیف؛ عنصر فقط درون فعالیت خودش جابه‌جا می‌شود.',
+  };
+
+  var TARGET_SAMPLE_HELP = {
+    what: 'هدف تعداد چرخه‌های معتبری است که برای این فعالیت برنامه‌ریزی کرده‌اید؛ صرفاً شمارش آموزشی است.',
+    input: 'عددی بزرگ‌تر یا مساوی ۱ وارد کنید یا خالی بگذارید (بدون هدف).',
+    example: 'برای مطالعه کلاسیک معمولاً ۱۰ تا ۱۵ چرخه هدف‌گذاری می‌شود.',
+    note: 'رسیدن به هدف تعداد، تضمین کفایت آماری نیست؛ شاخص‌های پراکندگی را در تحلیل نتایج بازبینی کنید.',
   };
 
   // ═══════════ استایل‌های اختصاصی این نما (تزریق یک‌باره) ═══════════
@@ -106,6 +110,18 @@
       'table.table tfoot td { border-top: 2px solid var(--border); border-bottom: none; background: color-mix(in srgb, var(--surface-2) 70%, transparent); }',
       // دکمه پیوندی مسیر (breadcrumb)
       '.t2-link-btn { border: none; background: none; padding: 0; cursor: pointer; color: var(--brand); font-family: inherit; font-size: inherit; text-decoration: underline; text-underline-offset: 3px; }',
+      // ── جلسه اول: درخت چهار سطح + جست‌وجو (§۷) ──
+      '.t2-chevron { border: none; background: none; cursor: pointer; color: var(--muted-foreground); padding: 2px; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; transition: transform .15s, background .15s; }',
+      '.t2-chevron:hover { background: var(--surface-3); color: var(--foreground); }',
+      '.t2-chevron:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }',
+      '.t2-chevron[data-open="false"] svg { transform: rotate(90deg); }',
+      '.t2-element-row { display: flex; align-items: center; gap: 5px; padding: 2px 4px 2px 0; padding-inline-start: 28px; border-radius: calc(var(--radius) - 4px); transition: background .15s; }',
+      '.t2-element-row:hover { background: color-mix(in srgb, var(--brand-soft) 25%, transparent); }',
+      '.t2-element-title { font-size: 11.5px; line-height: 1.5; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: start; }',
+      '.t2-elements-list { margin: 2px 8px 4px 0; margin-inline-start: 8px; padding-inline-start: 10px; border-inline-start: 2px dashed color-mix(in srgb, var(--border) 80%, transparent); display: flex; flex-direction: column; gap: 1px; }',
+      '.t2-tree-toolbar { display: flex; align-items: center; gap: 6px; padding: 10px; border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--surface-2) 40%, transparent); }',
+      '.t2-activity-head-btn { border: none; background: transparent; cursor: pointer; color: inherit; font-family: inherit; display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1; padding: 4px 2px; border-radius: calc(var(--radius) - 4px); text-align: start; }',
+      '.t2-activity-head-btn:focus-visible { outline: 2px solid var(--brand); outline-offset: -2px; }',
     ].join('\n');
     document.head.appendChild(style);
   }
@@ -360,77 +376,167 @@
     container.appendChild(U.h('div', { class: 'flex flex-col lg:flex-row gap-4 items-start t2-two-col' }, treeCol, detailsCol));
   };
 
-  // ── کارت درخت ساختار ──
+  // ── کارت درخت ساختار — چهار سطح + جست‌وجو (§۷) ──
   function buildTreeCard(ctx, stations) {
     var project = ctx.project;
-    var card = U.h('div', { class: 'card p-3' });
+    var card = U.h('div', { class: 'card overflow-hidden' });
 
-    // ریشه درخت: خط تولید + محصول (کامل، بدون برش — بدون لیبل «یک خط — یک محصول»)
-    card.appendChild(U.h('div', { class: 'flex flex-wrap items-center gap-2' },
+    // ریشه درخت: نام پروژه + خط تولید + محصول — §۷.۱
+    card.appendChild(U.h('div', { class: 'flex items-center gap-2 p-3', style: { background: 'linear-gradient(to left, color-mix(in srgb, var(--brand-soft) 70%, transparent), transparent 65%)', borderBottom: '1px solid var(--border)' } },
       U.h('span', { class: 'chip-icon' }, U.icon('factory')),
       U.h('div', { class: 'flex-1 min-w-0' },
-        U.h('p', { class: 'font-bold text-sm truncate', title: project.lineName || undefined, text: project.lineName || 'خط تولید' }),
-        U.h('p', { class: 'text-xs text-muted', style: { lineHeight: '1.45' }, title: project.productName || undefined, text: 'محصول: ' + (project.productName || '—') })),
-      UI.helpDot('خط تولید و محصول', LINE_HELP)));
+        U.h('p', { class: 'font-extrabold text-sm truncate', title: project.name || undefined, text: project.name || 'پروژه' }),
+        U.h('p', { class: 'text-[11px] text-muted num truncate', title: (project.lineName || '') + ' / ' + (project.productName || ''), text: 'خط: ' + (project.lineName || '—') + ' · محصول: ' + (project.productName || '—') })),
+      U.h('button', {
+        class: 'icon-btn sm shrink-0', type: 'button',
+        'aria-label': 'ویرایش مشخصات پروژه', title: 'ویرایش مشخصات پروژه',
+        onclick: function () { appNavigate('/p/' + ctx.projectId + '/info'); },
+      }, U.icon('pencil')),
+      UI.helpDot('درخت ساختار تولید', TREE_HELP)));
 
-    // فهرست ایستگاه‌ها — قابل مرتب‌سازی با Drag & Drop
-    var listWrap = U.h('div', { class: 'flex flex-col gap-2 mt-3' });
-    if (!stations.length) {
-      listWrap.appendChild(U.h('p', { class: 'text-sm text-muted', text: 'هنوز ایستگاهی ثبت نشده است.' }));
+    // نوار ابزار: جست‌وجو + باز/بستن همه — §۷.۳/۷.۴
+    var searchInput = U.h('input', {
+      class: 'input', placeholder: 'جست‌وجوی ایستگاه، فعالیت یا عنصر…',
+      'aria-label': 'جست‌وجو در درخت ساختار',
+      style: { height: '32px', fontSize: '12px', flex: '1', minWidth: '0', background: 'var(--card)' },
+      value: _treeSearch[ctx.projectId] || '',
+    });
+    searchInput.addEventListener('input', function () {
+      _treeSearch[ctx.projectId] = searchInput.value;
+      redrawTree();
+    });
+    card.appendChild(U.h('div', { class: 't2-tree-toolbar' },
+      searchInput,
+      U.h('button', {
+        class: 'icon-btn sm shrink-0', type: 'button',
+        'aria-label': 'باز کردن همه شاخه‌ها', title: 'باز کردن همه',
+        onclick: function () {
+          _stationOpen = {};
+          _activityOpenTree = {};
+          stations.forEach(function (s) {
+            _stationOpen[s.id] = true;
+            DB.sortActivities(s.id).forEach(function (a) { _activityOpenTree[a.id] = true; });
+          });
+          redrawTree();
+        },
+      }, U.icon('chevronsUpDown')),
+      U.h('button', {
+        class: 'icon-btn sm shrink-0', type: 'button',
+        'aria-label': 'بستن همه شاخه‌ها', title: 'بستن همه',
+        onclick: function () {
+          _stationOpen = {};
+          _activityOpenTree = {};
+          redrawTree();
+        },
+      }, U.icon('chevronsDownUp'))));
+
+    // فهرست ایستگاه‌ها — قابل مرتب‌سازی با Drag & Drop + فیلتر جست‌وجو
+    var listWrap = U.h('div', { class: 'flex flex-col gap-2 p-3 scroll-slim', style: { maxHeight: 'min(26rem, calc(100vh - 23rem))', overflowY: 'auto' } });
+    var hasSearch = (_treeSearch[ctx.projectId] || '').trim().length > 0;
+    var visible = hasSearch ? stations.filter(function (s) { return stationMatches(s, _treeSearch[ctx.projectId].trim()); }) : stations;
+    if (!visible.length) {
+      listWrap.appendChild(U.h('div', { class: 'rounded-xl border border-dashed p-5 text-center', style: { borderColor: 'var(--border)' } },
+        U.h('p', { class: 'text-sm font-bold', text: hasSearch ? 'موردی منطبق با جست‌وجو یافت نشد' : 'هنوز ایستگاهی ثبت نشده است.' })));
     } else {
-      stations.forEach(function (st) { listWrap.appendChild(stationNode(st, stations, ctx)); });
+      visible.forEach(function (st) { listWrap.appendChild(stationNode(st, visible, ctx, hasSearch)); });
     }
     card.appendChild(listWrap);
 
-    // پانوشت درخت: افزودن ایستگاه جدید
-    card.appendChild(U.h('div', { class: 'mt-3' },
+    // پانوشت درخت: افزودن ایستگاه جدید — §۷.۶ variant متمایز
+    card.appendChild(U.h('div', { class: 'p-3', style: { borderTop: '1px solid var(--border)' } },
       U.h('button', {
-        class: 'btn btn-outline w-full', type: 'button',
+        class: 'btn btn-brand w-full', type: 'button',
         onclick: function () { openStationCreate(ctx); },
       }, U.icon('plus'), 'ایستگاه جدید')));
+
+    function redrawTree() {
+      var idx = Array.prototype.indexOf.call(card.childNodes, listWrap);
+      var fresh = U.h('div', { class: 'flex flex-col gap-2 p-3 scroll-slim', style: { maxHeight: 'min(26rem, calc(100vh - 23rem))', overflowY: 'auto' } });
+      var q = (_treeSearch[ctx.projectId] || '').trim();
+      var has = q.length > 0;
+      var vis = has ? stations.filter(function (s) { return stationMatches(s, q); }) : stations;
+      if (!vis.length) {
+        fresh.appendChild(U.h('div', { class: 'rounded-xl border border-dashed p-5 text-center', style: { borderColor: 'var(--border)' } },
+          U.h('p', { class: 'text-sm font-bold', text: has ? 'موردی منطبق با جست‌وجو یافت نشد' : 'هنوز ایستگاهی ثبت نشده است.' })));
+      } else {
+        vis.forEach(function (st) { fresh.appendChild(stationNode(st, vis, ctx, has)); });
+      }
+      card.replaceChild(fresh, listWrap);
+      listWrap = fresh;
+    }
     return card;
   }
 
-  // ── گره ایستگاه در درخت — کارت با کلیک = انتخاب + باز/بسته؛ ──
-  // دستگیره درگ داخل کارت چسبیده به لبه راست؛ عملیات ویرایش/حذف
-  // عمودی در راست؛ عنوان تا دو خط؛ شمارش فقط روی کارت انتخاب‌شده
-  function stationNode(st, stations, ctx) {
-    var isOpen = _stationOpen[st.id] !== false;
-    var acts = DB.sortActivities(st.id);
-    var isSelected = ctx.selectedId === st.id;
-    var elsCount = acts.reduce(function (n, a) { return n + DB.sortElements(a.id).length; }, 0);
+  /** تطبیق جست‌وجو: ایستگاه/فعالیت/عنصر — نتایج مسیر والد را باز می‌کنند (§۷.۴) */
+  function stationMatches(st, q) {
+    if (st.name.indexOf(q) >= 0) return true;
+    return DB.sortActivities(st.id).some(function (a) {
+      if (a.name.indexOf(q) >= 0) return true;
+      return DB.sortElements(a.id).some(function (e) { return e.name.indexOf(q) >= 0; });
+    });
+  }
+  function activityMatches(a, q) {
+    if (a.name.indexOf(q) >= 0) return true;
+    return DB.sortElements(a.id).some(function (e) { return e.name.indexOf(q) >= 0; });
+  }
 
-    function activate() {
+  // ── گره ایستگاه در درخت — کلیک نام = فقط انتخاب؛ ──
+  // chevron = فقط باز/بسته — دو رفتار مستقل (§۷.۲)
+  // دستگیره درگ داخل کارت چسبیده به لبه راست؛ عملیات ویرایش/حذف
+  // عمودی در راست؛ عنوان تا دو خط؛ شمارش فرزندان کنار گره (§۷.۴)
+  function stationNode(st, stations, ctx, hasSearch) {
+    var q = (_treeSearch[ctx.projectId] || '').trim();
+    var isOpen = hasSearch || _stationOpen[st.id] !== false;
+    var acts = hasSearch ? DB.sortActivities(st.id).filter(function (a) { return activityMatches(a, q); }) : DB.sortActivities(st.id);
+    var allActs = DB.sortActivities(st.id);
+    var isSelected = ctx.selectedId === st.id;
+    var elsCount = allActs.reduce(function (n, a) { return n + DB.sortElements(a.id).length; }, 0);
+
+    function selectOnly() {
       _selectedStation[ctx.projectId] = st.id;
+      appRefresh();
+    }
+    function toggleOpen() {
       _stationOpen[st.id] = !isOpen;
       appRefresh();
     }
 
-    // سربرگ کارت — کل ناحیه کلیک‌پذیر (به‌جز دکمه‌ها)
+    // chevron — فقط باز/بسته (§۷.۲)
+    var chevron = U.h('button', {
+      class: 't2-chevron', type: 'button',
+      'data-open': isOpen ? 'true' : 'false',
+      'aria-expanded': isOpen ? 'true' : 'false',
+      'aria-label': (isOpen ? 'بستن' : 'باز کردن') + ' زیرشاخه ایستگاه ' + st.name,
+      onclick: function (e) { e.stopPropagation(); toggleOpen(); },
+    }, U.icon('chevronDown'));
+
+    // سربرگ کارت — کلیک = فقط انتخاب (§۷.۲)
     var head = U.h('div', {
       class: 't2-station-head',
       role: 'button', tabindex: '0',
-      'aria-expanded': isOpen ? 'true' : 'false',
       'aria-current': isSelected ? 'true' : null,
     },
+      chevron,
+      U.h('div', { class: 'min-w-0 flex-1', role: 'button', tabindex: '0' },
+        U.h('div', { class: 'flex items-center gap-1.5' },
+          U.h('p', { class: 't2-station-title min-w-0 flex-1', 'data-station-name': st.id, title: st.name, text: st.name }),
+          numBadge(U.formatInt(allActs.length), 'muted')),
+        isSelected
+          ? U.h('p', { class: 't2-station-meta num', text: U.formatInt(allActs.length) + ' فعالیت · ' + U.formatInt(elsCount) + ' عنصر کاری' })
+          : null),
       actionButtons(
         { label: 'ویرایش ایستگاه ' + st.name, title: 'ویرایش ایستگاه', fn: function () { openStationEditDialog(st); } },
         { label: 'حذف ایستگاه ' + st.name, title: 'حذف ایستگاه', fn: function () { confirmDeleteStation(st, ctx); } }
-      ),
-      U.h('div', { class: 'min-w-0 flex-1' },
-        U.h('p', { class: 't2-station-title', 'data-station-name': st.id, title: st.name, text: st.name }),
-        isSelected
-          ? U.h('p', { class: 't2-station-meta num', text: U.formatInt(acts.length) + ' فعالیت · ' + U.formatInt(elsCount) + ' عنصر کاری' })
-          : null));
+      ));
 
     head.addEventListener('click', function (e) {
       if (e.target.closest('button')) return;
-      activate();
+      selectOnly();
     });
     head.addEventListener('keydown', function (e) {
       if (e.key === 'Enter' || e.key === ' ') {
         e.preventDefault();
-        activate();
+        if (e.target === head) selectOnly();
       }
     });
 
@@ -441,7 +547,7 @@
 
     var node = U.h('div', null, card);
     if (isOpen) {
-      node.appendChild(U.h('div', { class: 't2-acts' }, activitiesSubList(st, acts, ctx)));
+      node.appendChild(U.h('div', { class: 't2-acts' }, activitiesSubList(st, allActs, ctx, hasSearch)));
     }
     makeSortable(card, 'station', st.id, ctx.projectId, function (fromId, toId) {
       var ids = stations.map(function (s) { return s.id; });
@@ -454,12 +560,14 @@
   }
 
   // ── فهرست فعالیت‌های یک ایستگاه (زیر گره باز شده) ──
-  function activitiesSubList(station, acts, ctx) {
+  function activitiesSubList(station, allActs, ctx, hasSearch) {
+    var q = (_treeSearch[ctx.projectId] || '').trim();
+    var acts = hasSearch ? allActs.filter(function (a) { return activityMatches(a, q); }) : allActs;
     var wrap = [];
     if (!acts.length) {
-      wrap.push(U.h('p', { class: 'text-xs text-faint text-center', text: 'فعالیتی ثبت نشده است' }));
+      wrap.push(U.h('p', { class: 'text-xs text-faint text-center', text: hasSearch ? 'فعالیت منطبقی نیست' : 'فعالیتی ثبت نشده است' }));
     } else {
-      acts.forEach(function (a) { wrap.push(activityTreeRow(a, acts, station, ctx)); });
+      acts.forEach(function (a) { wrap.push(activityTreeRow(a, acts, station, ctx, hasSearch)); });
     }
     wrap.push(U.h('button', {
       class: 'btn btn-ghost btn-sm w-full', type: 'button',
@@ -468,35 +576,73 @@
     return wrap;
   }
 
-  // ── ردیف فعالیت در درخت — ظاهر زیرمنو؛ بدون لوگو/شماره/گروه/شمارش ──
-  // عنوان تا دو خط؛ گروه و شمارش فقط برای فعالیت‌های ایستگاه انتخاب‌شده
-  function activityTreeRow(a, acts, station, ctx) {
+  // ── ردیف فعالیت در درخت — chevron باز/بسته عناصر؛ کلیک نام = صفحه فعالیت ──
+  // badge نوع فرایند کنار نام (§۷.۶)؛ شمارش فرزندان کنار گره (§۷.۴)
+  function activityTreeRow(a, acts, station, ctx, hasSearch) {
     var group = ctx.groupMap[a.groupId];
-    var elsCount = DB.sortElements(a.id).length;
+    var els = DB.sortElements(a.id);
+    var elsCount = els.length;
     var parentSelected = ctx.selectedId === station.id;
+    var q = (_treeSearch[ctx.projectId] || '').trim();
+    var isOpen = hasSearch || _activityOpenTree[a.id] === true;
+    var visibleEls = hasSearch ? els.filter(function (e) { return e.name.indexOf(q) >= 0; }) : els;
 
-    var row = U.h('div', {
-      class: 't2-activity-row t2-sort',
-      title: 'نوع رویداد فرایندی: ' + processLabelOf(a.processType) +
-        (group ? ' · گروه مجازها: ' + group.name : '') + ' · ' + U.formatInt(elsCount) + ' عنصر',
-    },
+    function toggleOpen(e) {
+      e.stopPropagation();
+      _activityOpenTree[a.id] = !isOpen;
+      appRefresh();
+    }
+
+    var chevron = U.h('button', {
+      class: 't2-chevron', type: 'button',
+      'data-open': isOpen ? 'true' : 'false',
+      'aria-expanded': isOpen ? 'true' : 'false',
+      'aria-label': (isOpen ? 'بستن' : 'باز کردن') + ' عناصر کاری فعالیت ' + a.name,
+      title: 'عناصر کاری',
+      onclick: toggleOpen,
+    }, U.icon('chevronDown'));
+
+    var row = U.h('div', { class: 't2-activity-row t2-sort', title: 'نوع رویداد فرایندی: ' + processLabelOf(a.processType) + (group ? ' · گروه: ' + group.name : '') + ' · ' + U.formatInt(elsCount) + ' عنصر' },
       dragHandleEl(),
-      actionButtons(
-        { label: 'ویرایش فعالیت ' + a.name, title: 'ویرایش فعالیت', fn: function () { openActivityDialog(ctx, station, a); } },
-        { label: 'حذف فعالیت ' + a.name, title: 'حذف فعالیت', fn: function () { confirmDeleteActivity(a, ctx, false); } }
-      ),
+      chevron,
       U.h('button', {
         type: 'button',
-        class: 'flex min-w-0 flex-1 items-center text-right',
-        style: { border: 'none', background: 'transparent', cursor: 'pointer', color: 'inherit', fontFamily: 'inherit', padding: '6px 4px' },
+        class: 't2-activity-head-btn',
         'aria-label': 'باز کردن صفحه فعالیت ' + a.name,
         onclick: function (e) { e.stopPropagation(); appNavigate('/p/' + ctx.projectId + '/activity/' + a.id); },
       },
-        U.h('span', { class: 'min-w-0' },
+        U.h('span', { class: 'min-w-0 flex-1' },
           U.h('span', { class: 't2-activity-title', text: a.name }),
           parentSelected
-            ? U.h('span', { class: 't2-activity-meta num', text: U.formatInt(elsCount) + ' عنصر · ' + (group ? group.name : 'بدون گروه') })
-            : null)));
+            ? U.h('span', { class: 't2-activity-meta num', text: U.formatInt(elsCount) + ' عنصر' + (group ? ' · ' + group.name : '') })
+            : null),
+        U.h('span', {
+          class: 'shrink-0 num', title: 'نوع رویداد فرایندی: ' + processLabelOf(a.processType),
+          'aria-label': 'نوع فرایند: ' + processLabelOf(a.processType),
+          style: { width: '20px', height: '20px', background: 'var(--brand-soft)', borderRadius: '6px', fontSize: '11px', fontWeight: '800', color: 'var(--brand)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
+          text: processSymbolOf(a.processType),
+        }),
+        numBadge(U.formatInt(elsCount), 'muted')),
+      actionButtons(
+        { label: 'ویرایش فعالیت ' + a.name, title: 'ویرایش فعالیت', fn: function () { openActivityDialog(ctx, station, a); } },
+        { label: 'حذف فعالیت ' + a.name, title: 'حذف فعالیت', fn: function () { confirmDeleteActivity(a, ctx, false); } }
+      ));
+
+    var node = U.h('div', null, row);
+    if (isOpen) {
+      var elsList = U.h('div', { class: 't2-elements-list' });
+      if (!visibleEls.length) {
+        elsList.appendChild(U.h('p', { class: 'px-1 py-1 text-[10.5px] text-faint', text: hasSearch ? 'عنصر منطبقی نیست' : 'عنصری ثبت نشده است' }));
+      } else {
+        visibleEls.forEach(function (e) { elsList.appendChild(elementTreeRow(e, visibleEls, a, ctx)); });
+      }
+      elsList.appendChild(U.h('button', {
+        class: 'btn btn-ghost btn-sm w-full', type: 'button',
+        style: { marginTop: '2px', fontSize: '11px', justifyContent: 'start', paddingInlineStart: '8px' },
+        onclick: function (ev) { ev.stopPropagation(); openTreeElementDialog(ctx, a, null); },
+      }, U.icon('plus'), 'عنصر جدید'));
+      node.appendChild(elsList);
+    }
 
     makeSortable(row, 'activity', a.id, station.id, function (fromId, toId) {
       var ids = acts.map(function (x) { return x.id; });
@@ -505,7 +651,105 @@
       DB.reorderActivities(station.id, ids);
       appRefresh();
     });
+    return node;
+  }
+
+  // ── ردیف عنصر کاری در درخت — سطح چهارم (§۷.۱) ──
+  // کلیک نام = دیالوگ ویرایش عنصر با الونس‌ها؛ DnD فقط درون فعالیت خود
+  function elementTreeRow(e, els, activity, ctx) {
+    var rating = DB.getElementRating(e.id);
+    var typeVariant = ELEMENT_TYPE_BADGE[e.elementType] || 'muted';
+    var row = U.h('div', { class: 't2-element-row t2-sort group' },
+      U.h('button', {
+        type: 'button',
+        class: 'flex min-w-0 flex-1 items-center gap-1.5 px-1 py-0.5',
+        style: { border: 'none', background: 'transparent', cursor: 'pointer', color: 'inherit', fontFamily: 'inherit', textAlign: 'start', borderRadius: '6px' },
+        'aria-label': 'ویرایش عنصر کاری ' + e.name,
+        title: e.name + ' — ' + (DB.CONST.ELEMENT_TYPE_LABELS[e.elementType] || '') + (rating ? ' · R = ' + rating.assessment.totalFactor : ' · ارزیابی نشده'),
+        onclick: function (ev) { ev.stopPropagation(); openTreeElementDialog(ctx, activity, e); },
+      },
+        U.h('span', { class: 'shrink-0', style: { color: 'var(--brand)', display: 'inline-flex' } }, U.icon('circle')),
+        U.h('span', { class: 't2-element-title min-w-0 flex-1', text: e.name }),
+        rating
+          ? U.h('span', { class: 'badge green num shrink-0', dir: 'ltr', style: { fontSize: '9px', padding: '1px 4px' }, text: 'R = ' + U.formatTimeValue(rating.assessment.totalFactor, 2) })
+          : null),
+      U.h('div', { class: 'flex shrink-0 items-center gap-0.5', style: { opacity: '0', transition: 'opacity .15s' }, onload: null },
+        U.h('button', {
+          class: 'icon-btn sm', type: 'button',
+          'aria-label': 'ویرایش عنصر ' + e.name, style: { width: '20px', height: '20px' },
+          onclick: function (ev) { ev.stopPropagation(); openTreeElementDialog(ctx, activity, e); },
+        }, U.icon('pencil')),
+        U.h('button', {
+          class: 'icon-btn sm danger', type: 'button',
+          'aria-label': 'حذف عنصر ' + e.name, style: { width: '20px', height: '20px' },
+          onclick: function (ev) { ev.stopPropagation(); confirmDeleteElement(e); },
+        }, U.icon('trash'))));
+    // نمایش عملیات با hover
+    row.addEventListener('mouseenter', function () { row.lastChild.style.opacity = '1'; });
+    row.addEventListener('mouseleave', function () { row.lastChild.style.opacity = '0'; });
+
+    makeSortable(row, 'element', e.id, activity.id, function (fromId, toId) {
+      var ids = els.map(function (x) { return x.id; });
+      ids = moveBefore(ids, fromId, toId);
+      if (!ids) return;
+      DB.reorderElements(activity.id, ids);
+      appRefresh();
+    });
     return row;
+  }
+
+  // ── دیالوگ ایجاد/ویرایش عنصر از درخت — با الونس‌های عنصر (§۶) ──
+  function openTreeElementDialog(ctx, activity, element) {
+    var isEdit = !!element;
+    var nameInput = U.h('input', { class: 'input', value: isEdit ? element.name : '', placeholder: 'مثلاً: برداشتن قطعه از گراناق' });
+    var descInput = U.h('textarea', { class: 'textarea', value: isEdit ? (element.description || '') : '', placeholder: 'مثلاً: برداشت با دو دست و قراردادن روی میز کار' });
+    var elementType = isEdit ? element.elementType : 'MANUAL';
+    var typeSelect = UI.selectEl(DB.CONST.ELEMENT_TYPES.map(function (et) {
+      return { value: et, label: DB.CONST.ELEMENT_TYPE_LABELS[et] };
+    }), elementType, function (v) { elementType = v; }, 'نوع عنصر کاری');
+
+    var dlg = UI.dialog({
+      title: isEdit ? 'ویرایش عنصر کاری' : 'عنصر کاری جدید',
+      desc: isEdit
+        ? 'مشخصات ذخیره می‌شوند؛ الونس‌های اختصاصی این عنصر در بخش پایین.'
+        : 'در فعالیت «' + activity.name + '» — عنصر در انتهای فهرست افزوده می‌شود.',
+      size: 'lg',
+      bodyBuilder: function (body) {
+        body.appendChild(U.h('div', { class: 'space-y-4' },
+          UI.field('نام عنصر کاری', nameInput, ELEMENT_NAME_HELP),
+          UI.field('شرح عنصر (اختیاری)', descInput),
+          UI.field('نوع عنصر کاری', typeSelect, ELEMENT_TYPE_HELP,
+            isEdit ? 'تغییر نوع عنصر بر مدل محاسباتی اثر دارد و وضعیت محاسبات را «نیازمند محاسبه مجدد» می‌کند.' : null),
+          isEdit ? U.h('div', { id: 'tree-element-allowances' }) : null));
+        if (isEdit && g.T2VIEWS._allowanceSection) {
+          var host = body.querySelector('#tree-element-allowances');
+          g.T2VIEWS._allowanceSection(host, ctx.projectId, 'WORK_ELEMENT', element.id, { compact: true });
+        }
+      },
+      footerBuilder: function (close) {
+        return U.h('div', { class: 'dialog-footer' },
+          U.h('button', { class: 'btn', type: 'button', text: 'انصراف', onclick: close }),
+          U.h('div', { class: 'spacer' }),
+          U.h('button', {
+            class: 'btn btn-brand', type: 'button',
+            onclick: function () {
+              var name = nameInput.value.trim();
+              if (!name) { UI.toast('نام عنصر کاری الزامی است', { type: 'error' }); return; }
+              try {
+                if (isEdit) {
+                  DB.updateElement(element.id, { name: name, description: descInput.value.trim() || null, elementType: elementType });
+                  UI.toast('عنصر کاری به‌روزرسانی شد');
+                } else {
+                  DB.createElement(activity.id, { name: name, description: descInput.value.trim() || null, elementType: elementType });
+                  UI.toast('عنصر کاری ثبت شد');
+                }
+                close();
+                appRefresh();
+              } catch (err) { UI.toastError(err); }
+            },
+          }, isEdit ? 'ذخیره' : 'ثبت عنصر'));
+      },
+    });
   }
 
   // ── پنل جزئیات ایستگاه — فرم با ذخیره خودکار (debounce 800ms) ──
@@ -611,7 +855,11 @@
       actsCard.appendChild(grid);
     }
 
-    return U.h('div', { class: 'flex flex-col gap-4' }, card, actsCard);
+    // ── الونس‌های سطح ایستگاه — §۶ ──
+    var alwWrap = U.h('div');
+    if (g.T2VIEWS._allowanceSection) g.T2VIEWS._allowanceSection(alwWrap, ctx.projectId, 'STATION', st.id);
+
+    return U.h('div', { class: 'flex flex-col gap-4' }, card, alwWrap, actsCard);
   }
 
   // ═══════════ دیالوگ‌ها و جریان حذف — ساختار ═══════════
@@ -684,7 +932,7 @@
     var processType = isEdit ? activity.processType : 'OPERATION';
     var groupId = isEdit ? (activity.groupId || '') : '';
     var typeSelect = UI.selectEl(processTypeOptions(), processType, function (v) { processType = v; }, 'نوع رویداد فرایندی');
-    var groupSelect = UI.selectEl(groupOptions(ctx.projectId), groupId, function (v) { groupId = v; }, 'گروه مجازها');
+    var groupSelect = UI.selectEl(groupOptions(ctx.projectId), groupId, function (v) { groupId = v; }, 'گروه فعالیت (طبقه‌بندی)');
 
     UI.dialog({
       title: isEdit ? 'ویرایش فعالیت' : 'فعالیت جدید',
@@ -693,7 +941,7 @@
         body.appendChild(UI.field('نام فعالیت', nameInput, ACTIVITY_NAME_HELP));
         body.appendChild(UI.field('شرح فعالیت (اختیاری)', descInput));
         body.appendChild(UI.field('نوع رویداد فرایندی', typeSelect));
-        body.appendChild(UI.field('گروه مجازها', groupSelect, GROUP_ASSIGN_HELP));
+        body.appendChild(UI.field('گروه فعالیت (طبقه‌بندی)', groupSelect, GROUP_ASSIGN_HELP));
       },
       footerBuilder: function (close) {
         return U.h('div', { class: 'dialog-footer' },
@@ -874,7 +1122,7 @@
     var descInput = U.h('textarea', { class: 'textarea', value: form.description, placeholder: 'مثلاً: بستن ۴ پیچ با پیچ‌گوشتی برقی' });
     descInput.addEventListener('input', function () { form.description = descInput.value; });
     var typeSelect = UI.selectEl(processTypeOptions(), form.processType, function (v) { form.processType = v; }, 'نوع رویداد فرایندی');
-    var groupSelect = UI.selectEl(groupOptions(ctx.projectId), form.groupId, function (v) { form.groupId = v; }, 'گروه مجازها');
+    var groupSelect = UI.selectEl(groupOptions(ctx.projectId), form.groupId, function (v) { form.groupId = v; }, 'گروه فعالیت (طبقه‌بندی)');
 
     // «تعداد نمونه هدف» — ذخیره خودکار با تأخیر ۶۰۰ms
     var sampleTimer = null;
@@ -917,89 +1165,18 @@
         UI.field('شرح فعالیت (اختیاری)', descInput),
         U.h('div', { class: 'grid grid-cols-1 md:grid-cols-2 gap-3' },
           UI.field('نوع رویداد فرایندی', typeSelect),
-          UI.field('گروه مجازها', groupSelect)),
+          UI.field('گروه فعالیت (طبقه‌بندی)', groupSelect)),
         UI.field('تعداد نمونه هدف', sampleInput, TARGET_SAMPLE_HELP)),
       U.h('div', { class: 'flex flex-wrap items-center justify-between gap-2 mt-4' },
         U.h('p', { class: 'text-xs text-muted num', text: 'ایجاد: ' + U.formatDateTime(activity.createdAt) + ' · آخرین تغییر: ' + U.formatDateTime(activity.updatedAt) }),
         U.h('button', { class: 'btn btn-brand', type: 'button', onclick: save }, U.icon('check'), 'ذخیره مشخصات')));
   }
 
-  // ── مجازهای مؤثر — ارث گروه + بازنویسی اختصاصی (debounce 600ms) ──
+  // ── الونس‌ها و زمان‌های مجاز — سطح فعالیت (§۶)؛ کامپوننت مشترک _allowanceSection ──
   function allowancesCard(activity, ctx) {
-    var eff = DB.getEffectiveAllowances(activity.id);
-    var card = U.h('section', { class: 'card p-4', 'aria-label': 'مجازهای مؤثر فعالیت' },
-      U.h('div', { class: 'flex flex-wrap items-center gap-2' },
-        U.h('span', { class: 'chip-icon cyan' }, U.icon('percent')),
-        U.h('h3', { class: 'font-bold', text: 'مجازهای مؤثر' }),
-        UI.helpDot('مجازهای مؤثر', ALLOWANCES_HELP)));
-
-    if (!eff.categories.length) {
-      card.appendChild(U.h('div', { class: 'mt-3 flex flex-col items-start gap-2' },
-        U.h('div', { class: 'banner info w-full' }, U.icon('info'),
-          U.h('div', { text: 'دسته مجازی تعریف نشده است؛ در «گروه‌ها و مجازها» دسته بسازید.' })),
-        U.h('button', {
-          class: 'btn btn-ghost btn-sm', type: 'button',
-          onclick: function () { appNavigate('/p/' + ctx.projectId + '/allowances'); },
-        }, 'رفتن به گروه‌ها و مجازها')));
-      return card;
-    }
-
-    var tbodyBuilder = function (tbody) {
-      eff.categories.forEach(function (cat) {
-        var sourceBadge;
-        if (cat.source === 'OVERRIDE') sourceBadge = UI.badge('اختصاصی فعالیت', 'amber');
-        else if (cat.source === 'GROUP') sourceBadge = UI.badge(cat.sourceLabel, 'brand');
-        else sourceBadge = UI.badge('بدون مقدار', 'outline');
-
-        // بازنویسی اختصاصی — ذخیره خودکار با تأخیر ۶۰۰ms
-        var ovTimer = null;
-        var input = UI.percentInput({
-          value: cat.overrideValue,
-          onChange: function (v) {
-            if (v !== null && (typeof v !== 'number' || !isFinite(v))) return;
-            if (ovTimer) clearTimeout(ovTimer);
-            ovTimer = setTimeout(function () {
-              try {
-                DB.putActivityAllowances(activity.id, [{ categoryId: cat.categoryId, percentValue: v }]);
-              } catch (err) {
-                UI.toastError(err);
-              }
-              appRefresh();
-            }, 600);
-          },
-        });
-        input.setAttribute('aria-label', 'بازنویسی اختصاصی ' + cat.name);
-
-        tbody.appendChild(U.h('tr', null,
-          U.h('td', null,
-            U.h('span', { class: 'font-medium', text: cat.name }),
-            cat.code ? U.h('span', { class: 'badge muted num', dir: 'ltr', style: { marginInlineStart: '6px' }, text: cat.code }) : null),
-          U.h('td', null, sourceBadge),
-          U.h('td', { class: 'num' }, U.formatPercent(cat.groupValue)),
-          U.h('td', null, input),
-          U.h('td', { class: 'num font-semibold' }, U.formatPercent(cat.effectiveValue))));
-      });
-    };
-
-    var tableWrap = UI.table(['دسته مجاز', 'منبع', 'مقدار ارثی', 'بازنویسی اختصاصی', 'مقدار مؤثر'], tbodyBuilder);
-    var tableEl = tableWrap.querySelector('table');
-    tableEl.appendChild(U.h('tfoot', null,
-      U.h('tr', null,
-        U.h('td', { colspan: '5' },
-          U.h('div', { class: 'flex flex-wrap items-center gap-2' },
-            U.h('span', { class: 'font-bold', text: 'جمع A (دسته‌های فعال)' }),
-            spacer(),
-            U.h('span', { class: 'text-xs text-muted', text: eff.methodLabel }),
-            U.h('code', { class: 'inline num', dir: 'ltr', text: eff.formula }),
-            U.h('span', { class: 'num font-extrabold', text: U.formatPercent(eff.totalA) }))))));
-
-    card.appendChild(U.h('div', { class: 'mt-3' }, tableWrap));
-
-    if (eff.method === 'SHARE_OF_ST' && eff.totalA >= 1) {
-      card.appendChild(U.h('div', { class: 'banner error mt-3', role: 'alert' }, U.icon('alertTriangle'),
-        U.h('div', { class: 'font-bold', text: 'مجموع مجازها باید کمتر از ۱۰۰٪ باشد (قید روش دوم) — جمع فعلی: ' + U.formatPercent(eff.totalA) })));
-    }
-    return card;
+    var wrap = U.h('div');
+    if (g.T2VIEWS._allowanceSection) g.T2VIEWS._allowanceSection(wrap, ctx.projectId, 'ACTIVITY', activity.id);
+    return wrap;
   }
 
   // ── کارت عملیات خطرناک ──
@@ -1046,12 +1223,12 @@
     }
 
     var list = U.h('div', { class: 'flex flex-col gap-2' });
-    elements.forEach(function (e, i) { list.appendChild(elementRow(e, i, elements, activity.id)); });
+    elements.forEach(function (e, i) { list.appendChild(elementRow(e, i, elements, activity.id, ctx)); });
     section.appendChild(list);
     return section;
   }
 
-  function elementRow(e, index, elements, activityId) {
+  function elementRow(e, index, elements, activityId, ctx) {
     var typeLabel = DB.CONST.ELEMENT_TYPE_LABELS[e.elementType] || e.elementType;
     var typeVariant = ELEMENT_TYPE_BADGE[e.elementType] || 'muted';
     var rating = DB.getElementRating(e.id);
@@ -1082,7 +1259,7 @@
       U.h('button', {
         class: 'icon-btn sm shrink-0', type: 'button',
         'aria-label': 'ویرایش عنصر ' + e.name, title: 'ویرایش عنصر کاری',
-        onclick: function (e2) { e2.stopPropagation(); openElementDialog(activityId, e); },
+        onclick: function (e2) { e2.stopPropagation(); openElementDialog(activityId, e, ctx); },
       }, U.icon('pencil')),
       U.h('button', {
         class: 'icon-btn sm danger shrink-0', type: 'button',
@@ -1100,9 +1277,10 @@
     return row;
   }
 
-  function openElementDialog(activityId, element) {
+  function openElementDialog(activityId, element, ctx) {
     var isEdit = !!element;
     var nameInput = U.h('input', { class: 'input', value: isEdit ? element.name : '', placeholder: 'مثلاً: برداشتن قطعه از گراناق' });
+    var descInput = U.h('textarea', { class: 'textarea', value: isEdit ? (element.description || '') : '', placeholder: 'مثلاً: برداشت با دو دست و قراردادن روی میز کار' });
     var elementType = isEdit ? element.elementType : 'MANUAL';
     var typeSelect = UI.selectEl(DB.CONST.ELEMENT_TYPES.map(function (et) {
       return { value: et, label: DB.CONST.ELEMENT_TYPE_LABELS[et] };
@@ -1110,10 +1288,19 @@
 
     UI.dialog({
       title: isEdit ? 'ویرایش عنصر کاری' : 'عنصر کاری جدید',
+      desc: isEdit ? 'مشخصات ذخیره می‌شوند؛ الونس‌های اختصاصی این عنصر در بخش پایین.' : null,
+      size: isEdit ? 'lg' : '',
       bodyBuilder: function (body) {
-        body.appendChild(UI.field('نام عنصر کاری', nameInput, ELEMENT_NAME_HELP));
-        body.appendChild(UI.field('نوع عنصر کاری', typeSelect, ELEMENT_TYPE_HELP,
-          isEdit ? 'تغییر نوع عنصر بر مدل محاسباتی اثر دارد و وضعیت محاسبات را «نیازمند محاسبه مجدد» می‌کند.' : null));
+        body.appendChild(U.h('div', { class: 'space-y-4' },
+          UI.field('نام عنصر کاری', nameInput, ELEMENT_NAME_HELP),
+          UI.field('شرح عنصر (اختیاری)', descInput),
+          UI.field('نوع عنصر کاری', typeSelect, ELEMENT_TYPE_HELP,
+            isEdit ? 'تغییر نوع عنصر بر مدل محاسباتی اثر دارد و وضعیت محاسبات را «نیازمند محاسبه مجدد» می‌کند.' : null),
+          isEdit && ctx && g.T2VIEWS._allowanceSection ? U.h('div', { id: 'tab-element-allowances' }) : null));
+        if (isEdit && ctx && g.T2VIEWS._allowanceSection) {
+          var host = body.querySelector('#tab-element-allowances');
+          g.T2VIEWS._allowanceSection(host, ctx.projectId, 'WORK_ELEMENT', element.id, { compact: true });
+        }
       },
       footerBuilder: function (close) {
         return U.h('div', { class: 'dialog-footer' },
@@ -1126,10 +1313,10 @@
               if (!name) { UI.toast('نام عنصر کاری الزامی است', { type: 'error' }); return; }
               try {
                 if (isEdit) {
-                  DB.updateElement(element.id, { name: name, elementType: elementType });
+                  DB.updateElement(element.id, { name: name, description: descInput.value.trim() || null, elementType: elementType });
                   UI.toast('عنصر کاری به‌روزرسانی شد');
                 } else {
-                  DB.createElement(activityId, { name: name, elementType: elementType });
+                  DB.createElement(activityId, { name: name, description: descInput.value.trim() || null, elementType: elementType });
                   UI.toast('عنصر کاری ثبت شد');
                 }
                 close();

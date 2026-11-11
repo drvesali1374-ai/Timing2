@@ -14,6 +14,7 @@
   g.T2VIEWS = g.T2VIEWS || {};
 
   var NOT_COMPUTABLE = 'قابل محاسبه نیست';
+  var ALLOWANCE_STATUS_LABELS = { INHERITED: 'ارث‌رسیده', OVERRIDDEN: 'جایگزین‌شده', CUSTOM: 'اختصاصی', EXCLUDED: 'حذف از ارث‌بری' };
 
   var REPORT_TYPES = [
     { value: 'overview', label: 'نگاه کل پروژه' },
@@ -408,18 +409,24 @@
       if (operatorName) boxes.appendChild(infoBox('اپراتور منتخب: ' + operatorName));
       sec.appendChild(boxes);
 
-      /* دسته‌های مجاز مؤثر */
-      var activeCats = an.allowances.categories.filter(function (c) { return c.isActive; });
-      if (activeCats.some(function (c) { return !isNull(c.effectiveValue); })) {
+      /* الونس‌های مؤثر — جلسه اول (§۳) */
+      var alwRows = (an.allowances.rows || []).filter(function (r) { return r.status !== 'EXCLUDED'; });
+      if (alwRows.length > 0) {
         sec.appendChild(U.h('p', {
           class: 'pr-meta font-bold mt-2 mb-1',
-          text: 'دسته‌های مجاز مؤثر (جمع A = ' + U.formatPercent(an.allowances.totalA) + ') — منبع: ' + (an.allowances.groupName || 'اختصاصی فعالیت'),
+          text: 'الونس‌های مؤثر (جمع A = ' + U.formatPercent(an.allowances.summary.totalPercent) + ')' +
+            (an.allowances.perCycleTotal > 0 ? ' — زمان ثابت هر چرخه: ' + U.formatTimeValue(an.allowances.perCycleTotal, 1) + ' ثانیه' : ''),
         }));
         sec.appendChild(U.h('div', { class: 'overflow-x-auto' }, prTable(
-          ['دسته', 'مقدار گروه', 'بازنویسی فعالیت', 'مؤثر', 'منبع'],
-          activeCats.map(function (c) {
-            return [c.name, U.formatPercent(c.groupValue), U.formatPercent(c.overrideValue), U.formatPercent(c.effectiveValue),
-              ALLOWANCE_SOURCE_LABELS[c.source] || c.source];
+          ['عنوان الونس', 'نوع / مبنا', 'مقدار مؤثر', 'مبدأ', 'وضعیت'],
+          alwRows.map(function (r) {
+            return [
+              r.title + (r.code ? ' (' + r.code + ')' : ''),
+              r.valueType === 'PERCENT' ? 'درصدی' : (r.applicationBasis === 'PER_CYCLE' ? 'زمان ثابت — هر چرخه' : 'زمان ثابت — هر اجرا'),
+              r.valueType === 'PERCENT' ? U.formatPercent(r.percentValue) : U.formatTimeValue(r.timeValueSeconds, 1) + 's',
+              r.sourceScopeLabel || '—',
+              ALLOWANCE_STATUS_LABELS[r.status] || r.status,
+            ];
           }))));
       }
 

@@ -345,6 +345,29 @@ svg.icon { width: 16px; height: 16px; flex-shrink: 0; }
 }
 .card-premium { transition: box-shadow .25s var(--ease), transform .25s var(--ease); }
 .card-premium:hover { box-shadow: var(--shadow-2); transform: translateY(-2px); }
+
+  /* هدر کارت‌های اصلی — پس‌زمینه بسیار ملایم + divider نازک (§۸.۱ جلسه اول)
+     معادل .card-head در globals.css نسخه وب */
+  .card-head {
+    background: linear-gradient(
+      to left,
+      color-mix(in srgb, var(--brand-soft) 45%, transparent),
+      transparent 65%
+    );
+    border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  }
+
+  /* ═══ سیاست alignment جداول — §۸.۳ جلسه اول ═══
+     هدر همه ستون‌ها center؛ داده کوتاه/عدد/کد/status center؛
+     توضیح بلند right (RTL). عددها tabular-nums + ltr. */
+  table.table th, table.tbl th { text-align: center; }
+  table.table td, table.tbl td { text-align: center; }
+  table.table td.tbl-text, table.tbl td.tbl-text,
+  table.table td.text-right, table.tbl td.text-right { text-align: right; }
+  table.table td.tbl-num, table.tbl td.tbl-num {
+    direction: ltr;
+    font-variant-numeric: tabular-nums;
+  }
 .card-hover { cursor: pointer; }
 .chip-icon {
   width: 40px; height: 40px; border-radius: calc(var(--radius) - 2px); flex-shrink: 0;

@@ -242,6 +242,7 @@
       class: 'input num ltr', type: 'text', inputmode: 'decimal',
       value: opts.value !== null && opts.value !== undefined ? String(Math.round(opts.value * 10000) / 100) : '',
       placeholder: opts.placeholder || '—',
+      'aria-label': opts.ariaLabel || 'درصد',
     });
     input.addEventListener('input', function () {
       if (input.value.trim() === '') { opts.onChange(null); return; }

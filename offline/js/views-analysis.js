@@ -446,27 +446,33 @@
       U.h('div', { class: 'metric' },
         U.h('div', { class: 'm-label', text: 'مجموع مجاز (A)' }),
         U.h('div', { class: 'm-value num flex items-center flex-wrap gap-1' },
-          U.h('span', { text: U.formatPercent(alw.totalA) }),
-          alw.method === 'SHARE_OF_ST' && alw.totalA >= 1
+          U.h('span', { text: U.formatPercent(alw.summary.totalPercent) }),
+          alw.method === 'SHARE_OF_ST' && alw.summary.totalPercent >= 1
             ? UI.badge('≥ ۱۰۰٪ — محاسبه ممنوع', 'red')
             : null))));
 
-    /* دسته‌های مجاز فعال با مقدار مؤثر */
-    var activeCats = (alw.categories || []).filter(function (c) {
-      return c.isActive && c.effectiveValue !== null && c.effectiveValue !== undefined;
-    });
-    if (activeCats.length > 0) {
-      card.appendChild(U.h('div', { class: 'flex flex-wrap gap-1 mt-3' },
-        activeCats.map(function (c) {
-          var suffix = c.source === 'OVERRIDE'
-            ? ' (اختصاصی فعالیت)'
-            : (c.source === 'GROUP' ? ' (گروه: ' + (alw.groupName || '') + ')' : '');
-          return UI.badge(c.name + ': ' + U.formatPercent(c.effectiveValue) + suffix, 'brand');
-        })));
+    /* الونس‌های مؤثر — ردیف‌های resolve سلسله‌مراتبی (جلسه اول §۳) */
+    var activeRows = (alw.rows || []).filter(function (r) { return r.status !== 'EXCLUDED'; });
+    if (activeRows.length > 0) {
+      var badges = activeRows.map(function (r) {
+        var suffix = r.status === 'CUSTOM'
+          ? ' (اختصاصی)'
+          : r.status === 'OVERRIDDEN'
+            ? ' (جایگزین‌شده)'
+            : ' (' + (r.sourceScopeLabel || '') + ')';
+        var value = r.valueType === 'PERCENT'
+          ? U.formatPercent(r.percentValue)
+          : U.formatTimeValue(r.timeValueSeconds, 1) + 's';
+        return UI.badge(r.title + ': ' + value + suffix, 'brand');
+      });
+      if (alw.perCycleTotal > 0) {
+        badges.push(UI.badge('الونس‌های هر چرخه: ' + U.formatTimeValue(alw.perCycleTotal, 1) + 's (یک‌بار در سطح چرخه)', 'outline'));
+      }
+      card.appendChild(U.h('div', { class: 'flex flex-wrap gap-1 mt-3' }, badges));
     } else {
-      card.appendChild(U.h('div', { class: 'text-xs text-muted mt-3', text: (alw.categories || []).length === 0
-        ? 'دسته مجازی تعریف نشده است؛ مجموع A صفر است.'
-        : 'هیچ دسته مجازی مقدار مؤثر ندارد؛ در «گروه‌ها و مجازها» مقدار تعریف کنید.' }));
+      card.appendChild(U.h('div', { class: 'text-xs text-muted mt-3', text: (alw.rows || []).length === 0
+        ? 'الونسی تعریف نشده است؛ مجموع A صفر است.'
+        : 'هیچ الونس مؤثری ندارد؛ در «مجازها و الونس‌ها» مقدار تعریف کنید.' }));
     }
 
     card.appendChild(U.h('div', { class: 'text-xs text-faint mt-3 pt-3 border-t', text: 'نسخهٔ فرمول ' + an.settings.formulaVersion + ' — تشخیص غیرعادی: ' + (an.settings.outlierMethod === 'mad'

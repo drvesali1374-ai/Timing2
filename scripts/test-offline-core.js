@@ -113,7 +113,7 @@ const e1vals = [8.2, 8.4, 8.1, 8.3, 8.2, 8.4, 8.1, 8.3, 8.5, 8.4, 8.4, 8.5];
 const e1ot = e1vals.reduce((s, v) => s + v, 0) / 12;
 close(e1.ot, e1ot, 'e1 OT');
 close(e1.nt, F.round12(e1ot * 1.09), 'e1 NT = OT x 1.09');
-close(an1.allowances.totalA, 0.08, 'totalA = 8%');
+close(an1.allowances.summary.totalPercent, 0.08, 'P (totalPercent) = 8%');
 close(e1.st, F.round12(e1.nt * 1.08), 'e1 ST m1');
 ok(an1.activityTotal.status === 'OK', 'act1 sequential -> OK');
 ok(an1.activityTotal.st !== null, 'act1 total ST computed');
@@ -245,6 +245,182 @@ ok(DB.getSheet(sesS.id).cycles.length === beforeCycles - 1, 'deleteCycle removes
 DB.deleteSession(sesS.id);
 ok(DB.getState().studySessions.every(s => s.id !== sesS.id), 'deleteSession removes row');
 ok(DB.listSessions(actS.id).length === 1, 'other session intact');
+
+
+// ═══════════════════════════════════════════════════════════
+// جلسه اول — الونس‌های سلسله‌مراتبی (§۱۰.۱/۱۰.۲/۱۰.۳ — parity با نسخه وب)
+// ═══════════════════════════════════════════════════════════
+{
+  const demo = DB.getState().projects[0];
+  ok(!!demo, 'demo project exists');
+
+  const stEl = F.computeElementStandardTime(100, { totalPercent: 0.08, perExecutionSeconds: 2.5, perCycleSeconds: 30 }, 'PERCENT_OF_NT');
+  close(stEl.st, 110.5, 'offline ST element = 100x1.08 + 2.5');
+  const stEl2 = F.computeElementStandardTime(100, { totalPercent: 0.08, perExecutionSeconds: 0, perCycleSeconds: 0 }, 'SHARE_OF_ST');
+  close(stEl2.st, 100 / 0.92, 'offline ST element method2 = 100/0.92');
+
+  const p2 = DB.createProject({ name: 'T1', lineName: 'L', productName: 'P' });
+  const sA = DB.createStation(p2.id, { name: 'SA' });
+  const sB = DB.createStation(p2.id, { name: 'SB' });
+  const actA = DB.createActivity(sA.id, { name: 'AA' });
+  const actB = DB.createActivity(sB.id, { name: 'AB' });
+  const elA = DB.createElement(actA.id, { name: 'EA' });
+
+  const dA = DB.createAllowanceDefinition(p2.id, { title: 'DA', defaultValueType: 'PERCENT', defaultValuePercent: 0.05 });
+  const dB = DB.createAllowanceDefinition(p2.id, { title: 'DB' });
+  const dC = DB.createAllowanceDefinition(p2.id, { title: 'DC', defaultValueType: 'FIXED_TIME', defaultTimeSeconds: 2.5 });
+  const dD = DB.createAllowanceDefinition(p2.id, { title: 'DD', defaultValueType: 'FIXED_TIME', defaultTimeSeconds: 30 });
+
+  const rowOf = (data, defId) => data.resolved.rows.find((r) => r.definitionId === defId);
+
+  DB.putScopeAllowanceOps('PROJECT', p2.id, [{ definitionId: dA.id, action: 'SET', valueType: 'PERCENT', percentValue: 0.05 }]);
+  let sc = DB.getScopeAllowances('ACTIVITY', actA.id);
+  ok(rowOf(sc, dA.id)?.status === 'INHERITED', '1-3. project -> activity/element INHERITED');
+  ok(DB.getScopeAllowances('WORK_ELEMENT', elA.id).resolved.rows.some((r) => r.definitionId === dA.id && r.status === 'INHERITED'), 'element inherits');
+
+  DB.putScopeAllowanceOps('STATION', sA.id, [{ definitionId: dA.id, action: 'SET', valueType: 'PERCENT', percentValue: 0.07 }]);
+  sc = DB.getScopeAllowances('ACTIVITY', actA.id);
+  ok(rowOf(sc, dA.id)?.status === 'INHERITED' && Math.abs(rowOf(sc, dA.id).percentValue - 0.07) < 1e-9, '4. station overrides project');
+
+  DB.putScopeAllowanceOps('ACTIVITY', actA.id, [{ definitionId: dA.id, action: 'SET', valueType: 'PERCENT', percentValue: 0.06 }]);
+  sc = DB.getScopeAllowances('ACTIVITY', actA.id);
+  ok(rowOf(sc, dA.id)?.status === 'OVERRIDDEN' && Math.abs(rowOf(sc, dA.id).percentValue - 0.06) < 1e-9, '5. activity overrides station (OVERRIDDEN)');
+  const elRow = rowOf(DB.getScopeAllowances('WORK_ELEMENT', elA.id), dA.id);
+  ok(elRow?.status === 'INHERITED' && Math.abs(elRow.percentValue - 0.06) < 1e-9, '5b. element inherits activity');
+
+  DB.putScopeAllowanceOps('PROJECT', p2.id, [{ definitionId: dB.id, action: 'SET', valueType: 'PERCENT', percentValue: 0.03 }]);
+  sc = DB.getScopeAllowances('ACTIVITY', actA.id);
+  ok(rowOf(sc, dA.id) && rowOf(sc, dB.id), '6. independent definitions preserved');
+
+  DB.putScopeAllowanceOps('STATION', sA.id, [{ definitionId: dB.id, action: 'EXCLUDE' }]);
+  sc = DB.getScopeAllowances('ACTIVITY', actA.id);
+  ok(rowOf(sc, dB.id)?.status === 'EXCLUDED', '7. station exclude -> activity EXCLUDED');
+  const sibRow = rowOf(DB.getScopeAllowances('ACTIVITY', actB.id), dB.id);
+  ok(sibRow?.status === 'INHERITED' && Math.abs(sibRow.percentValue - 0.03) < 1e-9, '7b. sibling unaffected');
+
+  DB.putScopeAllowanceOps('ACTIVITY', actA.id, [{ definitionId: dB.id, action: 'SET', valueType: 'PERCENT', percentValue: 0.04 }]);
+  sc = DB.getScopeAllowances('ACTIVITY', actA.id);
+  ok(rowOf(sc, dB.id)?.status === 'OVERRIDDEN' && Math.abs(rowOf(sc, dB.id).percentValue - 0.04) < 1e-9, '8. re-enable after exclude');
+
+  DB.putScopeAllowanceOps('ACTIVITY', actA.id, [{ definitionId: dB.id, action: 'RESTORE' }]);
+  sc = DB.getScopeAllowances('ACTIVITY', actA.id);
+  ok(rowOf(sc, dB.id)?.status === 'EXCLUDED', '9. restore -> parent exclude decision');
+  DB.putScopeAllowanceOps('STATION', sA.id, [{ definitionId: dB.id, action: 'RESTORE' }]);
+  sc = DB.getScopeAllowances('ACTIVITY', actA.id);
+  ok(rowOf(sc, dB.id)?.status === 'INHERITED' && Math.abs(rowOf(sc, dB.id).percentValue - 0.03) < 1e-9, '9b. second restore -> project value');
+
+  const r10 = rowOf(DB.getScopeAllowances('ACTIVITY', actB.id), dA.id);
+  ok(r10?.status === 'INHERITED' && Math.abs(r10.percentValue - 0.05) < 1e-9, '10. sibling sees project not sibling override');
+
+  DB.putScopeAllowanceOps('PROJECT', p2.id, [{ definitionId: dA.id, action: 'SET', valueType: 'PERCENT', percentValue: 0.055 }]);
+  const r11a = rowOf(DB.getScopeAllowances('ACTIVITY', actA.id), dA.id);
+  ok(r11a?.status === 'OVERRIDDEN' && Math.abs(r11a.percentValue - 0.06) < 1e-9, '11. child with local override unchanged');
+  const r11b = rowOf(DB.getScopeAllowances('ACTIVITY', actB.id), dA.id);
+  ok(Math.abs(r11b.percentValue - 0.055) < 1e-9, '11b. child without override changed');
+
+  DB.updateAllowanceDefinition(dA.id, { defaultValueType: 'PERCENT', defaultValuePercent: 0.99 });
+  const r12 = rowOf(DB.getScopeAllowances('ACTIVITY', actB.id), dA.id);
+  ok(Math.abs(r12.percentValue - 0.055) < 1e-9, '12. default change does not alter assignment');
+
+  DB.updateAllowanceDefinition(dB.id, { title: 'DB2' });
+  const r14 = rowOf(DB.getScopeAllowances('ACTIVITY', actB.id), dB.id);
+  ok(r14?.definitionId === dB.id && r14?.title === 'DB2', '14. title change keeps relation');
+
+  DB.putScopeAllowanceOps('ACTIVITY', actB.id, [{ definitionId: dA.id, action: 'SET', valueType: 'PERCENT', percentValue: 0.09 }]);
+  DB.putScopeAllowanceOps('ACTIVITY', actB.id, [{ definitionId: dA.id, action: 'SET', valueType: 'PERCENT', percentValue: 0.08 }]);
+  const cnt15 = DB.getState().allowanceAssignments.filter((a) => a.definitionId === dA.id && a.scopeType === 'ACTIVITY' && a.scopeId === actB.id).length;
+  ok(cnt15 === 1, '15. no duplicate assignment');
+
+  let threw = false;
+  try { DB.putScopeAllowanceOps('ACTIVITY', actB.id, [{ definitionId: dB.id, action: 'SET', valueType: 'PERCENT', percentValue: -0.1 }]); } catch { threw = true; }
+  ok(threw, 'negative rejected');
+  threw = false;
+  try { DB.putScopeAllowanceOps('ACTIVITY', actB.id, [{ definitionId: dB.id, action: 'SET', valueType: 'PERCENT', percentValue: 1.5 }]); } catch { threw = true; }
+  ok(threw, '>=100% rejected');
+  threw = false;
+  try { DB.putScopeAllowanceOps('ACTIVITY', actB.id, [{ definitionId: dB.id, action: 'SET', valueType: 'PERCENT', percentValue: 0.02, timeValueSeconds: 5 }]); } catch { threw = true; }
+  ok(threw, 'mismatched type rejected');
+
+  const opT = DB.createOperator(p2.id, { displayName: 'OP' });
+  const sesT = DB.createSession(actA.id, { operatorId: opT.id, timingMethod: 'SNAPBACK' });
+  DB.addCycles(sesT.id, 3);
+  const cellsT = [];
+  for (let i = 1; i <= 3; i++) cellsT.push({ cycleNo: i, workElementId: elA.id, rawDuration: 100 });
+  DB.putCells(sesT.id, cellsT);
+  const tbl = DB.getState().ratingTables.find((t) => t.projectId === p2.id);
+  DB.saveElementRating(elA.id, { ratingTableId: tbl.id, skillGrade: 'D', effortGrade: 'D', conditionsGrade: 'D', consistencyGrade: 'D' });
+
+  DB.putScopeAllowanceOps('ACTIVITY', actA.id, [{ definitionId: dA.id, action: 'SET', valueType: 'PERCENT', percentValue: 0.05 }]);
+  let an = DB.getActivityAnalysis(actA.id);
+  let el = an.elements[0];
+  close(el.nt, 100, 'NT=100');
+  close(el.allowances.totalPercent, 0.08, 'P=0.08');
+  close(el.st, 108, 'ST m1 = 108');
+
+  DB.putScopeAllowanceOps('WORK_ELEMENT', elA.id, [{ definitionId: dC.id, action: 'SET', valueType: 'FIXED_TIME', timeValueSeconds: 2.5, applicationBasis: 'PER_ELEMENT_EXECUTION' }]);
+  an = DB.getActivityAnalysis(actA.id);
+  el = an.elements[0];
+  close(el.st, 110.5, '+2.5s per-exec -> 110.5');
+  close(el.allowances.perExecutionSeconds, 2.5, 'per-execution in summary');
+
+  DB.putScopeAllowanceOps('ACTIVITY', actA.id, [{ definitionId: dD.id, action: 'SET', valueType: 'FIXED_TIME', timeValueSeconds: 30, applicationBasis: 'PER_CYCLE' }]);
+  an = DB.getActivityAnalysis(actA.id);
+  el = an.elements[0];
+  close(el.st, 110.5, 'PER_CYCLE not multiplied into element ST');
+  close(an.activityTotal.st, 140.5, 'PER_CYCLE once in activityTotal');
+  close(an.allowances.perCycleTotal, 30, 'perCycleTotal=30');
+
+  DB.putCalcSettings(p2.id, { allowanceMethod: 'SHARE_OF_ST' });
+  an = DB.getActivityAnalysis(actA.id);
+  el = an.elements[0];
+  close(el.st, 100 / 0.92 + 2.5, 'm2: 100/0.92+2.5');
+  DB.putCalcSettings(p2.id, { allowanceMethod: 'PERCENT_OF_NT' });
+
+  const dE = DB.createAllowanceDefinition(p2.id, { title: 'DE', defaultValueType: 'FIXED_TIME', defaultTimeSeconds: 10 });
+  DB.putScopeAllowanceOps('STATION', sA.id, [{ definitionId: dE.id, action: 'SET', valueType: 'FIXED_TIME', timeValueSeconds: 10, applicationBasis: 'PER_ELEMENT_EXECUTION' }]);
+  an = DB.getActivityAnalysis(actA.id);
+  el = an.elements[0];
+  close(el.st, 110.5, 'station per-exec not applied');
+  ok(el.allowances.needsAggregationCount >= 1, 'needs-aggregation row present');
+  DB.putScopeAllowanceOps('STATION', sA.id, [{ definitionId: dE.id, action: 'RESTORE' }]);
+
+  const p3 = DB.createProject({ name: 'T3', lineName: 'L3', productName: 'P3' });
+  const s3 = DB.createStation(p3.id, { name: 'S3' });
+  const act3 = DB.createActivity(s3.id, { name: 'A3' });
+  const catOld = { id: 'cat-old-1', projectId: p3.id, name: 'old cat', code: null, isActive: true, sortOrder: 0, createdAt: U.nowISO(), updatedAt: U.nowISO() };
+  DB.getState().allowanceCategories.push(catOld);
+  const grpOld = { id: 'grp-old-1', projectId: p3.id, name: 'old grp', description: null, createdAt: U.nowISO(), updatedAt: U.nowISO() };
+  DB.getState().activityGroups.push(grpOld);
+  DB.getState().groupAllowances.push({ id: 'ga-old-1', groupId: grpOld.id, categoryId: catOld.id, percentValue: 0.12, updatedAt: U.nowISO() });
+  DB.getState().activityAllowanceOverrides.push({ id: 'ov-old-1', activityId: act3.id, categoryId: catOld.id, percentValue: 0.15, updatedAt: U.nowISO() });
+  DB.updateActivity(act3.id, { groupId: grpOld.id });
+  DB.getState().projectSettings = DB.getState().projectSettings.filter((s) => !(s.projectId === p3.id && s.key === 'migration.allowanceModel'));
+
+  const sc3 = DB.getScopeAllowances('ACTIVITY', act3.id);
+  const row3 = sc3.resolved.rows.find((r) => r.definitionId === catOld.id);
+  ok(!!row3 && row3.status === 'CUSTOM' && Math.abs(row3.percentValue - 0.15) < 1e-9, 'migration: old override -> ACTIVITY 0.15');
+  const rep3 = DB.migrateProjectAllowancesIfNeeded(p3.id);
+  ok(rep3.migrated === false, 'migration: idempotent (marker)');
+  const cnt3 = DB.getState().allowanceAssignments.filter((a) => a.definitionId === catOld.id && a.scopeType === 'ACTIVITY' && a.scopeId === act3.id).length;
+  ok(cnt3 === 1, 'migration: no duplication');
+  ok(DB.getState().groupAllowances.some((ga) => ga.id === 'ga-old-1'), 'migration: legacy data preserved');
+  const el3 = DB.createElement(act3.id, { name: 'E3' });
+  const scEl3 = DB.getScopeAllowances('WORK_ELEMENT', el3.id);
+  const rEl3 = scEl3.resolved.rows.find((r) => r.definitionId === catOld.id);
+  ok(rEl3?.status === 'INHERITED' && Math.abs(rEl3.percentValue - 0.15) < 1e-9, 'migration: element inherits without copy');
+
+  const pkg = await DB.exportProjectPackage(p2.id);
+  ok(pkg.manifest.schemaVersion === 2, 'package v2');
+  ok(Array.isArray(pkg.data.allowanceDefinition) && Array.isArray(pkg.data.allowanceAssignment), 'package contains new tables');
+  const imp = await DB.importProjectPackage(pkg);
+  ok(!!imp.projectId, 'import ok');
+  const impScope = DB.getScopeAllowances('PROJECT', imp.projectId);
+  ok(impScope.resolved.rows.length > 0, 'import: project assignments reproduced');
+
+  DB.deleteProject(p2.id);
+  DB.deleteProject(p3.id);
+  DB.deleteProject(imp.projectId);
+}
 
 console.log(`\n========== RESULT: ${pass} passed / ${fail} failed ==========`);
 if (fail > 0) process.exit(1);

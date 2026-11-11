@@ -263,6 +263,203 @@
     rounding: { raw: 12.357, expectedDisplay: '12.36' },
   };
 
+
+  /* ═══════════════════════════════════════════════════════════
+     الونس‌های مؤثر سلسله‌مراتبی — جلسه اول
+     پورت «دقیق و بدون تغییر» از src/calculation/effective-allowances.ts
+     زنجیره: Project/Line → Station → Activity → WorkElement
+     ⚠ هر تغییر در این بخش باید همزمان در نسخه وب انجام شود.
+     ═══════════════════════════════════════════════════════════ */
+
+  function AllowanceValueError(code, message) {
+    var err = new Error(message);
+    err.code = code;
+    err.isAllowanceValueError = true;
+    return err;
+  }
+
+  /** اعتبارسنجی سازگاری نوع و مقدار تخصیص (§۲.۳) */
+  function validateAssignmentValue(input) {
+    if (input.mode === 'EXCLUDE') return;
+    if (input.valueType === 'PERCENT') {
+      if (input.percentValue === null || input.percentValue === undefined) {
+        throw AllowanceValueError('VALUE_REQUIRED', 'مقدار درصدی الزامی است.');
+      }
+      if (!isFinite(input.percentValue)) {
+        throw AllowanceValueError('VALUE_INVALID', 'مقدار درصدی معتبر نیست (NaN/Infinity).');
+      }
+      if (input.percentValue < 0) {
+        throw AllowanceValueError('VALUE_NEGATIVE', 'مقدار درصدی نمی‌تواند منفی باشد.');
+      }
+      if (input.percentValue >= 1) {
+        throw AllowanceValueError('VALUE_TOO_HIGH', 'درصد الونس باید کمتر از ۱۰۰ باشد.');
+      }
+      if (input.timeValueSeconds !== null && input.timeValueSeconds !== undefined) {
+        throw AllowanceValueError('VALUE_TYPE_MISMATCH', 'الونس درصدی نباید مقدار زمان ثابت داشته باشد.');
+      }
+    } else if (input.valueType === 'FIXED_TIME') {
+      if (input.timeValueSeconds === null || input.timeValueSeconds === undefined) {
+        throw AllowanceValueError('VALUE_REQUIRED', 'مقدار زمان ثابت الزامی است.');
+      }
+      if (!isFinite(input.timeValueSeconds)) {
+        throw AllowanceValueError('VALUE_INVALID', 'مقدار زمان ثابت معتبر نیست (NaN/Infinity).');
+      }
+      if (input.timeValueSeconds < 0) {
+        throw AllowanceValueError('VALUE_NEGATIVE', 'مقدار زمان ثابت نمی‌تواند منفی باشد.');
+      }
+      if (input.percentValue !== null && input.percentValue !== undefined) {
+        throw AllowanceValueError('VALUE_TYPE_MISMATCH', 'الونس زمان ثابت نباید مقدار درصدی داشته باشد.');
+      }
+      if (input.applicationBasis !== 'PER_ELEMENT_EXECUTION' && input.applicationBasis !== 'PER_CYCLE') {
+        throw AllowanceValueError('BASIS_REQUIRED', 'مبنای وقوع زمان ثابت الزامی است (هر اجرا / هر چرخه).');
+      }
+    } else {
+      throw AllowanceValueError('VALUE_TYPE_INVALID', 'نوع مقدار الونس معتبر نیست.');
+    }
+  }
+
+  function assignmentValueOf(a) {
+    if (a.mode !== 'ACTIVE') return null;
+    return a.valueType === 'PERCENT' ? a.percentValue : a.timeValueSeconds;
+  }
+
+  /**
+   * الونس‌های مؤثر یک scope با پیمایش زنجیره والد (از برگ به ریشه).
+   * قواعد ۱ تا ۱۰ سند §۲.۴ — مطابق نسخه وب.
+   */
+  function resolveEffectiveAllowances(params) {
+    var definitions = params.definitions;
+    var assignments = params.assignments;
+    var chain = params.chain;
+    var target = chain[chain.length - 1];
+    if (!target) throw new Error('زنجیره scope خالی است.');
+
+    var rows = [];
+    var count = 0, totalPercent = 0, perExecutionSeconds = 0, perCycleSeconds = 0, needsAggregationCount = 0;
+
+    var sortedDefs = definitions.slice().sort(function (a, b) {
+      return a.sortOrder - b.sortOrder || a.title.localeCompare(b.title, 'fa');
+    });
+
+    for (var di = 0; di < sortedDefs.length; di++) {
+      var def = sortedDefs[di];
+      if (!def.isActive) continue;
+
+      var decision = null, parentDecision = null;
+      for (var i = chain.length - 1; i >= 0; i--) {
+        var link = chain[i];
+        var found = null;
+        for (var ai = 0; ai < assignments.length; ai++) {
+          var a = assignments[ai];
+          if (a.definitionId === def.id && a.scopeType === link.type && a.scopeId === link.id &&
+              (a.mode === 'ACTIVE' || a.mode === 'EXCLUDE')) { found = a; break; }
+        }
+        if (!found) continue;
+        if (!decision) decision = found;
+        else if (!parentDecision) parentDecision = found;
+        if (decision && parentDecision) break;
+      }
+
+      if (!decision) continue;
+
+      var isLocal = decision.scopeType === target.type && decision.scopeId === target.id;
+      var sourceLink = null;
+      for (var ci = 0; ci < chain.length; ci++) {
+        if (chain[ci].type === decision.scopeType && chain[ci].id === decision.scopeId) { sourceLink = chain[ci]; break; }
+      }
+
+      var status;
+      if (decision.mode === 'EXCLUDE') status = 'EXCLUDED';
+      else if (isLocal && parentDecision) status = 'OVERRIDDEN';
+      else if (isLocal) status = 'CUSTOM';
+      else status = 'INHERITED';
+
+      var excluded = decision.mode === 'EXCLUDE';
+      var needsAggregationRule =
+        !excluded &&
+        decision.valueType === 'FIXED_TIME' &&
+        decision.applicationBasis === 'PER_ELEMENT_EXECUTION' &&
+        decision.scopeType !== 'WORK_ELEMENT';
+
+      var note = null;
+      if (excluded) {
+        note = isLocal
+          ? 'این الونس در همین سطح از ارث‌بری حذف شده و روی این شاخه و زیرمجموعه‌هایش اعمال نمی‌شود.'
+          : 'حذف از ارث‌بری در سطح «' + (sourceLink ? sourceLink.label : decision.scopeType) + '» اعلام شده و در این شاخه غیرفعال است.';
+      } else if (needsAggregationRule) {
+        note = 'زمان ثابت «به‌ازای هر اجرا» در سطح بالاتر از عنصر تعریف شده است؛ قاعده تجمیع مهندسی تعیین نشده و مقدار بی‌صدا حذف یا چندبار اعمال نمی‌شود — در ST عنصر لحاظ نشد.';
+      } else if (isLocal && parentDecision && parentDecision.mode === 'EXCLUDE') {
+        note = 'این شاخه پس از حذف از ارث‌بری در سطح بالاتر، با تعریف مجدد صریح دوباره فعال شده است.';
+      } else if (status === 'OVERRIDDEN') {
+        var pLink = null;
+        for (var pi = 0; pi < chain.length; pi++) {
+          if (chain[pi].type === parentDecision.scopeType && chain[pi].id === parentDecision.scopeId) { pLink = chain[pi]; break; }
+        }
+        note = 'مقدار سطح «' + (pLink ? pLink.label : parentDecision.scopeType) + '» در همین سطح جایگزین شده است.';
+      }
+
+      var row = {
+        definitionId: def.id,
+        title: def.title,
+        code: def.code || null,
+        status: status,
+        valueType: decision.valueType,
+        percentValue: !excluded && decision.valueType === 'PERCENT' ? decision.percentValue : null,
+        timeValueSeconds: !excluded && decision.valueType === 'FIXED_TIME' ? decision.timeValueSeconds : null,
+        applicationBasis: decision.valueType === 'FIXED_TIME' ? decision.applicationBasis : null,
+        sourceScopeType: decision.scopeType,
+        sourceScopeLabel: sourceLink ? sourceLink.label : null,
+        hasLocalDecision: isLocal,
+        parentValue: parentDecision ? assignmentValueOf(parentDecision) : null,
+        parentScopeType: parentDecision ? parentDecision.scopeType : null,
+        needsAggregationRule: needsAggregationRule,
+        note: note,
+      };
+      rows.push(row);
+
+      if (!excluded && !needsAggregationRule) {
+        count++;
+        if (row.valueType === 'PERCENT' && row.percentValue !== null) {
+          totalPercent += row.percentValue;
+        } else if (row.valueType === 'FIXED_TIME' && row.timeValueSeconds !== null) {
+          if (row.applicationBasis === 'PER_CYCLE') perCycleSeconds += row.timeValueSeconds;
+          else perExecutionSeconds += row.timeValueSeconds;
+        }
+      } else if (needsAggregationRule) {
+        needsAggregationCount++;
+      }
+    }
+
+    return {
+      scopeType: target.type,
+      scopeId: target.id,
+      rows: rows,
+      summary: {
+        count: count,
+        totalPercent: round12(totalPercent),
+        perExecutionSeconds: round12(perExecutionSeconds),
+        perCycleSeconds: round12(perCycleSeconds),
+        needsAggregationCount: needsAggregationCount,
+      },
+    };
+  }
+
+  /**
+   * ST عنصر با ترتیب قطعی (§۳):
+   *  ۱. درصدها مطابق روش پروژه روی NT اعمال می‌شوند.
+   *  ۲. سپس ثانیه‌های ثابت per-execution اضافه می‌شوند.
+   * per-cycle جداگانه — در ST عنصر ضرب نمی‌شود.
+   */
+  function computeElementStandardTime(normalTime, factors, method) {
+    var percentPart = computeStandardTime(normalTime, factors.totalPercent, method);
+    var st = round12(percentPart + factors.perExecutionSeconds);
+    var stFormula = method === 'PERCENT_OF_NT' ? 'NT × (1 + A)' : 'NT / (1 − A)';
+    var explanation = factors.perExecutionSeconds > 0
+      ? 'ST = (' + stFormula + ' با A=' + factors.totalPercent + ') + ' + factors.perExecutionSeconds + 's زمان ثابت هر اجرا'
+      : 'ST = ' + stFormula + ' با A=' + factors.totalPercent;
+    return { st: st, explanation: explanation };
+  }
+
   g.T2F = {
     round12: round12, computeRatingFactor: computeRatingFactor, computeNormalTime: computeNormalTime,
     sumAllowances: sumAllowances, allowanceError: allowanceError, computeStandardTime: computeStandardTime,
@@ -272,5 +469,8 @@
     descriptiveStats: descriptiveStats, median: median, mad: mad, detectOutliers: detectOutliers,
     weightedMeanByCount: weightedMeanByCount, equalOperatorMean: equalOperatorMean, aggregateElement: aggregateElement,
     roundForDisplay: roundForDisplay, formatForDisplay: formatForDisplay, REFERENCE_TESTS: REFERENCE_TESTS,
+    // ── جلسه اول: الونس‌های سلسله‌مراتبی ──
+    validateAssignmentValue: validateAssignmentValue, AllowanceValueError: AllowanceValueError,
+    resolveEffectiveAllowances: resolveEffectiveAllowances, computeElementStandardTime: computeElementStandardTime,
   };
 })(typeof window !== 'undefined' ? window : globalThis);
