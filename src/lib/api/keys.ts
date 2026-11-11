@@ -11,7 +11,9 @@ export const qk = {
   stations: (projectId: string) => ['stations', projectId] as const,
   activities: (stationId: string) => ['activities', stationId] as const,
   elements: (activityId: string) => ['elements', activityId] as const,
-  activityAllowances: (activityId: string) => ['activity-allowances', activityId] as const,
+  // ── الونس‌های سلسله‌مراتبی — جلسه اول ──
+  allowanceDefinitions: (projectId: string) => ['allowance-definitions', projectId] as const,
+  scopeAllowances: (scopeType: string, scopeId: string) => ['scope-allowances', scopeType, scopeId] as const,
   elementRating: (elementId: string) => ['element-rating', elementId] as const,
   operators: (projectId: string) => ['operators', projectId] as const,
   groups: (projectId: string) => ['groups', projectId] as const,

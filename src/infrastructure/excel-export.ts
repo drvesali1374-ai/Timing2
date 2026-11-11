@@ -223,7 +223,7 @@ function buildSummarySheet(wb: ExcelJS.Workbook, report: StudyReportDto, prefs: 
       if (el.rating) ws.getCell(r, 11).value = Number(el.rating.totalFactor.toFixed(4))
       if (el.nt !== null) ws.getCell(r, 12).value = Number(el.nt.toFixed(6))
       if (el.st !== null) ws.getCell(r, 13).value = Number(el.st.toFixed(6))
-      ws.getCell(r, 14).value = Number(sec.allowances.totalA.toFixed(6))
+      ws.getCell(r, 14).value = Number(el.allowanceP.toFixed(6))
       ws.getCell(r, 15).value =
         el.stError ??
         (el.st !== null
@@ -282,25 +282,25 @@ function buildSummarySheet(wb: ExcelJS.Workbook, report: StudyReportDto, prefs: 
   const ws3 = wb.addWorksheet('دسته‌های مجاز', { views: [{ rightToLeft: true }] })
   ws3.columns = [{ width: 24 }, { width: 26 }, { width: 22 }, { width: 14 }, { width: 14 }, { width: 16 }, { width: 14 }]
   styleTitleRow(ws3, 1, 7)
-  ws3.getCell(1, 1).value = `دسته‌های مجاز مؤثر — ${report.project.name}`
+  ws3.getCell(1, 1).value = `الونس‌های مؤثر — ${report.project.name}`
   const h3 = 3
-  const headers3 = ['فعالیت', 'گروه', 'دستهٔ مجاز', 'مقدار گروه', 'بازنویسی فعالیت', 'مؤثر', 'منبع']
-  headers3.forEach((h, i) => (ws3.getCell(h3, i + 1).value = h))
+  const headers3 = ['فعالیت', 'عنوان الونس', 'نوع', 'مقدار مؤثر', 'مبدأ', 'وضعیت', 'مبنا']
   styleHeaderRow(ws3, h3)
   let r3 = h3 + 1
   const seen = new Set<string>()
   for (const sec of report.activities) {
-    for (const cat of sec.allowances.categories) {
-      const key = `${sec.activity.id}:${cat.categoryId}`
+    for (const row of sec.allowances.rows) {
+      const key = `${sec.activity.id}:${row.definitionId}`
       if (seen.has(key)) continue
       seen.add(key)
       ws3.getCell(r3, 1).value = sec.activity.name
-      ws3.getCell(r3, 2).value = sec.allowances.groupName ?? '—'
-      ws3.getCell(r3, 3).value = cat.name + (cat.isActive ? '' : ' (غیرفعال)')
-      if (cat.groupValue !== null) ws3.getCell(r3, 4).value = Number((cat.groupValue * 100).toFixed(4))
-      if (cat.overrideValue !== null) ws3.getCell(r3, 5).value = Number((cat.overrideValue * 100).toFixed(4))
-      if (cat.effectiveValue !== null) ws3.getCell(r3, 6).value = Number((cat.effectiveValue * 100).toFixed(4))
-      ws3.getCell(r3, 7).value = cat.sourceLabel
+      ws3.getCell(r3, 2).value = row.title
+      ws3.getCell(r3, 3).value = row.valueType === 'PERCENT' ? 'درصدی' : 'زمان ثابت'
+      if (row.valueType === 'PERCENT' && row.percentValue !== null) ws3.getCell(r3, 4).value = Number((row.percentValue * 100).toFixed(4))
+      if (row.valueType === 'FIXED_TIME' && row.timeValueSeconds !== null) ws3.getCell(r3, 4).value = Number(row.timeValueSeconds.toFixed(4))
+      ws3.getCell(r3, 5).value = row.sourceScopeLabel ?? '—'
+      ws3.getCell(r3, 6).value = row.status === 'INHERITED' ? 'ارث‌رسیده' : row.status === 'OVERRIDDEN' ? 'جایگزین‌شده' : row.status === 'CUSTOM' ? 'اختصاصی' : 'حذف از ارث‌بری'
+      ws3.getCell(r3, 7).value = row.applicationBasis === 'PER_ELEMENT_EXECUTION' ? 'هر اجرا' : row.applicationBasis === 'PER_CYCLE' ? 'هر چرخه' : '—'
       for (let c = 1; c <= 7; c++) ws3.getCell(r3, c).alignment = { horizontal: 'center', readingOrder: 'rtl' }
       r3++
     }

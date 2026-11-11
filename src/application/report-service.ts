@@ -31,9 +31,8 @@ import {
   type TimingMethod,
   type ProjectStatus,
 } from '@/domain/types'
-import { getActivityAnalysis, type ActivityAnalysisDto, type SuspectItemDto } from './analysis-service'
+import { getActivityAnalysis, type ActivityAnalysisDto, type ActivityAllowancesDto, type SuspectItemDto } from './analysis-service'
 import { getLatestCalculation } from './calculation-run-service'
-import type { EffectiveAllowance } from './allowance-service'
 import type { DescriptiveStats } from '@/calculation/statistics'
 import type { RatingAssessment } from '@prisma/client'
 
@@ -66,6 +65,10 @@ export interface ElementReportRow {
   nt: number | null
   st: number | null
   stError: string | null
+  /** جمع درصدهای الونس مؤثر این عنصر — جلسه اول (§۳) */
+  allowanceP: number
+  /** ثانیه‌های ثابت per-execution این عنصر */
+  allowanceT: number
   operatorsCount: number
 }
 
@@ -99,7 +102,7 @@ export interface ActivityReportSection {
     reached: boolean | null
     message: string
   }
-  allowances: EffectiveAllowance
+  allowances: ActivityAllowancesDto
   elements: ElementReportRow[]
   activityTotal: ActivityAnalysisDto['activityTotal']
   cycleStats: { count: number | null; mean: number | null; sampleSD: number | null; cvPercent: number | null; methodNote: string }
@@ -317,6 +320,8 @@ export async function getStudyReport(
         nt,
         st,
         stError,
+        allowanceP: el.allowances.totalPercent,
+        allowanceT: el.allowances.perExecutionSeconds,
         operatorsCount: el.operators.length,
       }
     })

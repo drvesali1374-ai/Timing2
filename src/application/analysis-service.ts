@@ -28,10 +28,11 @@ import {
 } from '@/domain/types'
 import { descriptiveStats, type DescriptiveStats } from '@/calculation/statistics'
 import { aggregateElement } from '@/calculation/aggregate'
-import { computeStandardTime } from '@/calculation/allowances'
+import { computeElementStandardTime } from '@/calculation/effective-allowances'
+import type { EffectiveAllowanceSummary, ResolvedAllowanceRow } from '@/calculation/effective-allowances'
 import { round12 } from '@/calculation/westinghouse'
 import { getProjectSettings } from './settings-service'
-import { getEffectiveAllowances, type EffectiveAllowance } from './allowance-service'
+import { resolveForActivity } from './effective-allowance-service'
 import { getOutlierConfig } from './outlier-service'
 import type { ElementObservation, CycleObservation, StudySession, Operator, WorkElement, RatingAssessment } from '@prisma/client'
 
@@ -89,6 +90,15 @@ export interface ElementAnalysisDto {
   st: number | null
   /** خطای محاسبه ST (مثلاً A ≥ ۱۰۰٪ در روش ۲) — FR-15 */
   stError: string | null
+  /** الونس‌های مؤثر این عنصر — جلسه اول (§۳) */
+  allowances: {
+    totalPercent: number
+    perExecutionSeconds: number
+    perCycleSeconds: number
+    needsAggregationCount: number
+  }
+  /** توضیح فرمول ST اعمال‌شده — خروجی قابل توضیح (§۳.۳) */
+  stExplanation: string | null
   operators: OperatorComparisonRow[]
   trend: TrendPoint[]
   histogram: HistogramBin[]
@@ -107,6 +117,21 @@ export interface SuspectItemDto {
   rule: string | null
   validityStatus: 'SUSPECT' | 'EXCLUDED'
   exclusionReason: string | null
+}
+
+/** الونس‌های مؤثر فعالیت — مدل سلسله‌مراتبی جدید (§۳) */
+export interface ActivityAllowancesDto {
+  method: AllowanceMethod
+  methodLabel: string
+  formula: string
+  /** ردیف‌های resolve در سطح فعالیت */
+  rows: ResolvedAllowanceRow[]
+  /** خلاصه سطح فعالیت */
+  summary: EffectiveAllowanceSummary
+  /** جمع ثانیه‌های per-cycle در سطح چرخه — دقیقاً یک‌بار (dedupe) */
+  perCycleTotal: number
+  /** ردیف‌های زمان ثابت نیازمند قاعده تجمیع */
+  needsAggregation: { title: string; sourceScopeLabel: string | null; timeValueSeconds: number }[]
 }
 
 export interface ActivityAnalysisDto {
@@ -130,7 +155,7 @@ export interface ActivityAnalysisDto {
     outlierMethod: string
     outlierThreshold: number
   }
-  allowances: EffectiveAllowance
+  allowances: ActivityAllowancesDto
   sampleProgress: {
     targetSampleCount: number | null
     validCycles: number
@@ -225,9 +250,9 @@ export async function getActivityAnalysis(activityId: string): Promise<ActivityA
   if (!activity) throw new AppError('ACTIVITY_NOT_FOUND', 'فعالیت یافت نشد.', 404)
   const projectId = activity.station.project.id
 
-  const [settingsRaw, allowances, outlierConfig, sessions] = await Promise.all([
+  const [settingsRaw, allowanceResolution, outlierConfig, sessions] = await Promise.all([
     getProjectSettings(projectId),
-    getEffectiveAllowances(activityId),
+    resolveForActivity(activityId),
     getOutlierConfig(),
     db.studySession.findMany({
       where: { activityId },
@@ -321,11 +346,22 @@ export async function getActivityAnalysis(activityId: string): Promise<ActivityA
     const ot = agg.value
     const nt = ot !== null && ratingDto !== null ? round12(ot * ratingDto.totalFactor) : null
 
+    // الونس‌های مؤثر این عنصر — resolve سلسله‌مراتبی (§۳)
+    const elResolution = allowanceResolution.elements.get(el.id)
+    const elFactors = {
+      totalPercent: elResolution?.summary.totalPercent ?? 0,
+      perExecutionSeconds: elResolution?.summary.perExecutionSeconds ?? 0,
+      perCycleSeconds: elResolution?.summary.perCycleSeconds ?? 0,
+    }
+
     let st: number | null = null
     let stError: string | null = null
+    let stExplanation: string | null = null
     if (nt !== null) {
       try {
-        st = computeStandardTime(nt, allowances.totalA, allowanceMethod)
+        const res = computeElementStandardTime(nt, elFactors, allowanceMethod)
+        st = res.st
+        stExplanation = res.explanation
       } catch (err) {
         stError = err instanceof AppError ? err.message : 'محاسبه زمان استاندارد برای این عنصر ممکن نیست.'
       }
@@ -340,7 +376,7 @@ export async function getActivityAnalysis(activityId: string): Promise<ActivityA
       let opSt: number | null = null
       if (opNt !== null) {
         try {
-          opSt = computeStandardTime(opNt, allowances.totalA, allowanceMethod)
+          opSt = computeElementStandardTime(opNt, elFactors, allowanceMethod).st
         } catch {
           opSt = null
         }
@@ -394,6 +430,13 @@ export async function getActivityAnalysis(activityId: string): Promise<ActivityA
       nt,
       st,
       stError,
+      allowances: {
+        totalPercent: elFactors.totalPercent,
+        perExecutionSeconds: elFactors.perExecutionSeconds,
+        perCycleSeconds: elFactors.perCycleSeconds,
+        needsAggregationCount: elResolution?.summary.needsAggregationCount ?? 0,
+      },
+      stExplanation,
       operators,
       trend,
       histogram: buildHistogram(values),
@@ -431,7 +474,32 @@ export async function getActivityAnalysis(activityId: string): Promise<ActivityA
     overlapSum: sumOt('OVERLAP'),
   }
 
-  // ── استاندارد کل فعالیت — FR-16/۱۰.۳ ──
+  // ── استاندارد کل فعالیت — FR-16/۱۰.۳ + الونس per-cycle (§۳.۲) ──
+  // الونس‌های زمانی «هر چرخه» دقیقاً یک‌بار در سطح چرخه اعمال می‌شوند:
+  // ردیف‌های per-cycle سطح فعالیت/ایستگاه/پروژه یک‌بار + ردیف‌های محلی عناصر
+  // (بدون ضرب شدن در ST تک‌تک عناصر — تست §۱۰.۲)
+  const actPerCycleRows = allowanceResolution.activity.rows.filter(
+    (r) => r.status !== 'EXCLUDED' && !r.needsAggregationRule && r.valueType === 'FIXED_TIME' && r.applicationBasis === 'PER_CYCLE' && r.timeValueSeconds !== null
+  )
+  let perCycleTotal = round12(actPerCycleRows.reduce((s, r) => s + (r.timeValueSeconds as number), 0))
+  const seenPerCycleDefs = new Set(actPerCycleRows.map((r) => r.definitionId))
+  for (const elDto of elementDtos) {
+    const elRes = allowanceResolution.elements.get(elDto.id)
+    if (!elRes) continue
+    for (const r of elRes.rows) {
+      if (r.sourceScopeType !== 'WORK_ELEMENT') continue // فقط ردیف‌های محلی عنصر
+      if (r.status === 'EXCLUDED' || r.needsAggregationRule) continue
+      if (r.valueType !== 'FIXED_TIME' || r.applicationBasis !== 'PER_CYCLE' || r.timeValueSeconds === null) continue
+      if (seenPerCycleDefs.has(r.definitionId)) continue
+      seenPerCycleDefs.add(r.definitionId)
+      perCycleTotal = round12(perCycleTotal + r.timeValueSeconds)
+    }
+  }
+  const needsAggregationRows = [
+    ...allowanceResolution.activity.rows.filter((r) => r.needsAggregationRule),
+    ...[...allowanceResolution.elements.values()].flatMap((res) => res.rows.filter((r) => r.needsAggregationRule)),
+  ].map((r) => ({ title: r.title, sourceScopeLabel: r.sourceScopeLabel, timeValueSeconds: r.timeValueSeconds ?? 0 }))
+
   const hasOverlapElements = activity.workElements.some((e) => e.elementType === 'OVERLAP')
   const hasAnyInterval = cycles.some((c) => c.observations.some((o) => o.startOffset !== null))
   let activityTotal: ActivityAnalysisDto['activityTotal']
@@ -456,10 +524,14 @@ export async function getActivityAnalysis(activityId: string): Promise<ActivityA
           .join('، ')}${missing.length > 3 ? ' و …' : ''}). علت رایج: نبود دادهٔ معتبر، نبود ارزیابی وستینگهاوس یا خطای مجازها.`,
       }
     } else {
+      const elementsSt = round12(elementDtos.reduce((s, e) => s + (e.st as number), 0))
       activityTotal = {
-        st: round12(elementDtos.reduce((s, e) => s + (e.st as number), 0)),
+        st: round12(elementsSt + perCycleTotal),
         status: 'OK',
-        reason: 'فعالیت کاملاً ترتیبی است؛ زمان استاندارد کل = جمع زمان استاندارد عناصر.',
+        reason:
+          perCycleTotal > 0
+            ? `فعالیت کاملاً ترتیبی است؛ زمان استاندارد کل = جمع زمان استاندارد عناصر (${elementsSt}) + الونس‌های زمانی «هر چرخه» که دقیقاً یک‌بار افزوده شدند (${perCycleTotal} ثانیه).`
+            : 'فعالیت کاملاً ترتیبی است؛ زمان استاندارد کل = جمع زمان استاندارد عناصر.',
       }
     }
   }
@@ -509,7 +581,15 @@ export async function getActivityAnalysis(activityId: string): Promise<ActivityA
       outlierMethod: outlierConfig.methodKey === 'iqr' ? 'iqr' : 'mad',
       outlierThreshold: outlierConfig.thresholdKey,
     },
-    allowances,
+    allowances: {
+      method: allowanceResolution.method,
+      methodLabel: allowanceResolution.methodLabel,
+      formula: allowanceResolution.formula,
+      rows: allowanceResolution.activity.rows,
+      summary: allowanceResolution.activity.summary,
+      perCycleTotal,
+      needsAggregation: needsAggregationRows,
+    },
     sampleProgress,
     elements: elementDtos,
     cycleStats,

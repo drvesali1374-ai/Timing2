@@ -16,6 +16,10 @@ import {
   TIMING_METHODS,
   SESSION_STATUSES,
   VALIDITY_STATUSES,
+  ALLOWANCE_VALUE_TYPES,
+  ALLOWANCE_MODES,
+  ALLOWANCE_BASES,
+  MAX_FIXED_TIME_SECONDS,
 } from './types'
 
 /** پیش‌پردازنده عدد: رشته فارسی/عربی → number (نامعتبر → undefined برای فیلد اختیاری) */
@@ -170,6 +174,76 @@ export const activityAllowancesPutSchema = z.object({
       percentValue: percentValueSchema.nullable(), // null = حذف بازنویسی و بازگشت به ارث‌بری
     })
   ).min(1),
+  expectedUpdatedAt: z.string().datetime().optional(),
+})
+
+// ── الونس‌ها — مدل جدید سلسله‌مراتبی (جلسه اول) ──
+
+/** تعریف مرکزی الونس — ایجاد */
+export const allowanceDefinitionCreateSchema = z.object({
+  title: trimmed(200),
+  code: z.string().trim().max(50).nullable().optional(),
+  description: z.string().trim().max(2000).nullable().optional(),
+  /** نوع و مقدار پیش‌فرض — صرفاً پیشنهاد اولیه فرم تخصیص (§۲.۲) */
+  defaultValueType: z.enum(ALLOWANCE_VALUE_TYPES).nullable().optional(),
+  defaultValuePercent: percentValueSchema.nullable().optional(),
+  defaultTimeSeconds: optionalNumber({ min: 0, max: MAX_FIXED_TIME_SECONDS }),
+  isActive: z.boolean().default(true),
+  sortOrder: numberFromString({ min: 0, max: 9999 }).default(0),
+}).refine(
+  (v) => {
+    // اگر نوع پیش‌فرض داده شده، مقدار متناظر باید باشد و بالعکس
+    if (v.defaultValueType === 'PERCENT') return v.defaultValuePercent !== null && v.defaultValuePercent !== undefined
+    if (v.defaultValueType === 'FIXED_TIME') return v.defaultTimeSeconds !== null && v.defaultTimeSeconds !== undefined
+    return v.defaultValuePercent === undefined || v.defaultTimeSeconds === undefined || v.defaultValuePercent === null || v.defaultTimeSeconds === null
+  },
+  { message: 'برای مقدار پیش‌فرض، نوع و مقدار متناظر باید با هم ثبت شوند' }
+).refine(
+  (v) => !(v.defaultValueType === 'PERCENT' && (v.defaultTimeSeconds !== null && v.defaultTimeSeconds !== undefined)),
+  { message: 'مقدار پیش‌فرض درصدی نباید همراه زمان ثابت باشد' }
+).refine(
+  (v) => !(v.defaultValueType === 'FIXED_TIME' && v.defaultValuePercent !== null && v.defaultValuePercent !== undefined),
+  { message: 'مقدار پیش‌فرض زمان ثابت نباید همراه درصد باشد' }
+)
+
+/** تعریف مرکزی الونس — به‌روزرسانی */
+export const allowanceDefinitionUpdateSchema = z.object({
+  title: trimmed(200).optional(),
+  code: z.string().trim().max(50).nullable().optional(),
+  description: z.string().trim().max(2000).nullable().optional(),
+  defaultValueType: z.enum(ALLOWANCE_VALUE_TYPES).nullable().optional(),
+  defaultValuePercent: percentValueSchema.nullable().optional(),
+  defaultTimeSeconds: optionalNumber({ min: 0, max: MAX_FIXED_TIME_SECONDS }),
+  isActive: z.boolean().optional(),
+  sortOrder: numberFromString({ min: 0, max: 9999 }).optional(),
+  isArchived: z.boolean().optional(),
+  expectedUpdatedAt: z.string().datetime().optional(),
+})
+
+/** یک عملیات تخصیص الونس (§۶ — عملیات کم‌تراکم) */
+export const allowanceOpSchema = z.object({
+  definitionId: z.string().uuid('تعریف الونس معتبر نیست'),
+  action: z.enum(['SET', 'EXCLUDE', 'RESTORE', 'REMOVE'], { message: 'عملیات تخصیص معتبر نیست' }),
+  /** فقط برای SET */
+  valueType: z.enum(ALLOWANCE_VALUE_TYPES).optional(),
+  percentValue: percentValueSchema.nullable().optional(),
+  /** ثانیه — واحد دقیقه در UI به ثانیه تبدیل می‌شود (§۲.۳) */
+  timeValueSeconds: optionalNumber({ min: 0, max: MAX_FIXED_TIME_SECONDS }),
+  applicationBasis: z.enum(ALLOWANCE_BASES).nullable().optional(),
+}).refine(
+  (v) => !(v.action !== 'SET') || v.valueType !== undefined,
+  { message: 'برای ثبت مقدار، نوع مقدار الزامی است' }
+).refine(
+  (v) => !(v.action === 'SET' && v.valueType === 'PERCENT') || (v.percentValue !== null && v.percentValue !== undefined),
+  { message: 'مقدار درصدی الزامی است' }
+).refine(
+  (v) => !(v.action === 'SET' && v.valueType === 'FIXED_TIME') || (v.timeValueSeconds !== null && v.timeValueSeconds !== undefined),
+  { message: 'مقدار زمان ثابت الزامی است' }
+)
+
+/** دسته عملیات تخصیص روی یک scope */
+export const allowanceOpsPutSchema = z.object({
+  ops: z.array(allowanceOpSchema).min(1, 'فهرست عملیات خالی است').max(200),
   expectedUpdatedAt: z.string().datetime().optional(),
 })
 
@@ -372,6 +446,10 @@ export type GroupCreateInput = z.infer<typeof groupCreateSchema>
 export type GroupUpdateInput = z.infer<typeof groupUpdateSchema>
 export type CategoryCreateInput = z.infer<typeof categoryCreateSchema>
 export type CategoryUpdateInput = z.infer<typeof categoryUpdateSchema>
+export type AllowanceDefinitionCreateInput = z.infer<typeof allowanceDefinitionCreateSchema>
+export type AllowanceDefinitionUpdateInput = z.infer<typeof allowanceDefinitionUpdateSchema>
+export type AllowanceOpsPutInput = z.infer<typeof allowanceOpsPutSchema>
+export type AllowanceOpInput = z.infer<typeof allowanceOpSchema>
 export type RatingTableCreateInput = z.infer<typeof ratingTableCreateSchema>
 export type AssessmentPutInput = z.infer<typeof assessmentPutSchema>
 export type SessionCreateInput = z.infer<typeof sessionCreateSchema>

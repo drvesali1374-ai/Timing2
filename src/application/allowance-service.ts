@@ -6,11 +6,12 @@
 // • روش اعمال مجاز در سطح پروژه + اعتبارسنجی A < ۱۰۰٪ برای روش ۲
 // ═══════════════════════════════════════════════════════════
 import { db } from '@/lib/db'
-import { AppError, ALLOWANCE_METHOD_LABELS, ALLOWANCE_METHOD_FORMULAS, PROJECT_SETTING_KEYS, DEFAULT_PROJECT_SETTINGS } from '@/domain/types'
+import { AppError, PROJECT_SETTING_KEYS, DEFAULT_PROJECT_SETTINGS } from '@/domain/types'
 import { recordAudit } from '@/infrastructure/audit'
 import { markDeleted } from '@/infrastructure/deletion'
-import { sumAllowances, validateAllowanceTotal } from '@/calculation/allowances'
+import { sumAllowances } from '@/calculation/allowances'
 import { getProjectSettings, putProjectSettings } from './settings-service'
+import { resolveForActivity } from './effective-allowance-service'
 import type { GroupCreateInput, GroupUpdateInput, CategoryCreateInput, CategoryUpdateInput } from '@/domain/validation'
 
 async function assertProject(projectId: string) {
@@ -175,205 +176,9 @@ export async function deleteGroup(groupId: string) {
   return { values, activities }
 }
 
-/** مقادیر مجاز یک گروه (همه دسته‌های فعال پروژه + مقدار ثبت‌شده) */
-export async function getGroupAllowances(groupId: string) {
-  const group = await db.activityGroup.findUnique({ where: { id: groupId }, include: { groupAllowances: true } })
-  if (!group) throw new AppError('GROUP_NOT_FOUND', 'گروه فعالیت یافت نشد.', 404)
-  const categories = await db.allowanceCategory.findMany({
-    where: { projectId: group.projectId },
-    orderBy: { sortOrder: 'asc' },
-  })
-  return {
-    group: { id: group.id, name: group.name },
-    values: categories.map((c) => {
-      const ga = group.groupAllowances.find((x) => x.categoryId === c.id)
-      return {
-        categoryId: c.id,
-        name: c.name,
-        code: c.code,
-        isActive: c.isActive,
-        percentValue: ga?.percentValue ?? null,
-      }
-    }),
-    totalA: sumAllowances(
-      categories
-        .filter((c) => c.isActive)
-        .map((c) => {
-          const ga = group.groupAllowances.find((x) => x.categoryId === c.id)
-          return { categoryId: c.id, percentValue: ga?.percentValue ?? 0 }
-        })
-    ),
-  }
-}
-
-/** ثبت مقادیر مجاز گروه (upsert هر دسته) */
-export async function putGroupAllowances(
-  groupId: string,
-  values: { categoryId: string; percentValue: number | null }[]
-) {
-  const group = await db.activityGroup.findUnique({ where: { id: groupId } })
-  if (!group) throw new AppError('GROUP_NOT_FOUND', 'گروه فعالیت یافت نشد.', 404)
-
-  await db.$transaction(async (tx) => {
-    for (const v of values) {
-      const category = await tx.allowanceCategory.findUnique({ where: { id: v.categoryId } })
-      if (!category || category.projectId !== group.projectId) {
-        throw new AppError('CATEGORY_NOT_IN_PROJECT', 'یکی از دسته‌های انتخاب‌شده به این پروژه تعلق ندارد.', 422)
-      }
-      if (v.percentValue === null) {
-        await tx.groupAllowance.deleteMany({ where: { groupId, categoryId: v.categoryId } })
-      } else {
-        await tx.groupAllowance.upsert({
-          where: { groupId_categoryId: { groupId, categoryId: v.categoryId } },
-          create: { groupId, categoryId: v.categoryId, percentValue: v.percentValue },
-          update: { percentValue: v.percentValue },
-        })
-      }
-    }
-  })
-  // تغییر مجازها بر محاسبات اثر دارد — FR-27
-  await db.calculationRun.updateMany({ where: { projectId: group.projectId }, data: { status: 'STALE' } })
-  await recordAudit({
-    entityType: 'ActivityGroup', entityId: groupId, action: 'UPDATE', entityName: group.name,
-    after: { allowances: values }, projectId: group.projectId,
-  })
-  return getGroupAllowances(groupId)
-}
-
-// ── مجازهای مؤثر فعالیت (ارث + بازنویسی) — FR-04 ──
-
-export interface EffectiveAllowance {
-  method: string
-  methodLabel: string
-  formula: string
-  hasGroup: boolean
-  groupId: string | null
-  groupName: string | null
-  totalA: number
-  categories: {
-    categoryId: string
-    name: string
-    code: string | null
-    isActive: boolean
-    source: 'GROUP' | 'OVERRIDE' | 'NONE'
-    sourceLabel: string
-    groupValue: number | null
-    overrideValue: number | null
-    effectiveValue: number | null
-  }[]
-}
-
-/** مجازهای مؤثر یک فعالیت با برچسب منبع هر مقدار — FR-04 */
-export async function getEffectiveAllowances(activityId: string): Promise<EffectiveAllowance> {
-  const activity = await db.activity.findUnique({
-    where: { id: activityId },
-    include: {
-      group: { include: { groupAllowances: true } },
-      allowanceOverrides: true,
-      station: { select: { project: { select: { id: true } } } },
-    },
-  })
-  if (!activity) throw new AppError('ACTIVITY_NOT_FOUND', 'فعالیت یافت نشد.', 404)
-
-  const projectId = activity.station.project.id
-  const settings = await getProjectSettings(projectId)
-  const method = settings[PROJECT_SETTING_KEYS.allowanceMethod] ?? DEFAULT_PROJECT_SETTINGS[PROJECT_SETTING_KEYS.allowanceMethod]
-
-  const categories = await db.allowanceCategory.findMany({
-    where: { projectId },
-    orderBy: { sortOrder: 'asc' },
-  })
-
-  const cats: EffectiveAllowance['categories'] = categories.map((c) => {
-    const groupValue = activity.group?.groupAllowances.find((g) => g.categoryId === c.id)?.percentValue ?? null
-    const override = activity.allowanceOverrides.find((o) => o.categoryId === c.id)
-    const overrideValue = override?.percentValue ?? null
-    let source: 'GROUP' | 'OVERRIDE' | 'NONE' = 'NONE'
-    let sourceLabel = 'بدون مقدار'
-    let effectiveValue: number | null = null
-    if (overrideValue !== null) {
-      source = 'OVERRIDE'
-      sourceLabel = 'اختصاصی فعالیت (بازنویسی)'
-      effectiveValue = overrideValue
-    } else if (groupValue !== null) {
-      source = 'GROUP'
-      sourceLabel = `ارث‌رسیده از گروه «${activity.group?.name ?? ''}»`
-      effectiveValue = groupValue
-    }
-    return {
-      categoryId: c.id,
-      name: c.name,
-      code: c.code,
-      isActive: c.isActive,
-      source,
-      sourceLabel,
-      groupValue,
-      overrideValue,
-      effectiveValue,
-    }
-  })
-
-  const totalA = sumAllowances(
-    cats.filter((c) => c.isActive && c.effectiveValue !== null).map((c) => ({ categoryId: c.categoryId, percentValue: c.effectiveValue ?? 0 }))
-  )
-
-  return {
-    method,
-    methodLabel: ALLOWANCE_METHOD_LABELS[method as keyof typeof ALLOWANCE_METHOD_LABELS] ?? method,
-    formula: ALLOWANCE_METHOD_FORMULAS[method as keyof typeof ALLOWANCE_METHOD_FORMULAS] ?? '',
-    hasGroup: Boolean(activity.group),
-    groupId: activity.groupId,
-    groupName: activity.group?.name ?? null,
-    totalA,
-    categories: cats,
-  }
-}
-
-/** ثبت بازنویسی‌های فعالیت — با اعتبارسنجی روش ۲ (A < ۱۰۰٪) — FR-15 */
-export async function putActivityAllowances(
-  activityId: string,
-  overrides: { categoryId: string; percentValue: number | null }[],
-  expectedUpdatedAt?: string
-) {
-  const activity = await db.activity.findUnique({ where: { id: activityId }, include: { station: { select: { project: { select: { id: true } } } } } })
-  if (!activity) throw new AppError('ACTIVITY_NOT_FOUND', 'فعالیت یافت نشد.', 404)
-  if (expectedUpdatedAt) {
-    const expected = new Date(expectedUpdatedAt).getTime()
-    if (Math.abs(activity.updatedAt.getTime() - expected) > 1000) {
-      throw new AppError('CONFLICT', 'این فعالیت جای دیگری تغییر کرده؛ تازه‌سازی کنید.', 409)
-    }
-  }
-  const projectId = activity.station.project.id
-
-  await db.$transaction(async (tx) => {
-    for (const v of overrides) {
-      const category = await tx.allowanceCategory.findUnique({ where: { id: v.categoryId } })
-      if (!category || category.projectId !== projectId) {
-        throw new AppError('CATEGORY_NOT_IN_PROJECT', 'یکی از دسته‌های انتخاب‌شده به این پروژه تعلق ندارد.', 422)
-      }
-      if (v.percentValue === null) {
-        await tx.activityAllowanceOverride.deleteMany({ where: { activityId, categoryId: v.categoryId } })
-      } else {
-        await tx.activityAllowanceOverride.upsert({
-          where: { activityId_categoryId: { activityId, categoryId: v.categoryId } },
-          create: { activityId, categoryId: v.categoryId, percentValue: v.percentValue },
-          update: { percentValue: v.percentValue },
-        })
-      }
-    }
-  })
-
-  // اعتبارسنجی مجموع پس از تغییر — FR-15
-  const effective = await getEffectiveAllowances(activityId)
-  validateAllowanceTotal(effective.totalA, effective.method as 'PERCENT_OF_NT' | 'SHARE_OF_ST')
-
-  await db.calculationRun.updateMany({ where: { projectId }, data: { status: 'STALE' } })
-  await recordAudit({
-    entityType: 'Activity', entityId: activityId, action: 'UPDATE', entityName: activity.name,
-    after: { allowanceOverrides: overrides }, projectId,
-  })
-  return effective
-}
+// ── مدیریت گروه‌های فعالیت — فقط طبقه‌بندی (سند جلسه اول §۵) ──
+// پس از migration، GroupAllowance دیگر منبع دوم محاسبه نیست؛
+// مقادیر مجاز از مدل سلسله‌مراتبی جدید (effective-allowance-service) خوانده می‌شوند.
 
 /** تنظیمات محاسباتی پروژه — FR-15 / ۱۰.۱ */
 export async function getCalcSettings(projectId: string) {
@@ -398,13 +203,18 @@ export async function putCalcSettings(
   // تغییر روش محاسبه → نتایج قبلی نیازمند محاسبه مجدد (Snapshot حفظ می‌شود) — FR-27
   await db.calculationRun.updateMany({ where: { projectId }, data: { status: 'STALE' } })
 
-  // اگر روش ۲ انتخاب شده، تمام فعالیت‌ها را از نظر A < ۱۰۰٪ بازبینی کن — FR-15
+  // اگر روش ۲ انتخاب شده، تمام عناصر را از نظر P < ۱۰۰٪ بازبینی کن — FR-15 + جلسه اول §۳
   if (input.allowanceMethod === 'SHARE_OF_ST') {
     const activities = await db.activity.findMany({ where: { station: { projectId } }, select: { id: true, name: true } })
     const violations: { activityId: string; activityName: string; totalA: number }[] = []
     for (const a of activities) {
-      const eff = await getEffectiveAllowances(a.id)
-      if (eff.totalA >= 1) violations.push({ activityId: a.id, activityName: a.name, totalA: eff.totalA })
+      const resolution = await resolveForActivity(a.id)
+      for (const [, elRes] of resolution.elements) {
+        if (elRes.summary.totalPercent >= 1) {
+          violations.push({ activityId: a.id, activityName: a.name, totalA: elRes.summary.totalPercent })
+          break // یک عنصر متخلف برای هر فعالیت کافی است
+        }
+      }
     }
     if (violations.length > 0) {
       await putProjectSettings(projectId, { [PROJECT_SETTING_KEYS.allowanceMethod]: 'PERCENT_OF_NT' })

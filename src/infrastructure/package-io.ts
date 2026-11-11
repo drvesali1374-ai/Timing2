@@ -41,7 +41,9 @@ export const SECTION_TABLES: Record<string, DomainTable[]> = {
   settings: ['projectSetting'],
   structure: ['station', 'activity', 'workElement', 'activityAllowanceOverride'],
   operators: ['operator'],
-  groupsAndAllowances: ['activityGroup', 'allowanceCategory', 'groupAllowance'],
+  // تعریف مرکزی + تخصیص‌های سلسله‌مراتبی (جلسه اول) —
+  // جداول قدیمی گروه/دسته نیز برای سازگاری بسته‌های قدیمی منتقل می‌شوند
+  groupsAndAllowances: ['activityGroup', 'allowanceCategory', 'groupAllowance', 'allowanceDefinition', 'allowanceAssignment'],
   // ارزیابی‌های ثبت‌شدهٔ عناصر نیز بخشی از دادهٔ وستینگهاوس‌اند — FR-25
   ratingTables: ['ratingTable', 'ratingTableGrade', 'ratingAssessment'],
   rawObservations: ['studySession', 'cycleObservation', 'timelineLane', 'elementObservation'],
@@ -152,12 +154,15 @@ const FK_MAP: Record<string, string[]> = {
   station: ['projectId'],
   activityGroup: ['projectId'],
   allowanceCategory: ['projectId'],
+  allowanceDefinition: ['projectId'],
   operator: ['projectId'],
   ratingTable: ['projectId'],
   activity: ['stationId', 'groupId'],
   ratingTableGrade: ['ratingTableId'],
   groupAllowance: ['groupId', 'categoryId'],
   activityAllowanceOverride: ['activityId', 'categoryId'],
+  // scopeId چندشکلی است و در remapProjectData به‌صورت اختصاصی بازنویسی می‌شود
+  allowanceAssignment: ['definitionId'],
   workElement: ['activityId'],
   studySession: ['activityId', 'operatorId'],
   ratingAssessment: ['workElementId', 'ratingTableId'],
@@ -168,6 +173,14 @@ const FK_MAP: Record<string, string[]> = {
   chartEdge: ['projectId', 'sourceNodeId', 'targetNodeId'],
   calculationRun: ['projectId'],
   finalizationInfo: ['projectId'],
+}
+
+/** جدول مقصد scope چندشکلی تخصیص الونس — remap */
+const ASSIGNMENT_SCOPE_TABLE: Record<string, string> = {
+  PROJECT: 'project',
+  STATION: 'station',
+  ACTIVITY: 'activity',
+  WORK_ELEMENT: 'workElement',
 }
 
 /** فیلدهای FK اختیاری — اگر مبدأ کپی نشده باشد null می‌شوند؛
@@ -219,6 +232,17 @@ function remapProjectData(
           break
         }
       }
+      // بازنویسی چندشکلی scope تخصیص الونس — scope مقصد باید کپی شده باشد
+      if (!drop && table === 'allowanceAssignment') {
+        const scopeTable = ASSIGNMENT_SCOPE_TABLE[String(row.scopeType)]
+        const mappedScope = scopeTable ? idMap.get(`${scopeTable}:${String(row.scopeId)}`) : undefined
+        if (mappedScope) {
+          newRow.scopeId = mappedScope
+        } else {
+          // scope در بخش انتخاب‌شده کپی نشده؛ تخصیص بدون مقصد بی‌معناست
+          drop = true
+        }
+      }
       if (!drop) kept.push(newRow)
     }
     out[table] = kept
@@ -235,6 +259,7 @@ function reverseFkTable(table: string, fk: string): string {
   if (fk === 'stationId') return 'station'
   if (fk === 'groupId') return 'activityGroup'
   if (fk === 'categoryId') return 'allowanceCategory'
+  if (fk === 'definitionId') return 'allowanceDefinition'
   if (fk === 'activityId') return 'activity'
   if (fk === 'ratingTableId') return 'ratingTable'
   if (fk === 'operatorId') return 'operator'
@@ -251,7 +276,7 @@ export async function importProjectPackage(jsonText: string): Promise<{ projectI
   const parsed = await validateProjectPackage(jsonText)
   const newName = `${String(parsed.project.name)} (ورودی)`
 
-  return db.$transaction(async (tx) => {
+  const result = await db.$transaction(async (tx) => {
     const data = remapProjectData(parsed.data as Record<string, Record<string, unknown>[]>, randomUUID())
     if (data.project?.[0]) {
       data.project[0].name = newName
@@ -273,8 +298,13 @@ export async function importProjectPackage(jsonText: string): Promise<{ projectI
         actor: 'کاربر محلی',
       },
     })
-    return { projectId: newProjectId, name: newName }
+    return { projectId: newProjectId }
   })
+  // بسته‌های قدیمی (schema v1) تعریف‌های مرکزی ندارند —
+  // مهاجرت idempotent پس از درج اجرا می‌شود (§۴)
+  const { migrateProjectAllowancesIfNeeded } = await import('../application/effective-allowance-service')
+  await migrateProjectAllowancesIfNeeded(result.projectId)
+  return { projectId: result.projectId, name: newName }
 }
 
 /** کپی پروژه با انتخاب بخش‌ها — FR-01
@@ -307,7 +337,7 @@ export async function duplicateProject(
   const tables = tablesForSections(selected)
   const data = await dumpDomain(['project', ...tables], projectId)
 
-  return db.$transaction(async (tx) => {
+  const result = await db.$transaction(async (tx) => {
     const remapped = remapProjectData(data as Record<string, Record<string, unknown>[]>, randomUUID())
     if (remapped.project?.[0]) {
       remapped.project[0].name = newProjectName
@@ -317,7 +347,6 @@ export async function duplicateProject(
     // کپی عادی هرگز تاریخچه و نهایی‌سازی پروژه مبدأ را منتقل نمی‌کند — FR-01
     delete remapped.finalizationInfo
     await loadDomain(tx, remapped)
-    // اگر بخش جدول‌های ارزیابی انتخاب نشده، جدول Seed پیش‌فرض ساخته می‌شود (FR-13)
     if (!remapped.ratingTable || remapped.ratingTable.length === 0) {
       const { WESTINGHOUSE_SEED_GRADES, WESTINGHOUSE_SEED_META } = await import('./seed-data')
       const table = await tx.ratingTable.create({
@@ -356,4 +385,8 @@ export async function duplicateProject(
     })
     return { projectId: newProjectId }
   })
+  // مبدأ مهاجرت‌نشده (داده قدیمی بدون تعریف مرکزی) — مهاجرت idempotent
+  const { migrateProjectAllowancesIfNeeded } = await import('../application/effective-allowance-service')
+  await migrateProjectAllowancesIfNeeded(result.projectId)
+  return result
 }

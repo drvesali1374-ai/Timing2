@@ -305,33 +305,46 @@ export default function AnalysisContent({ activityId }: { activityId: string }) 
             <div className="rounded-xl bg-muted/60 p-3">
               <p className="text-xs text-muted-foreground">مجموع مجاز (A)</p>
               <p className="mt-1 font-bold">
-                {formatPercent(analysis.allowances.totalA, prefs, 2)}
-                {analysis.settings.allowanceMethod === 'SHARE_OF_ST' && analysis.allowances.totalA >= 1 ? (
+                {formatPercent(analysis.allowances.summary.totalPercent, prefs, 2)}
+                {analysis.settings.allowanceMethod === 'SHARE_OF_ST' && analysis.allowances.summary.totalPercent >= 1 ? (
                   <span className="mr-2 text-xs font-bold text-red">≥ ۱۰۰٪ — محاسبه ممنوع</span>
                 ) : null}
               </p>
             </div>
           </div>
-          {analysis.allowances.categories.length > 0 ? (
+          {analysis.allowances.rows.length > 0 ? (
             <div className="flex flex-wrap gap-2">
-              {analysis.allowances.categories
-                .filter((c) => c.effectiveValue !== null)
-                .map((c) => (
-                  <Badge key={c.categoryId} variant="outline" className={cn('gap-1', !c.isActive && 'opacity-50')}>
-                    {c.name}: {formatPercent(c.effectiveValue, prefs, 2)}
+              {analysis.allowances.rows
+                .filter((r) => r.status !== 'EXCLUDED')
+                .map((r) => (
+                  <Badge key={r.definitionId} variant="outline" className={cn('gap-1', r.status === 'EXCLUDED' && 'opacity-50')}>
+                    {r.title}:{' '}
+                    {r.valueType === 'PERCENT'
+                      ? formatPercent(r.percentValue, prefs, 2)
+                      : `${formatTimeValue(r.timeValueSeconds, prefs, 1)}s`}
                     <span className="text-[10px] text-muted-foreground">
-                      {c.source === 'OVERRIDE' ? '(اختصاصی فعالیت)' : c.source === 'GROUP' ? `(گروه: ${analysis.allowances.groupName ?? ''})` : ''}
+                      {r.status === 'CUSTOM'
+                        ? '(اختصاصی)'
+                        : r.status === 'OVERRIDDEN'
+                          ? '(جایگزین‌شده)'
+                          : `(${r.sourceScopeLabel ?? ''})`}
                     </span>
                   </Badge>
                 ))}
-              {analysis.allowances.categories.every((c) => c.effectiveValue === null) && (
-                <p className="text-sm text-muted-foreground">
-                  هیچ دسته مجازی مقدار مؤثر ندارد؛ در «گروه‌ها و مجازها» مقدار تعریف کنید.
-                </p>
+              {analysis.allowances.perCycleTotal > 0 && (
+                <Badge variant="outline" className="num gap-1">
+                  الونس‌های هر چرخه: {formatTimeValue(analysis.allowances.perCycleTotal, prefs, 1)}s
+                  <span className="text-[10px] text-muted-foreground">(یک‌بار در سطح چرخه)</span>
+                </Badge>
+              )}
+              {analysis.allowances.summary.count === 0 && (
+                <p className="text-sm text-muted-foreground">هیچ الونس مؤثری ندارد؛ مجموع A صفر است.</p>
               )}
             </div>
           ) : (
-            <p className="text-sm text-muted-foreground">دسته مجازی تعریف نشده است؛ مجموع A صفر است.</p>
+            <p className="text-sm text-muted-foreground">
+              الونسی تعریف نشده است؛ در مرحله «مجازها و الونس‌ها» تعریف کنید.
+            </p>
           )}
           <p className="text-xs text-muted-foreground">
             نسخهٔ فرمول {analysis.settings.formulaVersion} — تشخیص غیرعادی: امتیاز Z تعدیل‌شده (آستانه{' '}

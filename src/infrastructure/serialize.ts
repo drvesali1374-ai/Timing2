@@ -7,8 +7,8 @@
 import { db } from '@/lib/db'
 import type { Prisma } from '@prisma/client'
 
-/** نسخه ساختار داده بسته/پشتیبان */
-export const SCHEMA_VERSION = 1
+/** نسخه ساختار داده بسته/پشتیبان — v۲: الونس‌های سلسله‌مراتبی (جلسه اول) */
+export const SCHEMA_VERSION = 2
 
 /** نام جداول دامنه به ترتیب درج (والد قبل از فرزند) */
 export const DOMAIN_TABLES_INSERT_ORDER = [
@@ -17,6 +17,7 @@ export const DOMAIN_TABLES_INSERT_ORDER = [
   'station',
   'activityGroup',
   'allowanceCategory',
+  'allowanceDefinition',
   'operator',
   'ratingTable',
   'activity',
@@ -24,6 +25,7 @@ export const DOMAIN_TABLES_INSERT_ORDER = [
   'groupAllowance',
   'activityAllowanceOverride',
   'workElement',
+  'allowanceAssignment',
   'studySession',
   'ratingAssessment',
   'cycleObservation',
@@ -71,7 +73,7 @@ function whereForProject(table: DomainTable, projectId: string): Record<string, 
   // جدول خود پروژه با کلید اصلی فیلتر می‌شود
   if (table === 'project') return { id: projectId }
   const direct: DomainTable[] = [
-    'projectSetting', 'station', 'activityGroup', 'allowanceCategory',
+    'projectSetting', 'station', 'activityGroup', 'allowanceCategory', 'allowanceDefinition',
     'operator', 'ratingTable', 'chartNode', 'chartEdge', 'calculationRun', 'finalizationInfo',
   ]
   if (direct.includes(table)) return { projectId }
@@ -85,6 +87,9 @@ function whereForProject(table: DomainTable, projectId: string): Record<string, 
       return { group: { projectId } }
     case 'activityAllowanceOverride':
       return { activity: { station: { projectId } } }
+    case 'allowanceAssignment':
+      // همهٔ تخصیص‌های تعریف‌های همین پروژه — scopeها همیشه درون پروژه‌اند (اعتبارسنجی سرویس)
+      return { definition: { projectId } }
     case 'workElement':
       return { activity: { station: { projectId } } }
     case 'studySession':
@@ -146,6 +151,7 @@ const FK_DEPENDENCIES: Record<string, { table: string; fk: string; nullable: boo
   station: [{ table: 'project', fk: 'projectId', nullable: false }],
   activityGroup: [{ table: 'project', fk: 'projectId', nullable: false }],
   allowanceCategory: [{ table: 'project', fk: 'projectId', nullable: false }],
+  allowanceDefinition: [{ table: 'project', fk: 'projectId', nullable: false }],
   operator: [{ table: 'project', fk: 'projectId', nullable: false }],
   ratingTable: [{ table: 'project', fk: 'projectId', nullable: false }],
   activity: [
@@ -160,6 +166,10 @@ const FK_DEPENDENCIES: Record<string, { table: string; fk: string; nullable: boo
   activityAllowanceOverride: [
     { table: 'activity', fk: 'activityId', nullable: false },
     { table: 'allowanceCategory', fk: 'categoryId', nullable: false },
+  ],
+  allowanceAssignment: [
+    // scopeId چندشکلی است — در enforceReferentialIntegrity به‌صورت اختصاصی بررسی می‌شود
+    { table: 'allowanceDefinition', fk: 'definitionId', nullable: false },
   ],
   workElement: [{ table: 'activity', fk: 'activityId', nullable: false }],
   studySession: [
@@ -188,6 +198,14 @@ const FK_DEPENDENCIES: Record<string, { table: string; fk: string; nullable: boo
   ],
   calculationRun: [{ table: 'project', fk: 'projectId', nullable: false }],
   finalizationInfo: [{ table: 'project', fk: 'projectId', nullable: false }],
+}
+
+/** جدول مقصد scope چندشکلی تخصیص الونس */
+const ASSIGNMENT_SCOPE_TABLE: Record<string, string> = {
+  PROJECT: 'project',
+  STATION: 'station',
+  ACTIVITY: 'activity',
+  WORK_ELEMENT: 'workElement',
 }
 
 /** پاکسازی ردیف‌های یتیم: هر ردیفی که FK اجباری‌اش به ردیف حذف‌شده
@@ -223,6 +241,16 @@ export function enforceReferentialIntegrity(
           }
           const parentSet = live.get(dep.table)
           if (!parentSet || !parentSet.has(String(value))) {
+            removed++
+            changed = true
+            return false
+          }
+        }
+        // بررسی چندشکلی scope تخصیص الونس — scope مقصد باید زنده باشد
+        if (table === 'allowanceAssignment') {
+          const scopeTable = ASSIGNMENT_SCOPE_TABLE[String(row.scopeType)]
+          const scopeSet = scopeTable ? live.get(scopeTable) : undefined
+          if (!scopeSet || !scopeSet.has(String(row.scopeId))) {
             removed++
             changed = true
             return false

@@ -141,31 +141,77 @@ export interface CategoryDto {
   overrideCount: number
 }
 
-export interface GroupAllowancesDto {
-  group: { id: string; name: string }
-  values: { categoryId: string; name: string; code: string | null; isActive: boolean; percentValue: number | null }[]
-  totalA: number
+export interface AllowanceDefinitionDto {
+  id: string
+  title: string
+  code: string | null
+  description: string | null
+  defaultValueType: string | null
+  defaultValuePercent: number | null
+  defaultTimeSeconds: number | null
+  isActive: boolean
+  isArchived: boolean
+  sortOrder: number
+  assignmentCount: number
+  createdAt: string
+  updatedAt: string
 }
 
-export interface EffectiveAllowancesDto {
-  method: string
-  methodLabel: string
-  formula: string
-  hasGroup: boolean
-  groupId: string | null
-  groupName: string | null
-  totalA: number
-  categories: {
-    categoryId: string
-    name: string
-    code: string | null
-    isActive: boolean
-    source: 'GROUP' | 'OVERRIDE' | 'NONE'
-    sourceLabel: string
-    groupValue: number | null
-    overrideValue: number | null
-    effectiveValue: number | null
+/** یک ردیف الونس resolve‌شده — جلسه اول (§۲.۴) */
+export interface ResolvedAllowanceRowDto {
+  definitionId: string
+  title: string
+  code: string | null
+  status: 'INHERITED' | 'OVERRIDDEN' | 'CUSTOM' | 'EXCLUDED'
+  valueType: 'PERCENT' | 'FIXED_TIME'
+  percentValue: number | null
+  timeValueSeconds: number | null
+  applicationBasis: 'PER_ELEMENT_EXECUTION' | 'PER_CYCLE' | null
+  sourceScopeType: string | null
+  sourceScopeLabel: string | null
+  hasLocalDecision: boolean
+  parentValue: number | null
+  parentScopeType: string | null
+  needsAggregationRule: boolean
+  note: string | null
+}
+
+export interface EffectiveAllowanceSummaryDto {
+  count: number
+  totalPercent: number
+  perExecutionSeconds: number
+  perCycleSeconds: number
+  needsAggregationCount: number
+}
+
+/** الونس‌های یک scope + resolve کامل — جلسه اول (§۵) */
+export interface ScopeAllowancesDto {
+  scope: { type: 'PROJECT' | 'STATION' | 'ACTIVITY' | 'WORK_ELEMENT'; id: string; label: string; projectId: string }
+  chain: { type: string; id: string; label: string }[]
+  descendants: { stations: number; activities: number; elements: number }
+  settings: { method: string; methodLabel: string; formula: string }
+  definitions: AllowanceDefinitionDto[]
+  resolved: { rows: ResolvedAllowanceRowDto[]; summary: EffectiveAllowanceSummaryDto }
+  localAssignments: {
+    definitionId: string
+    mode: string
+    valueType: string
+    percentValue: number | null
+    timeValueSeconds: number | null
+    applicationBasis: string | null
+    updatedAt: string
   }[]
+  lastModifiedAt: string | null
+}
+
+/** عملیات تخصیص الونس — §۶ */
+export interface AllowanceOpInput {
+  definitionId: string
+  action: 'SET' | 'EXCLUDE' | 'RESTORE' | 'REMOVE'
+  valueType?: 'PERCENT' | 'FIXED_TIME'
+  percentValue?: number | null
+  timeValueSeconds?: number | null
+  applicationBasis?: 'PER_ELEMENT_EXECUTION' | 'PER_CYCLE' | null
 }
 
 export interface RatingTableDto {
@@ -500,10 +546,6 @@ export const structureApi = {
   deleteElement: (id: string) => api.del<{ deleted: boolean; removedCounts: { observations: number; hasRating: boolean } }>(`/api/elements/${id}`),
   reorderElements: (activityId: string, ids: string[]) =>
     api.post<{ reordered: boolean }>(`/api/activities/${activityId}/elements/reorder`, { ids }),
-
-  effectiveAllowances: (activityId: string) => api.get<EffectiveAllowancesDto>(`/api/activities/${activityId}/allowances`),
-  putActivityAllowances: (activityId: string, overrides: { categoryId: string; percentValue: number | null }[], expectedUpdatedAt?: string) =>
-    api.put<EffectiveAllowancesDto>(`/api/activities/${activityId}/allowances`, { overrides }, undefined),
 }
 
 // ── اپراتورها ──
@@ -516,24 +558,38 @@ export const operatorsApi = {
   delete: (id: string) => api.del<{ deleted: boolean; removedCounts: { sessions: number; observations: number } }>(`/api/operators/${id}`),
 }
 
-// ── گروه‌ها و مجازها ──
+// ── مجازها و الونس‌ها — جلسه اول: مدل سلسله‌مراتبی ──
 export const allowancesApi = {
-  categories: (projectId: string) => api.get<{ items: CategoryDto[] }>(`/api/projects/${projectId}/allowance-categories`),
-  createCategory: (projectId: string, body: Record<string, unknown>) =>
-    api.post<{ category: CategoryDto }>(`/api/projects/${projectId}/allowance-categories`, body),
-  updateCategory: (id: string, body: Record<string, unknown>, changeId?: string) =>
-    api.put<{ category: CategoryDto }>(`/api/allowance-categories/${id}`, body, changeId),
-  deleteCategory: (id: string) => api.del<{ deleted: boolean; removedCounts: { groupValues: number; overrides: number } }>(`/api/allowance-categories/${id}`),
+  // تعریف‌های مرکزی (§۲.۲)
+  definitions: (projectId: string) => api.get<{ items: AllowanceDefinitionDto[] }>(`/api/projects/${projectId}/allowance-definitions`),
+  createDefinition: (projectId: string, body: Record<string, unknown>) =>
+    api.post<{ definition: AllowanceDefinitionDto }>(`/api/projects/${projectId}/allowance-definitions`, body),
+  updateDefinition: (id: string, body: Record<string, unknown>, changeId?: string) =>
+    api.put<{ definition: AllowanceDefinitionDto }>(`/api/allowance-definitions/${id}`, body, changeId),
+  deleteDefinition: (id: string) =>
+    api.del<{ archived: boolean; assignmentCount: number }>(`/api/allowance-definitions/${id}`),
 
+  // تخصیص در چهار سطح — resolve + عملیات (§۵)
+  projectAllowances: (projectId: string) => api.get<ScopeAllowancesDto>(`/api/projects/${projectId}/allowances`),
+  stationAllowances: (stationId: string) => api.get<ScopeAllowancesDto>(`/api/stations/${stationId}/allowances`),
+  activityAllowances: (activityId: string) => api.get<ScopeAllowancesDto>(`/api/activities/${activityId}/allowances`),
+  elementAllowances: (elementId: string) => api.get<ScopeAllowancesDto>(`/api/elements/${elementId}/allowances`),
+  putProjectAllowances: (projectId: string, ops: AllowanceOpInput[], expectedUpdatedAt?: string) =>
+    api.put<ScopeAllowancesDto>(`/api/projects/${projectId}/allowances`, { ops, expectedUpdatedAt }),
+  putStationAllowances: (stationId: string, ops: AllowanceOpInput[], expectedUpdatedAt?: string) =>
+    api.put<ScopeAllowancesDto>(`/api/stations/${stationId}/allowances`, { ops, expectedUpdatedAt }),
+  putActivityAllowances: (activityId: string, ops: AllowanceOpInput[], expectedUpdatedAt?: string) =>
+    api.put<ScopeAllowancesDto>(`/api/activities/${activityId}/allowances`, { ops, expectedUpdatedAt }),
+  putElementAllowances: (elementId: string, ops: AllowanceOpInput[], expectedUpdatedAt?: string) =>
+    api.put<ScopeAllowancesDto>(`/api/elements/${elementId}/allowances`, { ops, expectedUpdatedAt }),
+
+  // گروه‌های فعالیت — فقط طبقه‌بندی (پس از migration منبع دوم محاسبه نیست)
   groups: (projectId: string) => api.get<{ items: GroupDto[] }>(`/api/projects/${projectId}/groups`),
   createGroup: (projectId: string, body: { name: string; description?: string | null }) =>
     api.post<{ group: GroupDto }>(`/api/projects/${projectId}/groups`, body),
   updateGroup: (id: string, body: Record<string, unknown>, changeId?: string) =>
     api.put<{ group: GroupDto }>(`/api/groups/${id}`, body, changeId),
   deleteGroup: (id: string) => api.del<{ deleted: boolean; removedCounts: { values: number; activities: number } }>(`/api/groups/${id}`),
-  groupAllowances: (groupId: string) => api.get<GroupAllowancesDto>(`/api/groups/${groupId}/allowances`),
-  putGroupAllowances: (groupId: string, values: { categoryId: string; percentValue: number | null }[]) =>
-    api.put<GroupAllowancesDto>(`/api/groups/${groupId}/allowances`, { values }),
 }
 
 // ── وستینگهاوس ──
@@ -658,7 +714,15 @@ export interface ActivityAnalysisDto {
     outlierMethod: string
     outlierThreshold: number
   }
-  allowances: EffectiveAllowancesDto
+  allowances: {
+    method: string
+    methodLabel: string
+    formula: string
+    rows: ResolvedAllowanceRowDto[]
+    summary: EffectiveAllowanceSummaryDto
+    perCycleTotal: number
+    needsAggregation: { title: string; sourceScopeLabel: string | null; timeValueSeconds: number }[]
+  }
   sampleProgress: {
     targetSampleCount: number | null
     validCycles: number | null

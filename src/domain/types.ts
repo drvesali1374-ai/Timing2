@@ -78,6 +78,55 @@ export const ALLOWANCE_METHOD_FORMULAS: Record<AllowanceMethod, string> = {
   SHARE_OF_ST: 'ST = NT / (1 − A)',
 }
 
+// ── مدل جدید الونس‌ها — جلسه اول بازطراحی ──
+
+/** سطوح تخصیص الونس — PROJECT همان سطح خط تولید است (§۲.۱) */
+export const ALLOWANCE_SCOPES = ['PROJECT', 'STATION', 'ACTIVITY', 'WORK_ELEMENT'] as const
+export type AllowanceScopeType = (typeof ALLOWANCE_SCOPES)[number]
+
+export const ALLOWANCE_SCOPE_LABELS: Record<AllowanceScopeType, string> = {
+  PROJECT: 'خط تولید (پروژه)',
+  STATION: 'ایستگاه',
+  ACTIVITY: 'فعالیت',
+  WORK_ELEMENT: 'عنصر کاری',
+}
+
+/** حالت تخصیص: مقدار فعال یا حذف از ارث‌بری */
+export const ALLOWANCE_MODES = ['ACTIVE', 'EXCLUDE'] as const
+export type AllowanceMode = (typeof ALLOWANCE_MODES)[number]
+
+/** نوع مقدار الونس */
+export const ALLOWANCE_VALUE_TYPES = ['PERCENT', 'FIXED_TIME'] as const
+export type AllowanceValueType = (typeof ALLOWANCE_VALUE_TYPES)[number]
+
+export const ALLOWANCE_VALUE_TYPE_LABELS: Record<AllowanceValueType, string> = {
+  PERCENT: 'درصدی',
+  FIXED_TIME: 'زمان ثابت',
+}
+
+/** مبنای وقوع زمان ثابت (§۲.۳) */
+export const ALLOWANCE_BASES = ['PER_ELEMENT_EXECUTION', 'PER_CYCLE'] as const
+export type AllowanceBasis = (typeof ALLOWANCE_BASES)[number]
+
+export const ALLOWANCE_BASIS_LABELS: Record<AllowanceBasis, string> = {
+  PER_ELEMENT_EXECUTION: 'به‌ازای هر اجرای عنصر',
+  PER_CYCLE: 'یک‌بار در هر چرخه',
+}
+
+/** وضعیت ارث‌بری مقدار مؤثر (§۲.۴) */
+export const ALLOWANCE_STATUSES = ['INHERITED', 'OVERRIDDEN', 'CUSTOM', 'EXCLUDED'] as const
+export type AllowanceStatus = (typeof ALLOWANCE_STATUSES)[number]
+
+export const ALLOWANCE_STATUS_LABELS: Record<AllowanceStatus, string> = {
+  INHERITED: 'ارث‌رسیده',
+  OVERRIDDEN: 'جایگزین‌شده',
+  CUSTOM: 'اختصاصی',
+  EXCLUDED: 'حذف‌شده از ارث‌بری',
+}
+
+/** سقف مجاز زمان ثابت (ثانیه) — محافظ مهندسی در برابر خطای داده */
+export const MAX_FIXED_TIME_SECONDS = 86_400
+
 // ── روش تجمیع چند اپراتور — ۱۰.۱ ──
 export const AGGREGATION_METHODS = ['WEIGHTED_BY_COUNT', 'EQUAL_OPERATOR_MEAN'] as const
 export type AggregationMethod = (typeof AGGREGATION_METHODS)[number]
@@ -122,7 +171,7 @@ export const STUDY_STAGES = [
   { key: 'info', label: 'مشخصات پروژه', desc: 'نام، خط تولید، محصول و تنظیمات محاسبات' },
   { key: 'structure', label: 'ساختار تولید', desc: 'ایستگاه‌ها، فعالیت‌ها و عناصر کاری' },
   { key: 'operators', label: 'اپراتورها', desc: 'معرفی اپراتورهای شرکت‌کننده در مطالعه' },
-  { key: 'allowances', label: 'گروه‌ها و مجازها', desc: 'گروه فعالیت، دسته‌های مجاز و بازنویسی' },
+  { key: 'allowances', label: 'مجازها و الونس‌ها', desc: 'تعریف مرکزی الونس، تخصیص سلسله‌مراتبی و گروه‌های فعالیت' },
   { key: 'westinghouse', label: 'ارزیابی وستینگهاوس', desc: 'جدول مرجع و ارزیابی عناصر کاری' },
   { key: 'timing', label: 'زمان‌سنجی', desc: 'جلسه، جدول چرخه‌محور، Paste از Excel' },
   { key: 'analysis', label: 'تحلیل نتایج', desc: 'آمار، داده غیرعادی و مقایسه اپراتورها' },

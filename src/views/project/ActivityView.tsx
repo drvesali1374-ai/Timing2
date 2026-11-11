@@ -53,7 +53,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import { ConfirmDeleteDialog, EmptyState } from '@/components/common/Feedback'
 import { HelpDot } from '@/components/common/HelpDot'
-import { PercentInput, PersianNumberInput } from '@/components/common/PersianNumberInput'
+import { PersianNumberInput } from '@/components/common/PersianNumberInput'
 import { SaveIndicator } from '@/components/common/SaveIndicator'
 import { SortableList } from '@/components/common/SortableList'
 import { useAutosave, type SaveStatus } from '@/hooks/use-autosave'
@@ -63,7 +63,6 @@ import {
   allowancesApi,
   structureApi,
   type ActivityDto,
-  type EffectiveAllowancesDto,
   type ElementDto,
   type GroupDto,
 } from '@/lib/api/endpoints'
@@ -83,6 +82,7 @@ import { formatDate, formatDateTime, formatInt, formatPercent, formatTimeValue }
 import { cn } from '@/lib/utils'
 import TimingView from './TimingView'
 import AnalysisContent from './analysis/AnalysisContent'
+import { AllowanceSection } from './allowances/AllowanceSection'
 
 type Prefs = ReturnType<typeof useDisplayPrefs>
 type TabKey = 'info' | 'elements' | 'timing' | 'analysis'
@@ -131,13 +131,6 @@ const TARGET_SAMPLE_HELP = {
   input: 'عدد صحیح بزرگ‌تر یا مساوی ۱؛ خالی بگذارید تا هدفی تعیین نشده باشد.',
   example: 'مثلاً ۱۵ چرخه برای کل فعالیت — هر اپراتور سهم خود را از همین هدف ثبت می‌کند.',
   note: 'رسیدن به هدف صرفاً به معنای ثبت تعداد هدف است و معادل اثبات کفایت آماری نیست؛ شاخص‌های پراکندگی و عدم‌قطعیت در مرحله «تحلیل نتایج» نمایش داده می‌شوند.',
-} as const
-
-const ALLOWANCES_HELP = {
-  what: 'مقدار نهایی هر دسته مجاز برای این فعالیت: مقدار گروه به ارث می‌رسد مگر آنکه در ستون «بازنویسی اختصاصی» مقدار دیگری ثبت شود. منبع هر مقدار مشخص است.',
-  input: 'ستون بازنویسی را فقط برای دسته‌هایی که باید با گروه تفاوت داشته باشند پر کنید؛ خالی بگذارید تا مقدار گروه اعمال شود.',
-  example: 'استراحت شخصی ۵٪ + نیازهای طبیعی ۳٪ ⇒ A=۸٪؛ صرفاً مثال است و نرخ مصوب شرکت نیست.',
-  note: 'مجموع A فقط از دسته‌های فعال ساخته می‌شود؛ روش اعمال (درصد از زمان نرمال یا سهم از زمان استاندارد) در سطح پروژه انتخاب می‌شود.',
 } as const
 
 const ACTIVITY_NAME_HELP = {
@@ -258,7 +251,7 @@ function ActivityScreen({ projectId, activityId }: { projectId: string; activity
     void qc.invalidateQueries({ queryKey: ['activities'] })
     void qc.invalidateQueries({ queryKey: ['elements'] })
     void qc.invalidateQueries({ queryKey: qk.groups(projectId) })
-    void qc.invalidateQueries({ queryKey: qk.activityAllowances(activityId) })
+    void qc.invalidateQueries({ queryKey: ['scope-allowances'] })
     void qc.invalidateQueries({ queryKey: qk.projectSummary(projectId) })
     void qc.invalidateQueries({ queryKey: qk.projects() })
     void qc.invalidateQueries({ queryKey: qk.ratingMatrix(projectId) })
@@ -459,13 +452,8 @@ function ActivityScreen({ projectId, activityId }: { projectId: string; activity
             </div>
           )}
 
-          {/* مجازهای مؤثر — FR-04 */}
-          <EffectiveAllowancesSection
-            projectId={projectId}
-            activityId={activityId}
-            prefs={prefs}
-            isMobile={isMobile}
-          />
+          {/* الونس‌ها و زمان‌های مجاز — جلسه اول (§۶) */}
+          <AllowanceSection projectId={projectId} scopeType="ACTIVITY" scopeId={activityId} />
 
           {/* عملیات */}
           <section className="card-premium p-5" aria-label="عملیات فعالیت">
@@ -682,384 +670,6 @@ function ActivityInfoForm({
   )
 }
 
-// ═══════════════════════════════════════════════════════════
-// مجازهای مؤثر — FR-04: ارث از گروه + بازنویسی اختصاصی
-// بدون گروه: EmptyState راهنما؛ با گروه: جدول دسکتاپ / کارت موبایل
-// ═══════════════════════════════════════════════════════════
-function EffectiveAllowancesSection({
-  projectId,
-  activityId,
-  prefs,
-  isMobile,
-}: {
-  projectId: string
-  activityId: string
-  prefs: Prefs
-  isMobile: boolean
-}) {
-  const qc = useQueryClient()
-  const navigate = useAppStore((s) => s.navigate)
-
-  const allowQ = useQuery({
-    queryKey: qk.activityAllowances(activityId),
-    queryFn: () => structureApi.effectiveAllowances(activityId),
-  })
-
-  return (
-    <section className="card-premium p-5" aria-label="مجازهای مؤثر فعالیت">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h3 className="flex items-center gap-1.5 text-sm font-extrabold">
-          <Tags className="size-4 text-brand" aria-hidden />
-          مجازهای مؤثر
-          <HelpDot label="مجازهای مؤثر" content={ALLOWANCES_HELP} />
-        </h3>
-        {allowQ.data?.hasGroup ? (
-          <Badge variant="outline" className="text-xs">
-            گروه: {allowQ.data.groupName}
-          </Badge>
-        ) : null}
-      </div>
-
-      {allowQ.isLoading ? (
-        <div className="mt-4 space-y-2">
-          <Skeleton className="h-10 w-full rounded-lg" />
-          <Skeleton className="h-10 w-full rounded-lg" />
-          <Skeleton className="h-10 w-full rounded-lg" />
-          <Skeleton className="h-12 w-full rounded-lg" />
-        </div>
-      ) : allowQ.isError ? (
-        <EmptyState
-          className="mt-3 py-6"
-          title="بارگذاری مجازهای فعالیت ناموفق بود"
-          description={allowQ.error instanceof Error ? allowQ.error.message : 'خطای نامشخص'}
-          action={
-            <Button
-              variant="outline"
-              onClick={() => qc.invalidateQueries({ queryKey: qk.activityAllowances(activityId) })}
-            >
-              تلاش مجدد
-            </Button>
-          }
-        />
-      ) : !allowQ.data ? (
-        <EmptyState
-          className="mt-3 py-6"
-          title="در حال بارگذاری مجازها…"
-        />
-      ) : !allowQ.data.hasGroup ? (
-        <EmptyState
-          className="mt-3 py-6"
-          icon={<Tags className="size-7" aria-hidden />}
-          title="این فعالیت به گروهی تخصیص نیافته؛ مجازی اعمال نمی‌شود"
-          description="مجازها در سطح گروه تعریف می‌شوند و فعالیت مقادیر گروه را به ارث می‌برد. برای فعال‌سازی، در فرم «مشخصات فعالیت» بالا یک گروه مجازها انتخاب کنید؛ گروه‌ها و دسته‌های مجاز در مرحله «گروه‌ها و مجازها» مدیریت می‌شوند."
-          action={
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => navigate({ name: 'project', projectId, stage: 'allowances' })}
-            >
-              مدیریت گروه‌ها و مجازها
-            </Button>
-          }
-        />
-      ) : (
-        <AllowancesOverrideEditor
-          key={activityId}
-          activityId={activityId}
-          projectId={projectId}
-          data={allowQ.data}
-          prefs={prefs}
-          isMobile={isMobile}
-        />
-      )}
-    </section>
-  )
-}
-
-// ── ویرایشگر بازنویسی مجازها — debounce ~600ms برای هر تغییر ──
-function AllowancesOverrideEditor({
-  activityId,
-  projectId,
-  data,
-  prefs,
-  isMobile,
-}: {
-  activityId: string
-  projectId: string
-  data: EffectiveAllowancesDto
-  prefs: Prefs
-  isMobile: boolean
-}) {
-  const qc = useQueryClient()
-
-  // درصد کاربر ↔ مقدار اعشاری API — FR-15
-  const [drafts, setDrafts] = useState<Record<string, number | null>>(() =>
-    Object.fromEntries(data.categories.map((c) => [c.categoryId, c.overrideValue]))
-  )
-  const serverRef = useRef<Record<string, number | null>>(
-    Object.fromEntries(data.categories.map((c) => [c.categoryId, c.overrideValue]))
-  )
-
-  // همگام‌سازی محافظه‌کارانه با داده سرور: دسته‌هایی که کاربر
-  // همین الان تغییر نداده از سرور تازه می‌شوند؛ تغییرات در جریان حفظ می‌شوند
-  useEffect(() => {
-    const nextServer = Object.fromEntries(data.categories.map((c) => [c.categoryId, c.overrideValue]))
-    setDrafts((prev) => {
-      const next: Record<string, number | null> = {}
-      let changed = false
-      for (const c of data.categories) {
-        const untouched = !(c.categoryId in prev) || prev[c.categoryId] === serverRef.current[c.categoryId]
-        next[c.categoryId] = untouched ? c.overrideValue : prev[c.categoryId]
-        if (next[c.categoryId] !== prev[c.categoryId]) changed = true
-      }
-      return changed ? next : prev
-    })
-    serverRef.current = nextServer
-  }, [data])
-
-  const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle')
-  const [saveError, setSaveError] = useState<string | null>(null)
-  const pendingRef = useRef<Record<string, number | null>>({})
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const inflightRef = useRef(false)
-
-  useEffect(() => {
-    return () => {
-      if (timerRef.current) clearTimeout(timerRef.current)
-    }
-  }, [])
-
-  const sendOverrides = async (overrides: { categoryId: string; percentValue: number | null }[]) => {
-    if (overrides.length === 0) return
-    if (inflightRef.current) {
-      // درخواست دیگر در جریان است — در صف ادغام می‌شود
-      for (const o of overrides) pendingRef.current[o.categoryId] = o.percentValue
-      return
-    }
-    inflightRef.current = true
-    setSaveStatus('saving')
-    setSaveError(null)
-    let ok = false
-    try {
-      const res = await structureApi.putActivityAllowances(activityId, overrides)
-      qc.setQueryData(qk.activityAllowances(activityId), res)
-      void qc.invalidateQueries({ queryKey: qk.projectSummary(projectId) })
-      void qc.invalidateQueries({ queryKey: qk.projects() })
-      setSaveStatus('saved')
-      ok = true
-    } catch (err) {
-      setSaveStatus('error')
-      setSaveError(err instanceof Error ? err.message : 'خطای نامشخص در ذخیره‌سازی')
-      toast.error(err instanceof Error ? err.message : 'ثبت بازنویسی مجاز ناموفق بود')
-      // داده ناموفق برای تلاش مجدد صریح در صف می‌ماند — FR-23
-      for (const o of overrides) pendingRef.current[o.categoryId] = o.percentValue
-      void qc.invalidateQueries({ queryKey: qk.activityAllowances(activityId) })
-    } finally {
-      inflightRef.current = false
-      if (ok) {
-        const pending = Object.entries(pendingRef.current)
-        pendingRef.current = {}
-        if (pending.length > 0) {
-          void sendOverrides(pending.map(([categoryId, percentValue]) => ({ categoryId, percentValue })))
-        }
-      }
-    }
-  }
-
-  const setOverride = (categoryId: string, v: number | null) => {
-    const clamped = v === null ? null : Math.min(v, MAX_PERCENT_DECIMAL)
-    setDrafts((s) => ({ ...s, [categoryId]: clamped }))
-    pendingRef.current[categoryId] = clamped
-    if (timerRef.current) clearTimeout(timerRef.current)
-    timerRef.current = setTimeout(() => {
-      const entries = Object.entries(pendingRef.current)
-      pendingRef.current = {}
-      void sendOverrides(entries.map(([cid, percentValue]) => ({ categoryId: cid, percentValue })))
-    }, OVERRIDE_DEBOUNCE_MS)
-  }
-
-  /** حذف بازنویسی و بازگشت به مقدار گروه — فوری، بدون debounce */
-  const removeOverride = (categoryId: string) => {
-    delete pendingRef.current[categoryId]
-    setDrafts((s) => ({ ...s, [categoryId]: null }))
-    void sendOverrides([{ categoryId, percentValue: null }])
-  }
-
-  const retrySave = () => {
-    const pending = Object.entries(pendingRef.current)
-    if (pending.length === 0) return
-    pendingRef.current = {}
-    setSaveStatus('dirty')
-    void sendOverrides(pending.map(([categoryId, percentValue]) => ({ categoryId, percentValue })))
-  }
-
-  const shareWarning = data.method === 'SHARE_OF_ST' && data.totalA >= 1
-
-  const sourceBadge = (cat: EffectiveAllowancesDto['categories'][number]) => {
-    if (cat.source === 'OVERRIDE') {
-      return (
-        <Badge className="max-w-40 truncate border-0 bg-amber-soft text-amber" title={cat.sourceLabel}>
-          {cat.sourceLabel}
-        </Badge>
-      )
-    }
-    if (cat.source === 'GROUP') {
-      return (
-        <Badge className="max-w-40 truncate border-0 bg-brand-soft text-brand" title={cat.sourceLabel}>
-          {cat.sourceLabel}
-        </Badge>
-      )
-    }
-    return (
-      <Badge variant="outline" className="text-faint">
-        {cat.sourceLabel}
-      </Badge>
-    )
-  }
-
-  const summaryRow = (
-    <div className="flex flex-wrap items-center justify-between gap-2">
-      <span className="text-sm font-bold">جمع A (دسته‌های فعال)</span>
-      <span className="flex flex-wrap items-center gap-1.5">
-        <Badge variant="outline" className="text-[10px]">
-          {data.methodLabel}
-        </Badge>
-        <Badge variant="outline" dir="ltr" className="num font-mono text-[10px]">
-          {data.formula}
-        </Badge>
-        <span className="num text-sm font-extrabold text-brand">{formatPercent(data.totalA, prefs)}</span>
-      </span>
-    </div>
-  )
-
-  const overrideInput = (cat: EffectiveAllowancesDto['categories'][number]) => (
-    <div className="flex items-center gap-1.5">
-      <PercentInput
-        value={drafts[cat.categoryId] ?? null}
-        onChange={(v) => setOverride(cat.categoryId, v)}
-        aria-label={`بازنویسی درصد دسته ${cat.name}`}
-      />
-      {cat.overrideValue !== null && (
-        <Button
-          variant="ghost"
-          size="icon"
-          className="size-7 shrink-0 text-red hover:text-red"
-          onClick={() => removeOverride(cat.categoryId)}
-          aria-label={`حذف بازنویسی دسته ${cat.name}`}
-          title="حذف بازنویسی و بازگشت به مقدار گروه"
-        >
-          <X className="size-3.5" aria-hidden />
-        </Button>
-      )}
-    </div>
-  )
-
-  return (
-    <div className="mt-4 space-y-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-xs leading-6 text-muted-foreground">
-          مقدار خالی در «بازنویسی اختصاصی» یعنی همان مقدار گروه اعمال می‌شود؛ منبع هر مقدار در ستون «منبع»
-          مشخص است.
-        </p>
-        <SaveIndicator status={saveStatus} onRetry={retrySave} error={saveError} />
-      </div>
-
-      {isMobile ? (
-        /* کارت موبایل — FR-30 */
-        <div className="space-y-3">
-          {data.categories.map((cat) => (
-            <div key={cat.categoryId} className={cn('card-premium space-y-2.5 p-4', !cat.isActive && 'opacity-60')}>
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <p className="truncate font-bold">{cat.name}</p>
-                  {cat.code && (
-                    <p className="num text-xs text-faint" dir="ltr">
-                      {cat.code}
-                    </p>
-                  )}
-                </div>
-                {sourceBadge(cat)}
-              </div>
-              {!cat.isActive && (
-                <Badge variant="outline" className="text-faint">
-                  غیرفعال — در A لحاظ نمی‌شود
-                </Badge>
-              )}
-              <Separator />
-              <div className="grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
-                <div>
-                  <p className="text-faint">مقدار ارثی</p>
-                  <p className="num mt-0.5 font-medium">{formatPercent(cat.groupValue, prefs)}</p>
-                </div>
-                <div>
-                  <p className="text-faint">مقدار مؤثر</p>
-                  <p className="num mt-0.5 font-bold">{formatPercent(cat.effectiveValue, prefs)}</p>
-                </div>
-                <div className="col-span-2">
-                  <p className="mb-1 text-faint">بازنویسی اختصاصی</p>
-                  {overrideInput(cat)}
-                </div>
-              </div>
-            </div>
-          ))}
-          <div className="card-premium p-4">{summaryRow}</div>
-        </div>
-      ) : (
-        /* جدول دسکتاپ */
-        <div className="card-premium overflow-hidden">
-          <div className="scroll-slim overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b bg-surface-2/70 text-right text-xs text-muted-foreground">
-                  <th className="px-4 py-2.5 font-bold">دسته مجاز</th>
-                  <th className="px-4 py-2.5 font-bold">منبع</th>
-                  <th className="px-4 py-2.5 font-bold">مقدار ارثی</th>
-                  <th className="px-4 py-2.5 font-bold">بازنویسی اختصاصی</th>
-                  <th className="px-4 py-2.5 font-bold">مقدار مؤثر</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.categories.map((cat) => (
-                  <tr key={cat.categoryId} className={cn('border-b last:border-0', !cat.isActive && 'opacity-60')}>
-                    <td className="px-4 py-2">
-                      <span className="font-medium">{cat.name}</span>
-                      {cat.code && (
-                        <span className="num ms-2 text-xs text-faint" dir="ltr">
-                          {cat.code}
-                        </span>
-                      )}
-                      {!cat.isActive && (
-                        <span className="block text-[10px] text-faint">غیرفعال — در A لحاظ نمی‌شود</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-2">{sourceBadge(cat)}</td>
-                    <td className="num px-4 py-2 text-muted-foreground">{formatPercent(cat.groupValue, prefs)}</td>
-                    <td className="w-52 px-4 py-2">{overrideInput(cat)}</td>
-                    <td className="num px-4 py-2 font-bold">{formatPercent(cat.effectiveValue, prefs)}</td>
-                  </tr>
-                ))}
-                <tr className="border-t-2 bg-surface-2/70">
-                  <td colSpan={5} className="px-4 py-2.5">
-                    {summaryRow}
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {shareWarning && (
-        <p className="rounded-xl bg-red-soft p-3 text-xs font-bold leading-6 text-red" role="alert">
-          مجموع مجازها باید کمتر از ۱۰۰٪ باشد (قید روش دوم) — جمع فعلی: {formatPercent(data.totalA, prefs)}
-        </p>
-      )}
-    </div>
-  )
-}
-
-// ═══════════════════════════════════════════════════════════
-// زبانه عناصر کاری — SortableList با D&D + دیالوگ‌ها
 // ═══════════════════════════════════════════════════════════
 function ElementsSection({
   projectId,
@@ -1297,13 +907,14 @@ function ElementsSection({
         </DialogContent>
       </Dialog>
 
-      {/* دیالوگ ویرایش عنصر — ذخیره خودکار */}
+      {/* دیالوگ ویرایش عنصر — ذخیره خودکار + الونس‌های عنصر (§۶) */}
       <Dialog open={editing !== null} onOpenChange={(open) => !open && setEditing(null)}>
-        <DialogContent dir="rtl" className="sm:max-w-md">
+        <DialogContent dir="rtl" className="max-h-[92vh] overflow-y-auto sm:max-w-2xl">
           {editing ? (
             <ElementEditForm
               key={editing.id}
               element={editing}
+              projectId={projectId}
               onClose={() => setEditing(null)}
               onSaved={invalidateElements}
             />
@@ -1421,10 +1032,12 @@ function ElementRow({
 // ── فرم ویرایش عنصر (داخل دیالوگ) — ذخیره خودکار ──
 function ElementEditForm({
   element,
+  projectId,
   onClose,
   onSaved,
 }: {
   element: ElementDto
+  projectId: string
   onClose: () => void
   onSaved: () => void
 }) {
@@ -1500,6 +1113,9 @@ function ElementEditForm({
             تغییر نوع عنصر بر مدل محاسباتی اثر دارد و وضعیت محاسبات را «نیازمند محاسبه مجدد» می‌کند.
           </p>
         </div>
+
+        {/* الونس‌ها و زمان‌های مجاز — سطح عنصر کاری (§۶) */}
+        <AllowanceSection projectId={projectId} scopeType="WORK_ELEMENT" scopeId={element.id} compact />
       </div>
       <DialogFooter className="flex-row justify-between gap-2">
         <SaveIndicator status={status} onRetry={retry} error={lastError} />

@@ -31,6 +31,7 @@ model Project {
   operators           Operator[]
   activityGroups      ActivityGroup[]
   allowanceCategories AllowanceCategory[]
+  allowanceDefinitions AllowanceDefinition[]
   ratingTables        RatingTable[]
   chartNodes          ChartNode[]
   calculationRuns     CalculationRun[]
@@ -110,6 +111,12 @@ model WorkElement {
 }
 
 // ═══════════════ گروه‌ها و مجازها ═══════════════
+// ── مدل جدید الونس‌ها (جلسه اول بازطراحی) ──
+// سلسله‌مراتب: Project/Line → Station → Activity → WorkElement
+// تعریف مرکزی (AllowanceDefinition) از تخصیص (AllowanceAssignment) جدا است.
+// مدل‌های قدیمی (ActivityGroup/AllowanceCategory/GroupAllowance/
+// ActivityAllowanceOverride) به‌صورت legacy حفظ می‌شوند؛ پس از migration
+// منبع دوم محاسبه نیستند (§۴.۱.۸ سند جلسه اول).
 
 model ActivityGroup {
   id          String   @id @default(uuid())
@@ -124,6 +131,51 @@ model ActivityGroup {
 
   @@index([projectId])
   @@map("activity_groups")
+}
+
+// تعریف مرکزی الونس — هر پروژه فهرست مرکزی خود را دارد.
+// مقدار پیش‌فرض صرفاً پیشنهاد اولیه فرم تخصیص است؛ به‌تنهایی اعمال نمی‌شود.
+model AllowanceDefinition {
+  id                  String   @id @default(uuid())
+  projectId           String   @map("project_id")
+  title               String
+  code                String?
+  description         String?
+  defaultValueType    String?  @map("default_value_type") // PERCENT | FIXED_TIME — فقط همراه مقدار پیش‌فرض
+  defaultValuePercent Float?   @map("default_value_percent") // اعشاری محاسباتی (۱۵٪ = 0.15)
+  defaultTimeSeconds  Float?   @map("default_time_seconds") // نرمال‌شده برحسب ثانیه
+  isActive            Boolean  @default(true) @map("is_active")
+  sortOrder           Int      @default(0) @map("sort_order")
+  isArchived          Boolean  @default(false) @map("is_archived") // آرشیو به‌جای حذف دارای‌سابقه
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+  project     Project               @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  assignments AllowanceAssignment[]
+
+  @@index([projectId])
+  @@map("allowance_definitions")
+}
+
+// تخصیص الونس به یک scope — یک تصمیم محلی برای هر تعریف در هر scope.
+// scopeId برای PROJECT همان projectId است.
+// ارث‌بری با resolve در زمان درخواست انجام می‌شود؛ کپی تکراری ذخیره نمی‌شود.
+model AllowanceAssignment {
+  id               String   @id @default(uuid())
+  definitionId     String   @map("definition_id")
+  scopeType        String   @map("scope_type") // PROJECT | STATION | ACTIVITY | WORK_ELEMENT
+  scopeId          String   @map("scope_id")
+  mode             String   @default("ACTIVE") // ACTIVE | EXCLUDE
+  valueType        String   @map("value_type") // PERCENT | FIXED_TIME
+  percentValue     Float?   @map("percent_value") // فقط برای PERCENT
+  timeValueSeconds Float?   @map("time_value_seconds") // فقط برای FIXED_TIME — برحسب ثانیه
+  applicationBasis String?  @map("application_basis") // PER_ELEMENT_EXECUTION | PER_CYCLE — فقط برای زمان ثابت
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+  definition AllowanceDefinition @relation(fields: [definitionId], references: [id], onDelete: Cascade)
+
+  @@unique([definitionId, scopeType, scopeId])
+  @@index([scopeType, scopeId])
+  @@map("allowance_assignments")
 }
 
 model AllowanceCategory {

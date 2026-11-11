@@ -51,7 +51,24 @@ function compactActivity(a: ActivityAnalysisDto) {
       totalCycles: a.sampleProgress.totalCycles,
       targetSampleCount: a.sampleProgress.targetSampleCount,
     },
-    totalA: a.allowances.totalA,
+    // snapshot الونس‌ها — بازتولید تاریخچه (§۴.۲):
+    // شناسه/عنوان تعریف، نوع و مقدار مؤثر، scope مبدأ، وضعیت ارث، مبنا، P/T
+    allowances: {
+      method: a.allowances.method,
+      rows: a.allowances.rows.map((r) => ({
+        definitionId: r.definitionId,
+        title: r.title,
+        status: r.status,
+        valueType: r.valueType,
+        percentValue: r.percentValue,
+        timeValueSeconds: r.timeValueSeconds,
+        applicationBasis: r.applicationBasis,
+        sourceScopeType: r.sourceScopeType,
+        sourceScopeLabel: r.sourceScopeLabel,
+      })),
+      summary: a.allowances.summary,
+      perCycleTotal: a.allowances.perCycleTotal,
+    },
     activityTotal: { st: a.activityTotal.st, status: a.activityTotal.status },
     elements: a.elements.map((e) => ({
       id: e.id,
@@ -63,6 +80,8 @@ function compactActivity(a: ActivityAnalysisDto) {
       st: e.st,
       stError: e.stError,
       ratingFactor: e.rating?.totalFactor ?? null,
+      allowanceP: e.allowances.totalPercent,
+      allowanceT: e.allowances.perExecutionSeconds,
     })),
     cycleStats: { count: a.cycleStats.count, mean: a.cycleStats.stats.mean },
   }

@@ -229,43 +229,58 @@ function ReportPaper({ report }: { report: StudyReportInfoDto }) {
             <span className="block text-[10px] leading-4 text-slate-500">{displayServerText(sec.cycleStats.methodNote, prefs)}</span>
           </p>
 
-          {/* دسته‌های مجاز مؤثر */}
+          {/* الونس‌های مؤثر — جلسه اول */}
           <div className="print-break-avoid">
             <p className="mb-1 text-xs font-bold">
-              دسته‌های مجاز مؤثر (جمع A = {formatPercent(sec.allowances.totalA, prefs)}) — منبع:{' '}
-              {sec.allowances.hasGroup ? `گروه ${sec.allowances.groupName}` : 'بدون گروه (مقادیر بازنویسی فعالیت)'}
+              الونس‌های مؤثر (جمع A = {formatPercent(sec.allowances.summary.totalPercent, prefs, 2)})
+              {sec.allowances.summary.perCycleSeconds > 0 || sec.allowances.perCycleTotal > 0
+                ? ` — زمان ثابت هر چرخه: ${formatTimeValue(sec.allowances.perCycleTotal, prefs, 1)} ثانیه`
+                : ''}
             </p>
-            {sec.allowances.categories.length === 0 ? (
-              <p className="text-xs text-slate-500">دستهٔ مجازی برای این فعالیت فعال نیست.</p>
+            {sec.allowances.rows.length === 0 ? (
+              <p className="text-xs text-slate-500">الونسی برای این فعالیت مؤثر نیست.</p>
             ) : (
               <table className="w-full text-[11px]">
                 <thead>
-                  <tr className="border-b border-slate-300 text-right">
-                    <th className="py-1 pl-1 font-bold">دسته</th>
-                    <th className="py-1 font-bold">مقدار گروه</th>
-                    <th className="py-1 font-bold">بازنویسی فعالیت</th>
-                    <th className="py-1 font-bold">مؤثر</th>
-                    <th className="py-1 font-bold">منبع</th>
+                  <tr className="border-b border-slate-300 text-center">
+                    <th className="py-1 pl-1 text-right font-bold">عنوان الونس</th>
+                    <th className="py-1 font-bold">نوع / مبنا</th>
+                    <th className="py-1 font-bold">مقدار مؤثر</th>
+                    <th className="py-1 font-bold">مبدأ</th>
+                    <th className="py-1 font-bold">وضعیت</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {sec.allowances.categories.map((cat) => (
-                    <tr key={cat.categoryId} className="border-b border-slate-100">
-                      <td className="py-1 pl-1">
-                        {cat.name}
-                        {cat.code ? ` (${cat.code})` : ''}
-                        {!cat.isActive ? ' — غیرفعال' : ''}
+                  {sec.allowances.rows.map((row) => (
+                    <tr key={row.definitionId} className="border-b border-slate-100">
+                      <td className="py-1 pl-1 text-right">
+                        {row.title}
+                        {row.code ? ` (${row.code})` : ''}
                       </td>
-                      <td className="py-1 text-center tabular-nums">
-                        {cat.groupValue === null ? '—' : formatPercent(cat.groupValue, prefs)}
-                      </td>
-                      <td className="py-1 text-center tabular-nums">
-                        {cat.overrideValue === null ? '—' : formatPercent(cat.overrideValue, prefs)}
+                      <td className="py-1 text-center">
+                        {row.valueType === 'PERCENT'
+                          ? 'درصدی'
+                          : row.applicationBasis === 'PER_CYCLE'
+                            ? 'زمان ثابت — هر چرخه'
+                            : 'زمان ثابت — هر اجرا'}
                       </td>
                       <td className="py-1 text-center font-bold tabular-nums">
-                        {cat.effectiveValue === null ? '—' : formatPercent(cat.effectiveValue, prefs)}
+                        {row.status === 'EXCLUDED'
+                          ? '—'
+                          : row.valueType === 'PERCENT'
+                            ? formatPercent(row.percentValue, prefs, 2)
+                            : `${formatTimeValue(row.timeValueSeconds, prefs, 1)}s`}
                       </td>
-                      <td className="py-1 text-center">{cat.sourceLabel}</td>
+                      <td className="py-1 text-center">{row.sourceScopeLabel ?? '—'}</td>
+                      <td className="py-1 text-center">
+                        {row.status === 'INHERITED'
+                          ? 'ارث‌رسیده'
+                          : row.status === 'OVERRIDDEN'
+                            ? 'جایگزین‌شده'
+                            : row.status === 'CUSTOM'
+                              ? 'اختصاصی'
+                              : 'حذف از ارث‌بری'}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
