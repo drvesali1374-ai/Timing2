@@ -25,6 +25,11 @@
   var _treeSearch = {}; // جست‌وجوی درخت per پروژه — §۷.۴
   var _drag = null; // درگ جاری: { type, id, scope } — اصلاح الزام ۱: تعریف مستقل (پیشتر دراثر کامنت داشت و ReferenceError می‌داد)
 
+  // بازبینی تکمیلی ج۱ (§۴): هنگام جست‌وجوی فعال، مرتب‌سازی درخت قفل می‌شود.
+  // آرایه reorder باید همیشه «کل» فرزندان را پوشش دهد؛ با فیلتر، گره‌های پنهان از
+  // محاسبه حذف می‌شوند و sortOrder تکراری/ترتیب نامطمئن پس از بارگذاری می‌سازد.
+  var SORT_LOCK_HINT = 'برای مرتب‌سازی، ابتدا فیلتر جست‌وجو را پاک کنید.';
+
   // ═══════════ محتوای راهنمای آیکونی (عیناً از مشخصات V2) ═══════════
   var LINE_HELP = {
     what: 'هر پروژه مطالعه زمان‌سنجی دقیقاً یک خط تولید و یک محصول را پوشش می‌دهد؛ ساختار داده از خط آغاز می‌شود: خط ← ایستگاه ← فعالیت ← عنصر کاری ← مشاهده.',
@@ -127,6 +132,12 @@
       '.t2-touch-ghost { position: fixed; z-index: 9999; pointer-events: none; opacity: .95; background: var(--card); border: 2px solid var(--brand); border-radius: calc(var(--radius) + 4px); box-shadow: 0 12px 32px -10px color-mix(in srgb, var(--brand) 55%, transparent); display: flex; align-items: center; gap: 6px; padding: 6px 10px; font-size: 12px; font-weight: 700; color: var(--foreground); }',
       '.t2-touch-ghost svg.icon { flex-shrink: 0; color: var(--brand); }',
       '.t2-sort.touch-dragging { opacity: .3; }',
+      // ── بازبینی تکمیلی ج۱ (§۴): قفل مرتب‌سازی هنگام جست‌وجو + راهنما ──
+      '.t2-sort-locked .drag-handle { opacity: .3; cursor: not-allowed; }',
+      '.t2-sort-locked .drag-handle:hover { background: transparent; cursor: not-allowed; }',
+      '.t2-sort-locked .drag-handle:active { cursor: not-allowed; }',
+      '.t2-sort-hint { display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: var(--radius); background: color-mix(in srgb, var(--amber-soft) 65%, transparent); color: var(--amber); font-size: 11px; font-weight: 600; line-height: 1.7; }',
+      '.t2-sort-hint .icon { flex-shrink: 0; }',
     ].join('\n');
     document.head.appendChild(style);
   }
@@ -152,11 +163,20 @@
     });
   }
 
-  function dragHandleEl() {
+  function dragHandleEl(locked) {
     return U.h('span', {
-      class: 'drag-handle shrink-0', title: 'جابه‌جایی',
+      class: 'drag-handle shrink-0' + (locked ? ' t2-sort-locked-handle' : ''),
+      title: locked ? SORT_LOCK_HINT : 'جابه‌جایی',
+      'aria-hidden': 'true',
       onclick: function (e) { e.stopPropagation(); },
     }, U.icon('gripVertical'));
+  }
+
+  /** راهنمای قفل مرتب‌سازی هنگام جست‌وجوی فعال — بازبینی تکمیلی ج۱ (§۴) */
+  function sortLockHint() {
+    return U.h('div', { class: 't2-sort-hint', role: 'note', 'aria-label': 'راهنمای مرتب‌سازی' },
+      U.icon('lock'),
+      U.h('span', { text: SORT_LOCK_HINT }));
   }
 
   /** ستون عملیات عمودی — ویرایش بالا، حذف پایین؛ چسبیده به راست کارت */
@@ -558,15 +578,25 @@
       }, U.icon('chevronsDownUp'))));
 
     // فهرست ایستگاه‌ها — قابل مرتب‌سازی با Drag & Drop + فیلتر جست‌وجو
-    var listWrap = U.h('div', { class: 'flex flex-col gap-2 p-3 scroll-slim', style: { maxHeight: 'min(26rem, calc(100vh - 23rem))', overflowY: 'auto' } });
-    var hasSearch = (_treeSearch[ctx.projectId] || '').trim().length > 0;
-    var visible = hasSearch ? stations.filter(function (s) { return stationMatches(s, _treeSearch[ctx.projectId].trim()); }) : stations;
-    if (!visible.length) {
-      listWrap.appendChild(U.h('div', { class: 'rounded-xl border border-dashed p-5 text-center', style: { borderColor: 'var(--border)' } },
-        U.h('p', { class: 'text-sm font-bold', text: hasSearch ? 'موردی منطبق با جست‌وجو یافت نشد' : 'هنوز ایستگاهی ثبت نشده است.' })));
-    } else {
-      visible.forEach(function (st) { listWrap.appendChild(stationNode(st, visible, ctx, hasSearch)); });
+    // ⚠ بازبینی تکمیلی ج۱ (§۴): رندر اولیه و بازنویسی از یک تابع مشترک؛
+    // هنگام جست‌وجو مرتب‌سازی قفل و راهنما نمایش داده می‌شود.
+    function renderStationList() {
+      var wrap = U.h('div', { class: 'flex flex-col gap-2 p-3 scroll-slim', style: { maxHeight: 'min(26rem, calc(100vh - 23rem))', overflowY: 'auto' } });
+      var q = (_treeSearch[ctx.projectId] || '').trim();
+      var has = q.length > 0;
+      var vis = has ? stations.filter(function (s) { return stationMatches(s, q); }) : stations;
+      if (has) wrap.appendChild(sortLockHint());
+      if (!vis.length) {
+        wrap.appendChild(U.h('div', { class: 'rounded-xl border border-dashed p-5 text-center', style: { borderColor: 'var(--border)' } },
+          U.h('p', { class: 'text-sm font-bold', text: has ? 'موردی منطبق با جست‌وجو یافت نشد' : 'هنوز ایستگاهی ثبت نشده است.' })));
+      } else {
+        // ⚠ همیشه آرایه «کامل» ایستگاه‌ها به گره داده می‌شود — نه فهرست فیلترشده؛
+        // callback مرتب‌سازی باید بر کل فرزندان اعمال شود (تضمین §۴).
+        vis.forEach(function (st) { wrap.appendChild(stationNode(st, stations, ctx, has)); });
+      }
+      return wrap;
     }
+    var listWrap = renderStationList();
     card.appendChild(listWrap);
 
     // پانوشت درخت: افزودن ایستگاه جدید — §۷.۶ variant متمایز
@@ -577,17 +607,7 @@
       }, U.icon('plus'), 'ایستگاه جدید')));
 
     function redrawTree() {
-      var idx = Array.prototype.indexOf.call(card.childNodes, listWrap);
-      var fresh = U.h('div', { class: 'flex flex-col gap-2 p-3 scroll-slim', style: { maxHeight: 'min(26rem, calc(100vh - 23rem))', overflowY: 'auto' } });
-      var q = (_treeSearch[ctx.projectId] || '').trim();
-      var has = q.length > 0;
-      var vis = has ? stations.filter(function (s) { return stationMatches(s, q); }) : stations;
-      if (!vis.length) {
-        fresh.appendChild(U.h('div', { class: 'rounded-xl border border-dashed p-5 text-center', style: { borderColor: 'var(--border)' } },
-          U.h('p', { class: 'text-sm font-bold', text: has ? 'موردی منطبق با جست‌وجو یافت نشد' : 'هنوز ایستگاهی ثبت نشده است.' })));
-      } else {
-        vis.forEach(function (st) { fresh.appendChild(stationNode(st, vis, ctx, has)); });
-      }
+      var fresh = renderStationList();
       card.replaceChild(fresh, listWrap);
       listWrap = fresh;
     }
@@ -668,21 +688,25 @@
     });
 
     // کارت ایستگاه — دستگیره درگ داخل کارت، چسبیده به لبه راست
-    var card = U.h('div', { class: 't2-station-card t2-sort' + (isSelected ? ' selected' : '') },
-      dragHandleEl(),
+    // ⚠ جست‌وجوی فعال → قفل مرتب‌سازی (بازبینی تکمیلی ج۱ §۴)
+    var card = U.h('div', { class: 't2-station-card t2-sort' + (isSelected ? ' selected' : '') + (hasSearch ? ' t2-sort-locked' : '') },
+      dragHandleEl(hasSearch),
       head);
 
     var node = U.h('div', null, card);
     if (isOpen) {
       node.appendChild(U.h('div', { class: 't2-acts' }, activitiesSubList(st, allActs, ctx, hasSearch)));
     }
-    makeSortable(card, 'station', st.id, ctx.projectId, function (fromId, toId) {
-      var ids = stations.map(function (s) { return s.id; });
-      ids = moveBefore(ids, fromId, toId);
-      if (!ids) return;
-      DB.reorderStations(ctx.projectId, ids);
-      appRefresh();
-    });
+    // مرتب‌سازی فقط بدون فیلتر فعال می‌شود؛ callback همیشه آرایه کامل را می‌گیرد.
+    if (!hasSearch) {
+      makeSortable(card, 'station', st.id, ctx.projectId, function (fromId, toId) {
+        var ids = stations.map(function (s) { return s.id; });
+        ids = moveBefore(ids, fromId, toId);
+        if (!ids) return;
+        DB.reorderStations(ctx.projectId, ids);
+        appRefresh();
+      });
+    }
     return node;
   }
 
@@ -694,7 +718,8 @@
     if (!acts.length) {
       wrap.push(U.h('p', { class: 'text-xs text-faint text-center', text: hasSearch ? 'فعالیت منطبقی نیست' : 'فعالیتی ثبت نشده است' }));
     } else {
-      acts.forEach(function (a) { wrap.push(activityTreeRow(a, acts, station, ctx, hasSearch)); });
+      // ⚠ آرایه «کامل» فعالیت‌ها به ردیف داده می‌شود — نه فیلترشده (تضمین §۴)
+      acts.forEach(function (a) { wrap.push(activityTreeRow(a, allActs, station, ctx, hasSearch)); });
     }
     wrap.push(U.h('button', {
       class: 'btn btn-ghost btn-sm w-full', type: 'button',
@@ -729,8 +754,8 @@
       onclick: toggleOpen,
     }, U.icon('chevronDown'));
 
-    var row = U.h('div', { class: 't2-activity-row t2-sort', title: 'نوع رویداد فرایندی: ' + processLabelOf(a.processType) + (group ? ' · گروه: ' + group.name : '') + ' · ' + U.formatInt(elsCount) + ' عنصر' },
-      dragHandleEl(),
+    var row = U.h('div', { class: 't2-activity-row t2-sort' + (hasSearch ? ' t2-sort-locked' : ''), title: 'نوع رویداد فرایندی: ' + processLabelOf(a.processType) + (group ? ' · گروه: ' + group.name : '') + ' · ' + U.formatInt(elsCount) + ' عنصر' },
+      dragHandleEl(hasSearch),
       chevron,
       U.h('button', {
         type: 'button',
@@ -761,7 +786,8 @@
       if (!visibleEls.length) {
         elsList.appendChild(U.h('p', { class: 'px-1 py-1 text-[10.5px] text-faint', text: hasSearch ? 'عنصر منطبقی نیست' : 'عنصری ثبت نشده است' }));
       } else {
-        visibleEls.forEach(function (e) { elsList.appendChild(elementTreeRow(e, visibleEls, a, ctx)); });
+        // ⚠ آرایه «کامل» عناصر به ردیف داده می‌شود — نه فیلترشده (تضمین §۴)
+        visibleEls.forEach(function (e) { elsList.appendChild(elementTreeRow(e, els, a, ctx, hasSearch)); });
       }
       elsList.appendChild(U.h('button', {
         class: 'btn btn-ghost btn-sm w-full', type: 'button',
@@ -771,23 +797,27 @@
       node.appendChild(elsList);
     }
 
-    makeSortable(row, 'activity', a.id, station.id, function (fromId, toId) {
-      var ids = acts.map(function (x) { return x.id; });
-      ids = moveBefore(ids, fromId, toId);
-      if (!ids) return;
-      DB.reorderActivities(station.id, ids);
-      appRefresh();
-    });
+    // مرتب‌سازی فقط بدون فیلتر فعال می‌شود؛ callback همیشه آرایه کامل را می‌گیرد.
+    if (!hasSearch) {
+      makeSortable(row, 'activity', a.id, station.id, function (fromId, toId) {
+        var ids = acts.map(function (x) { return x.id; });
+        ids = moveBefore(ids, fromId, toId);
+        if (!ids) return;
+        DB.reorderActivities(station.id, ids);
+        appRefresh();
+      });
+    }
     return node;
   }
 
   // ── ردیف عنصر کاری در درخت — سطح چهارم (§۷.۱) ──
   // کلیک نام = دیالوگ ویرایش عنصر با الونس‌ها؛ DnD فقط درون فعالیت خود
-  function elementTreeRow(e, els, activity, ctx) {
+  // hasSearch → قفل مرتب‌سازی (بازبینی تکمیلی ج۱ §۴)
+  function elementTreeRow(e, els, activity, ctx, hasSearch) {
     var rating = DB.getElementRating(e.id);
     var typeVariant = ELEMENT_TYPE_BADGE[e.elementType] || 'muted';
-    var row = U.h('div', { class: 't2-element-row t2-sort group' },
-      dragHandleEl(),
+    var row = U.h('div', { class: 't2-element-row t2-sort group' + (hasSearch ? ' t2-sort-locked' : '') },
+      dragHandleEl(hasSearch),
       U.h('button', {
         type: 'button',
         class: 'flex min-w-0 flex-1 items-center gap-1.5 px-1 py-0.5',
@@ -816,13 +846,16 @@
     row.addEventListener('mouseenter', function () { row.lastChild.style.opacity = '1'; });
     row.addEventListener('mouseleave', function () { row.lastChild.style.opacity = '0'; });
 
-    makeSortable(row, 'element', e.id, activity.id, function (fromId, toId) {
-      var ids = els.map(function (x) { return x.id; });
-      ids = moveBefore(ids, fromId, toId);
-      if (!ids) return;
-      DB.reorderElements(activity.id, ids);
-      appRefresh();
-    });
+    // مرتب‌سازی فقط بدون فیلتر فعال می‌شود؛ callback همیشه آرایه کامل را می‌گیرد.
+    if (!hasSearch) {
+      makeSortable(row, 'element', e.id, activity.id, function (fromId, toId) {
+        var ids = els.map(function (x) { return x.id; });
+        ids = moveBefore(ids, fromId, toId);
+        if (!ids) return;
+        DB.reorderElements(activity.id, ids);
+        appRefresh();
+      });
+    }
     return row;
   }
 
