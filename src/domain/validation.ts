@@ -231,7 +231,8 @@ export const allowanceOpSchema = z.object({
   timeValueSeconds: optionalNumber({ min: 0, max: MAX_FIXED_TIME_SECONDS }),
   applicationBasis: z.enum(ALLOWANCE_BASES).nullable().optional(),
 }).refine(
-  (v) => !(v.action !== 'SET') || v.valueType !== undefined,
+  // valueType فقط برای SET الزامی است — EXCLUDE/RESTORE/REMOVE بدون مقدارند
+  (v) => v.action !== 'SET' || v.valueType !== undefined,
   { message: 'برای ثبت مقدار، نوع مقدار الزامی است' }
 ).refine(
   (v) => !(v.action === 'SET' && v.valueType === 'PERCENT') || (v.percentValue !== null && v.percentValue !== undefined),

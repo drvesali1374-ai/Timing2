@@ -17,6 +17,7 @@ import {
   DEFAULT_PROJECT_SETTINGS,
   type AllowanceMethod,
   type AllowanceScopeType,
+  type AllowanceMode,
   type AllowanceBasis,
   type AllowanceValueType,
 } from '@/domain/types'
@@ -26,6 +27,7 @@ import type { AllowanceDefinitionCreateInput, AllowanceDefinitionUpdateInput, Al
 import {
   resolveEffectiveAllowances,
   validateAssignmentValue,
+  AllowanceValueError,
   type AllowanceDefinitionLike,
   type AllowanceAssignmentLike,
   type ScopeChain,
@@ -33,6 +35,24 @@ import {
   type ResolvedAllowanceRow,
   type EffectiveAllowanceSummary,
 } from '@/calculation/effective-allowances'
+
+/** اعتبارسنجی مقدار تخصیص — خطای خالص به AppError ساختاریافته تبدیل می‌شود (FR-23) */
+function assertValidAssignment(input: {
+  mode: AllowanceMode
+  valueType: AllowanceValueType
+  percentValue: number | null
+  timeValueSeconds: number | null
+  applicationBasis: AllowanceBasis | null
+}): void {
+  try {
+    validateAssignmentValue(input)
+  } catch (err) {
+    if (err instanceof AllowanceValueError) {
+      throw new AppError(err.code, err.message, 422)
+    }
+    throw err
+  }
+}
 
 // ── DTO ──
 
@@ -473,7 +493,7 @@ export async function putScopeAllowanceOps(
     const valueType = op.valueType as AllowanceValueType
     const basis: AllowanceBasis | null =
       valueType === 'FIXED_TIME' ? (op.applicationBasis ?? defaultBasisForScope(scopeType)) : null
-    validateAssignmentValue({
+    assertValidAssignment({
       mode: 'ACTIVE',
       valueType,
       percentValue: op.percentValue ?? null,
