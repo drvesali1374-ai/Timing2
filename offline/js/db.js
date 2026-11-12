@@ -865,7 +865,7 @@
   }
 
   /** اعمال عملیات روی فهرست در حافظه — برای اعتبارسنجی پیش از commit */
-  function applyOpsInMemory(assignments, ops, scopeType, scopeId) {
+  function applyOpsInMemory(assignments, ops, scopeType, scopeId, excludeTypes) {
     var map = {};
     assignments.forEach(function (a) { map[a.definitionId + '|' + a.scopeType + '|' + a.scopeId] = a; });
     ops.forEach(function (op) {
@@ -875,7 +875,8 @@
         var basis = vt === 'FIXED_TIME' ? (op.applicationBasis || defaultBasisForScope(scopeType)) : null;
         map[k] = { definitionId: op.definitionId, scopeType: scopeType, scopeId: scopeId, mode: 'ACTIVE', valueType: vt, percentValue: vt === 'PERCENT' ? (op.percentValue ?? null) : null, timeValueSeconds: vt === 'FIXED_TIME' ? (op.timeValueSeconds ?? null) : null, applicationBasis: basis };
       } else if (op.action === 'EXCLUDE') {
-        map[k] = { definitionId: op.definitionId, scopeType: scopeType, scopeId: scopeId, mode: 'EXCLUDE', valueType: 'PERCENT', percentValue: null, timeValueSeconds: null, applicationBasis: null };
+        // نوع نمایشی معنادار — نه PERCENT ساختگی (الزام ۴)
+        map[k] = { definitionId: op.definitionId, scopeType: scopeType, scopeId: scopeId, mode: 'EXCLUDE', valueType: (excludeTypes && excludeTypes[op.definitionId]) || 'PERCENT', percentValue: null, timeValueSeconds: null, applicationBasis: null };
       } else {
         delete map[k];
       }
@@ -907,6 +908,32 @@
   }
 
   /** ثبت عملیات تخصیص روی یک scope (§۶) */
+  /**
+   * نوع نمایشی ذخیره‌شده برای تخصیص EXCLUDE (الزام ۴ — هم‌ارز نسخه وب):
+   * نزدیک‌ترین تصمیم «فعال» در سطح بالاترِ خود scope؛
+   * وگرنه پیش‌فرض تعریف مرکزی؛ وگرنه PERCENT خنثی.
+   */
+  function computeExcludeValueType(ctx, context, definitionId, scopeType, scopeId) {
+    for (var i = ctx.chain.length - 1; i >= 0; i--) {
+      var link = ctx.chain[i];
+      if (link.type === scopeType && link.id === scopeId) continue; // خود scope
+      for (var j = 0; j < context.assignments.length; j++) {
+        var a = context.assignments[j];
+        if (a.definitionId === definitionId && a.scopeType === link.type && a.scopeId === link.id && a.mode === 'ACTIVE') {
+          return a.valueType;
+        }
+      }
+    }
+    for (var k = 0; k < context.definitions.length; k++) {
+      var def = context.definitions[k];
+      if (def.id !== definitionId) continue;
+      if (def.defaultValueType === 'PERCENT' || def.defaultValueType === 'FIXED_TIME') return def.defaultValueType;
+      if (def.defaultTimeSeconds !== null && def.defaultTimeSeconds !== undefined) return 'FIXED_TIME';
+      if (def.defaultValuePercent !== null && def.defaultValuePercent !== undefined) return 'PERCENT';
+    }
+    return 'PERCENT';
+  }
+
   function putScopeAllowanceOps(scopeType, scopeId, ops, expectedUpdatedAt) {
     var ctx = getScopeContext(scopeType, scopeId);
     var context = loadProjectAllowanceContext(ctx.projectId);
@@ -936,7 +963,13 @@
       var basis = op.valueType === 'FIXED_TIME' ? (op.applicationBasis || defaultBasisForScope(scopeType)) : null;
       F.validateAssignmentValue({ mode: 'ACTIVE', valueType: op.valueType, percentValue: op.percentValue ?? null, timeValueSeconds: op.timeValueSeconds ?? null, applicationBasis: basis });
     });
-    var virtualAssignments = applyOpsInMemory(context.assignments, ops, scopeType, scopeId);
+    // نوع نمایشی هر op Exclude — پیش از اعمال، از وضعیت فعلی محاسبه می‌شود (الزام ۴)
+    var excludeTypes = {};
+    ops.forEach(function (op) {
+      if (op.action === 'EXCLUDE') excludeTypes[op.definitionId] = computeExcludeValueType(ctx, context, op.definitionId, scopeType, scopeId);
+    });
+
+    var virtualAssignments = applyOpsInMemory(context.assignments, ops, scopeType, scopeId, excludeTypes);
     validateShareOfStForScope(ctx, context.definitions, virtualAssignments, method);
 
     ops.forEach(function (op) {
@@ -947,7 +980,8 @@
         if (existing) { Object.assign(existing, data); touch(existing); }
         else state.allowanceAssignments.push(Object.assign({ id: U.uid(), definitionId: op.definitionId, scopeType: scopeType, scopeId: scopeId, createdAt: U.nowISO() }, data, { updatedAt: U.nowISO() }));
       } else if (op.action === 'EXCLUDE') {
-        var dataX = { mode: 'EXCLUDE', valueType: 'PERCENT', percentValue: null, timeValueSeconds: null, applicationBasis: null };
+        // نوع نمایشی معنادار — نه PERCENT ساختگی (الزام ۴)
+        var dataX = { mode: 'EXCLUDE', valueType: excludeTypes[op.definitionId] || 'PERCENT', percentValue: null, timeValueSeconds: null, applicationBasis: null };
         if (existing) { Object.assign(existing, dataX); touch(existing); }
         else state.allowanceAssignments.push(Object.assign({ id: U.uid(), definitionId: op.definitionId, scopeType: scopeType, scopeId: scopeId, createdAt: U.nowISO() }, dataX, { updatedAt: U.nowISO() }));
       } else {

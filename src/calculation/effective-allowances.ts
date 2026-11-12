@@ -75,22 +75,44 @@ export interface ResolvedAllowanceRow {
   code: string | null
   /** وضعیت ارث‌بری نسبت به scope هدف */
   status: AllowanceStatus
-  /** نوع مقدار مؤثر */
-  valueType: AllowanceValueType
+  /**
+   * نوع مقدار مؤثر — برای ردیف EXCLUDED «نوع نمایشی» است که از نزدیک‌ترین
+   * تصمیم فعال بالادست و سپس پیش‌فرض تعریف مشتق می‌شود (نه نوع ساختگی)؛
+   * اگر هیچ منبع معتبری نبود null است و ردیف به‌صورت خنثی نمایش داده می‌شود.
+   */
+  valueType: AllowanceValueType | null
   /** مقدار درصدی مؤثر (اعشاری محاسباتی) — فقط PERCENT */
   percentValue: number | null
   /** ثانیه‌های ثابت مؤثر — فقط FIXED_TIME */
   timeValueSeconds: number | null
   /** مبنای وقوع زمان ثابت */
   applicationBasis: AllowanceBasis | null
+  /**
+   * مبنای «نمایشی» زمان ثابت — مستقل از applicationBasis تخصیص (بازبینی تکمیلی ج۱):
+   *  • ردیف فعال: مبنای واقعی تخصیص (همان applicationBasis)؛
+   *  • ردیف EXCLUDED با نوع نمایشی FIXED_TIME از تخصیص فعال بالادست:
+   *    مبنای همان تخصیص بالادست منتقل می‌شود؛
+   *  • نوع نمایشی از پیش‌فرض تعریف مرکزی یا درصدی: null.
+   * EXCLUDE هرگز به‌صورت مصنوعی PER_ELEMENT_EXECUTION/PER_CYCLE نمی‌گیرد و
+   * UI مقدار null را به «هر اجرا» تبدیل نمی‌کند.
+   */
+  displayApplicationBasis: AllowanceBasis | null
   /** مبدأ مقدار مؤثر */
   sourceScopeType: AllowanceScopeType | null
   sourceScopeLabel: string | null
   /** آیا تخصیص محلی (در همین scope) وجود دارد؟ */
   hasLocalDecision: boolean
-  /** مقدار والد مستقیم (برای نمایش «مقدار والد») */
+  /** مقدار والد مستقیم (نزدیک‌ترین تصمیم در سطوح بالاترِ خود scope) */
   parentValue: number | null
+  /** نوع مقدار والد مستقیم — فقط وقتی والد فعال باشد */
+  parentValueType: AllowanceValueType | null
+  /** مبنای وقوع زمان ثابت والد مستقیم */
+  parentApplicationBasis: AllowanceBasis | null
   parentScopeType: AllowanceScopeType | null
+  /** آیا برای این تعریف تصمیمی در سطوح بالاترِ خود scope وجود دارد؟ */
+  parentDecisionExists: boolean
+  /** حالت تصمیم والد مستقیم: ACTIVE | EXCLUDE | null */
+  parentMode: AllowanceMode | null
   /** زمان ثابت per-execution در سطح بالاتر از عنصر → نیاز به قاعده تجمیع */
   needsAggregationRule: boolean
   /** توضیح فارسی کوتاه وضعیت */
@@ -189,6 +211,24 @@ function assignmentValue(a: AllowanceAssignmentLike): number | null {
 }
 
 /**
+ * نوع نمایشی یک تخصیص EXCLUDE — مستقل از نوع مقدار فعال (الزام ۴):
+ *  ۱. نزدیک‌ترین تصمیم «فعال» در سطوح بالاترِ خود scope (نوع اصلی الونس در شاخه)،
+ *  ۲. وگرنه نوع/مقدار پیش‌فرض تعریف مرکزی،
+ *  ۳. وگرنه null — وضعیت حذف‌شده به‌صورت خنثی نمایش داده می‌شود.
+ * EXCLUDE یعنی حذف از ارث‌بری؛ نباید الونس زمان ثابت را درصدی جلوه دهد.
+ */
+function deriveExcludedDisplayType(
+  nearestActiveAbove: AllowanceAssignmentLike | null,
+  def: AllowanceDefinitionLike
+): AllowanceValueType | null {
+  if (nearestActiveAbove && nearestActiveAbove.mode === 'ACTIVE') return nearestActiveAbove.valueType
+  if (def.defaultValueType === 'PERCENT' || def.defaultValueType === 'FIXED_TIME') return def.defaultValueType
+  if (def.defaultTimeSeconds !== null && def.defaultTimeSeconds !== undefined) return 'FIXED_TIME'
+  if (def.defaultValuePercent !== null && def.defaultValuePercent !== undefined) return 'PERCENT'
+  return null
+}
+
+/**
  * الونس‌های مؤثر یک scope را با پیمایش زنجیره والد resolve می‌کند.
  *
  * @param definitions تعریف‌های مرکزی پروژه (فعال و غیرفعال — ردیف غیرفعال
@@ -242,6 +282,30 @@ export function resolveEffectiveAllowances(params: {
     const isLocal = decision.scopeType === target.type && decision.scopeId === target.id
     const sourceLink = chain.find((l) => l.type === decision!.scopeType && l.id === decision!.scopeId)
 
+    // نزدیک‌ترین تصمیم «فعال» در سطوح بالاترِ خود scope — برای نوع نمایشی EXCLUDED (الزام ۴)
+    let nearestActiveAbove: AllowanceAssignmentLike | null = null
+    for (let i = chain.length - 1; i >= 0; i--) {
+      const link = chain[i]
+      if (link.type === target.type && link.id === target.id) continue // خود scope
+      const found = assignments.find(
+        (a) =>
+          a.definitionId === def.id &&
+          a.scopeType === link.type &&
+          a.scopeId === link.id &&
+          a.mode === 'ACTIVE'
+      )
+      if (found) {
+        nearestActiveAbove = found
+        break
+      }
+    }
+
+    // والد مستقیم scope (نه والد تصمیم):
+    //  • تصمیم محلی وجود دارد → والد = نزدیک‌ترین تصمیم بالاتر (parentDecision)
+    //  • تصمیم ارثی است → خود تصمیم از والد می‌آید؛ والد مستقیم همان است.
+    const directParent: AllowanceAssignmentLike | null = isLocal ? parentDecision : decision
+    const parentIsActive = directParent !== null && directParent.mode === 'ACTIVE'
+
     let status: AllowanceStatus
     if (decision.mode === 'EXCLUDE') {
       status = 'EXCLUDED'
@@ -254,6 +318,20 @@ export function resolveEffectiveAllowances(params: {
     }
 
     const excluded = decision.mode === 'EXCLUDE'
+    // نوع نمایشی ردیف — برای EXCLUDED از منابع معنادار مشتق می‌شود (الزام ۴)
+    const rowValueType: AllowanceValueType | null = excluded
+      ? deriveExcludedDisplayType(nearestActiveAbove, def)
+      : decision.valueType
+    // مبنای نمایشی — بازبینی تکمیلی ج۱: برای EXCLUDED از تخصیص فعال بالادست
+    // (فقط وقتی نوع نمایشی از همان تخصیص مشتق شده) منتقل می‌شود؛ پیش‌فرض مرکزی
+    // هیچ مبنای واقعی ندارد → null. ردیف فعال = مبنای خود تخصیص.
+    const displayApplicationBasis: AllowanceBasis | null = excluded
+      ? nearestActiveAbove && nearestActiveAbove.mode === 'ACTIVE' && nearestActiveAbove.valueType === 'FIXED_TIME'
+        ? nearestActiveAbove.applicationBasis
+        : null
+      : decision.valueType === 'FIXED_TIME'
+        ? decision.applicationBasis
+        : null
     // زمان ثابت per-execution در سطح بالاتر از عنصر → نیازمند قاعده تجمیع (§۲.۳)
     const needsAggregationRule =
       !excluded &&
@@ -280,15 +358,21 @@ export function resolveEffectiveAllowances(params: {
       title: def.title,
       code: def.code ?? null,
       status,
-      valueType: decision.valueType,
+      valueType: rowValueType,
       percentValue: !excluded && decision.valueType === 'PERCENT' ? decision.percentValue : null,
       timeValueSeconds: !excluded && decision.valueType === 'FIXED_TIME' ? decision.timeValueSeconds : null,
       applicationBasis: decision.valueType === 'FIXED_TIME' ? decision.applicationBasis : null,
+      displayApplicationBasis,
       sourceScopeType: decision.scopeType,
       sourceScopeLabel: sourceLink?.label ?? null,
       hasLocalDecision: isLocal,
-      parentValue: parentDecision ? assignmentValue(parentDecision) : null,
-      parentScopeType: parentDecision?.scopeType ?? null,
+      parentValue: parentIsActive ? assignmentValue(directParent!) : null,
+      parentValueType: parentIsActive ? directParent!.valueType : null,
+      parentApplicationBasis:
+        parentIsActive && directParent!.valueType === 'FIXED_TIME' ? directParent!.applicationBasis : null,
+      parentScopeType: directParent?.scopeType ?? null,
+      parentDecisionExists: directParent !== null,
+      parentMode: directParent?.mode ?? null,
       needsAggregationRule,
       note,
     }
@@ -296,9 +380,9 @@ export function resolveEffectiveAllowances(params: {
 
     if (!excluded && !needsAggregationRule) {
       count++
-      if (row.valueType === 'PERCENT' && row.percentValue !== null) {
+      if (decision.valueType === 'PERCENT' && row.percentValue !== null) {
         totalPercent += row.percentValue
-      } else if (row.valueType === 'FIXED_TIME' && row.timeValueSeconds !== null) {
+      } else if (decision.valueType === 'FIXED_TIME' && row.timeValueSeconds !== null) {
         if (row.applicationBasis === 'PER_CYCLE') perCycleSeconds += row.timeValueSeconds
         else perExecutionSeconds += row.timeValueSeconds
       }

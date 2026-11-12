@@ -316,8 +316,14 @@ function toDefinitionDto(
 
 export async function getScopeAllowances(scopeType: AllowanceScopeType, scopeId: string): Promise<ScopeAllowancesDto> {
   const ctx = await getScopeContext(scopeType, scopeId)
-  const [context, defsRaw, localAssignments] = await Promise.all([
-    loadProjectAllowanceContext(ctx.projectId),
+
+  // ۱) بافت پروژه (شامل مهاجرت self-heal) باید ابتدا «کامل و commit شده» باشد —
+  //    وابستگی ترتیبی: مهاجرت، تعریف‌ها/تخصیص‌های جدید می‌سازد؛ اگر خواندن‌ها
+  //    هم‌زمان اجرا شوند، اولین بارگذاری پروژه مهاجرت‌نشده داده ناقص برمی‌گرداند.
+  const context = await loadProjectAllowanceContext(ctx.projectId)
+
+  // ۲) خواندن‌های مستقل از یکدیگر — پس از مهاجرت، موازی امن است.
+  const [defsRaw, localAssignments] = await Promise.all([
     db.allowanceDefinition.findMany({
       where: { projectId: ctx.projectId },
       orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
@@ -419,7 +425,8 @@ function applyOpsInMemory(
   assignments: AllowanceAssignmentLike[],
   ops: AllowanceOpsPutInput['ops'],
   scopeType: AllowanceScopeType,
-  scopeId: string
+  scopeId: string,
+  excludeTypes?: Map<string, 'PERCENT' | 'FIXED_TIME'>
 ): AllowanceAssignmentLike[] {
   const keyOf = (definitionId: string, type: string, id: string) => `${definitionId}|${type}|${id}`
   const map = new Map(assignments.map((a) => [keyOf(a.definitionId, a.scopeType, a.scopeId), a]))
@@ -445,7 +452,8 @@ function applyOpsInMemory(
         scopeType,
         scopeId,
         mode: 'EXCLUDE',
-        valueType: 'PERCENT',
+        // نوع نمایشی معنادار — نه PERCENT ساختگی (الزام ۴)
+        valueType: excludeTypes?.get(op.definitionId) ?? 'PERCENT',
         percentValue: null,
         timeValueSeconds: null,
         applicationBasis: null,
@@ -455,6 +463,37 @@ function applyOpsInMemory(
     }
   }
   return [...map.values()]
+}
+
+/**
+ * نوع نمایشی ذخیره‌شده برای تخصیص EXCLUDE (الزام ۴) — مستقل از نوع مقدار فعال:
+ * نزدیک‌ترین تصمیم «فعال» در سطوح بالاترِ خود scope؛ وگرنه پیش‌فرض تعریف مرکزی؛
+ * وگرنه PERCENT خنثی (ستون NOT NULL است و مدل داده تغییر نمی‌کند).
+ * Resolver برای ردیف EXCLUDED همین منطق را بازتولید می‌کند؛ ذخیرهٔ معنادار
+ * صرفاً دادهٔ پایدار را هم معنادار نگه می‌دارد (import/export و snapshot).
+ */
+function computeExcludeValueType(
+  ctx: ScopeContext,
+  context: ProjectAllowanceContext,
+  definitionId: string,
+  scopeType: AllowanceScopeType,
+  scopeId: string
+): 'PERCENT' | 'FIXED_TIME' {
+  for (let i = ctx.chain.length - 1; i >= 0; i--) {
+    const link = ctx.chain[i]
+    if (link.type === scopeType && link.id === scopeId) continue // خود scope
+    const found = context.assignments.find(
+      (a) => a.definitionId === definitionId && a.scopeType === link.type && a.scopeId === link.id && a.mode === 'ACTIVE'
+    )
+    if (found) return found.valueType
+  }
+  const def = context.definitionById.get(definitionId)
+  if (def) {
+    if (def.defaultValueType === 'PERCENT' || def.defaultValueType === 'FIXED_TIME') return def.defaultValueType
+    if (def.defaultTimeSeconds !== null && def.defaultTimeSeconds !== undefined) return 'FIXED_TIME'
+    if (def.defaultValuePercent !== null && def.defaultValuePercent !== undefined) return 'PERCENT'
+  }
+  return 'PERCENT'
 }
 
 export async function putScopeAllowanceOps(
@@ -501,7 +540,15 @@ export async function putScopeAllowanceOps(
       applicationBasis: basis,
     })
   }
-  const virtualAssignments = applyOpsInMemory(context.assignments, input.ops, scopeType, scopeId)
+  // نوع نمایشی هر op Exclude — پیش از اعمال، از وضعیت فعلی محاسبه می‌شود (الزام ۴)
+  const excludeTypes = new Map<string, 'PERCENT' | 'FIXED_TIME'>()
+  for (const op of input.ops) {
+    if (op.action === 'EXCLUDE') {
+      excludeTypes.set(op.definitionId, computeExcludeValueType(ctx, context, op.definitionId, scopeType, scopeId))
+    }
+  }
+
+  const virtualAssignments = applyOpsInMemory(context.assignments, input.ops, scopeType, scopeId, excludeTypes)
   await validateShareOfStForScope(ctx, context.definitions, virtualAssignments, method)
 
   await db.$transaction(async (tx) => {
@@ -531,7 +578,14 @@ export async function putScopeAllowanceOps(
         const existing = await tx.allowanceAssignment.findUnique({
           where: { definitionId_scopeType_scopeId: { definitionId: op.definitionId, scopeType, scopeId } },
         })
-        const data = { mode: 'EXCLUDE', valueType: 'PERCENT', percentValue: null, timeValueSeconds: null, applicationBasis: null }
+        // نوع نمایشی معنادار — نه PERCENT ساختگی (الزام ۴)
+        const data = {
+          mode: 'EXCLUDE',
+          valueType: excludeTypes.get(op.definitionId) ?? 'PERCENT',
+          percentValue: null,
+          timeValueSeconds: null,
+          applicationBasis: null,
+        }
         if (existing) {
           await tx.allowanceAssignment.update({ where: { id: existing.id }, data })
         } else {
@@ -667,6 +721,25 @@ export async function deleteDefinition(definitionId: string): Promise<{ archived
 
 // ── migration از مدل قدیمی (§۴) ──
 
+// سریال‌سازی مهاجرت per پروژه (الزام ۲ — بخش ۲):
+// درخواست‌های همزمان اولین بارگذاری پروژه قدیمی، به‌جای اجرای تراکنش‌های رقیب روی
+// SQLite (که به timeout تراکنش و خطای 500 می‌انجامد)، در زنجیره درون‌فرایندی صف
+// می‌شوند و منتظر همان وعده مهاجرت می‌مانند؛ سپس داده پس از مهاجرت خوانده می‌شود.
+// globalThis — در حالت dev ماژول ممکن است در چند chunk تکرار شود؛
+// نقشه درون فرایند باید بین همه نمونه‌ها مشترک باشد (الزام ۲)
+const gForMigration = globalThis as unknown as { __t2AllowanceMigrationInflight?: Map<string, Promise<MigrationReport>> }
+const migrationInflight: Map<string, Promise<MigrationReport>> = (gForMigration.__t2AllowanceMigrationInflight ??= new Map())
+
+export function migrateProjectAllowancesIfNeeded(projectId: string): Promise<MigrationReport> {
+  const inflight = migrationInflight.get(projectId)
+  if (inflight) return inflight
+  const run = doMigrateProjectAllowancesIfNeeded(projectId).finally(() => {
+    if (migrationInflight.get(projectId) === run) migrationInflight.delete(projectId)
+  })
+  migrationInflight.set(projectId, run)
+  return run
+}
+
 /**
  * مهاجرت پروژه از مدل گروه/دسته/بازنویسی به مدل مرکزی سلسله‌مراتبی.
  * • دسته‌ها → تعریف مرکزی (حفظ ID — §۴.۱.۳)
@@ -676,7 +749,7 @@ export async function deleteDefinition(definitionId: string): Promise<{ archived
  * • قابل تکرار — مارکر ProjectSetting (§۴.۱.۲)
  * • داده قدیمی حذف نمی‌شود (§۴.۱.۸) — legacy می‌ماند
  */
-export async function migrateProjectAllowancesIfNeeded(projectId: string): Promise<MigrationReport> {
+async function doMigrateProjectAllowancesIfNeeded(projectId: string): Promise<MigrationReport> {
   const marker = await db.projectSetting.findUnique({
     where: { projectId_key: { projectId, key: MIGRATION_MARKER_KEY } },
   })
@@ -700,8 +773,8 @@ export async function migrateProjectAllowancesIfNeeded(projectId: string): Promi
     }),
   ])
 
-  await db.$transaction(async (tx) => {
-    // ۱. دسته‌ها → تعریف مرکزی (حفظ ID)
+  const runMigrationTx = () => db.$transaction(async (tx) => {
+    // ۱. دسته‌ها → تعیف مرکزی (حفظ ID)
     for (const cat of categories) {
       const existing = await tx.allowanceDefinition.findUnique({ where: { id: cat.id } })
       if (existing) continue
@@ -764,7 +837,29 @@ export async function migrateProjectAllowancesIfNeeded(projectId: string): Promi
       create: { projectId, key: MIGRATION_MARKER_KEY, value: MIGRATION_MARKER_VALUE },
       update: { value: MIGRATION_MARKER_VALUE },
     })
-  })
+  }, { timeout: 15_000 })
+
+  // اجرا با تلاش مجدد — رقابت هم‌زمانی/فرایندی بر روی SQLite می‌تواند
+  // به timeout تراکنش بیانجامد؛ پس از هر شکست، مارکر دوباره بررسی می‌شود (اگر مهاجرت رقیب کامل شده باشد، ادامه بدون خطا).
+  const markerNow = () => db.projectSetting.findUnique({ where: { projectId_key: { projectId, key: MIGRATION_MARKER_KEY } } })
+  try {
+    await runMigrationTx()
+  } catch (err) {
+    const m = await markerNow()
+    if (m?.value === MIGRATION_MARKER_VALUE) {
+      return { projectId, migrated: false, definitionsCreated: 0, assignmentsCreated: 0, activitiesProcessed: activities.length, skippedInactiveCategories: 0, issues: [] }
+    }
+    await new Promise((r) => setTimeout(r, 300))
+    try {
+      await runMigrationTx()
+    } catch (err2) {
+      const m2 = await markerNow()
+      if (m2?.value === MIGRATION_MARKER_VALUE) {
+        return { projectId, migrated: false, definitionsCreated: 0, assignmentsCreated: 0, activitiesProcessed: activities.length, skippedInactiveCategories: 0, issues: [] }
+      }
+      throw err2
+    }
+  }
 
   if (categories.some((c) => !c.isActive)) {
     issues.push(`${skippedInactiveCategories} مقدار متنعلق به دسته غیرفعال نادیده گرفته شد (مطابق قاعده قدیمی: دسته غیرفعال در A لحاظ نمی‌شد).`)

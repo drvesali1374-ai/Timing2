@@ -163,15 +163,26 @@ export interface ResolvedAllowanceRowDto {
   title: string
   code: string | null
   status: 'INHERITED' | 'OVERRIDDEN' | 'CUSTOM' | 'EXCLUDED'
-  valueType: 'PERCENT' | 'FIXED_TIME'
+  /** برای ردیف EXCLUDED ممکن است null باشد (نوع خنثی — الزام ۴) */
+  valueType: 'PERCENT' | 'FIXED_TIME' | null
   percentValue: number | null
   timeValueSeconds: number | null
   applicationBasis: 'PER_ELEMENT_EXECUTION' | 'PER_CYCLE' | null
+  /**
+   * مبنای نمایشی زمان ثابت — بازبینی تکمیلی ج۱:
+   * ردیف EXCLUDED مبنای تخصیص فعال بالادست را منتقل می‌کند؛ بدون منبع واقعی null
+   * (UI مقدار null را «مبنا نامشخص» نشان می‌دهد، نه «هر اجرا»).
+   */
+  displayApplicationBasis: 'PER_ELEMENT_EXECUTION' | 'PER_CYCLE' | null
   sourceScopeType: string | null
   sourceScopeLabel: string | null
   hasLocalDecision: boolean
   parentValue: number | null
+  parentValueType: 'PERCENT' | 'FIXED_TIME' | null
+  parentApplicationBasis: 'PER_ELEMENT_EXECUTION' | 'PER_CYCLE' | null
   parentScopeType: string | null
+  parentDecisionExists: boolean
+  parentMode: 'ACTIVE' | 'EXCLUDE' | null
   needsAggregationRule: boolean
   note: string | null
 }

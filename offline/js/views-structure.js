@@ -22,7 +22,13 @@
   var _stationOpen = {};     // stationId -> bool (پیش‌فرض: باز)
   var _activityTab = {};     // activityId -> 'info' | 'elements' | 'timing' | 'analysis'
   var _activityOpenTree = {}; // فعالیت‌های باز در درخت (پیش‌فرض: بسته) — جلسه اول §۷.۲
-  var _treeSearch = {}; // جست‌وجوی درخت per پروژه — §۷.۴  var _drag = null;          // درگ جاری: { type, id, scope }
+  var _treeSearch = {}; // جست‌وجوی درخت per پروژه — §۷.۴
+  var _drag = null; // درگ جاری: { type, id, scope } — اصلاح الزام ۱: تعریف مستقل (پیشتر دراثر کامنت داشت و ReferenceError می‌داد)
+
+  // بازبینی تکمیلی ج۱ (§۴): هنگام جست‌وجوی فعال، مرتب‌سازی درخت قفل می‌شود.
+  // آرایه reorder باید همیشه «کل» فرزندان را پوشش دهد؛ با فیلتر، گره‌های پنهان از
+  // محاسبه حذف می‌شوند و sortOrder تکراری/ترتیب نامطمئن پس از بارگذاری می‌سازد.
+  var SORT_LOCK_HINT = 'برای مرتب‌سازی، ابتدا فیلتر جست‌وجو را پاک کنید.';
 
   // ═══════════ محتوای راهنمای آیکونی (عیناً از مشخصات V2) ═══════════
   var LINE_HELP = {
@@ -122,6 +128,16 @@
       '.t2-tree-toolbar { display: flex; align-items: center; gap: 6px; padding: 10px; border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--surface-2) 40%, transparent); }',
       '.t2-activity-head-btn { border: none; background: transparent; cursor: pointer; color: inherit; font-family: inherit; display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1; padding: 4px 2px; border-radius: calc(var(--radius) - 4px); text-align: start; }',
       '.t2-activity-head-btn:focus-visible { outline: 2px solid var(--brand); outline-offset: -2px; }',
+      '.drag-handle { touch-action: manipulation; }',
+      '.t2-touch-ghost { position: fixed; z-index: 9999; pointer-events: none; opacity: .95; background: var(--card); border: 2px solid var(--brand); border-radius: calc(var(--radius) + 4px); box-shadow: 0 12px 32px -10px color-mix(in srgb, var(--brand) 55%, transparent); display: flex; align-items: center; gap: 6px; padding: 6px 10px; font-size: 12px; font-weight: 700; color: var(--foreground); }',
+      '.t2-touch-ghost svg.icon { flex-shrink: 0; color: var(--brand); }',
+      '.t2-sort.touch-dragging { opacity: .3; }',
+      // ── بازبینی تکمیلی ج۱ (§۴): قفل مرتب‌سازی هنگام جست‌وجو + راهنما ──
+      '.t2-sort-locked .drag-handle { opacity: .3; cursor: not-allowed; }',
+      '.t2-sort-locked .drag-handle:hover { background: transparent; cursor: not-allowed; }',
+      '.t2-sort-locked .drag-handle:active { cursor: not-allowed; }',
+      '.t2-sort-hint { display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: var(--radius); background: color-mix(in srgb, var(--amber-soft) 65%, transparent); color: var(--amber); font-size: 11px; font-weight: 600; line-height: 1.7; }',
+      '.t2-sort-hint .icon { flex-shrink: 0; }',
     ].join('\n');
     document.head.appendChild(style);
   }
@@ -138,11 +154,20 @@
     return U.h('span', { html: UI.processSymbol(processType, 'sm', title), 'aria-hidden': 'true' });
   }
 
-  function dragHandleEl() {
+  function dragHandleEl(locked) {
     return U.h('span', {
-      class: 'drag-handle shrink-0', title: 'جابه‌جایی',
+      class: 'drag-handle shrink-0' + (locked ? ' t2-sort-locked-handle' : ''),
+      title: locked ? SORT_LOCK_HINT : 'جابه‌جایی',
+      'aria-hidden': 'true',
       onclick: function (e) { e.stopPropagation(); },
     }, U.icon('gripVertical'));
+  }
+
+  /** راهنمای قفل مرتب‌سازی هنگام جست‌وجوی فعال — بازبینی تکمیلی ج۱ (§۴) */
+  function sortLockHint() {
+    return U.h('div', { class: 't2-sort-hint', role: 'note', 'aria-label': 'راهنمای مرتب‌سازی' },
+      U.icon('lock'),
+      U.h('span', { text: SORT_LOCK_HINT }));
   }
 
   /** ستون عملیات عمودی — ویرایش بالا، حذف پایین؛ چسبیده به راست کارت */
@@ -195,8 +220,18 @@
     return ids;
   }
 
+  /** نشانه‌گذاری ردیف برای هدف‌یابی درگ — همیشه اعمال می‌شود (حتی در حالت قفل)؛
+   * شناسه/نوع/scope ردیف برای تست‌پذیری و معناشناسی نشانه‌گذاری می‌شود
+   * بدون اتصال شنونده یا draggable (بازبینی تکمیلی ج۱ §۶). */
+  function markSortTarget(row, type, id, scope) {
+    row.setAttribute('data-sort-type', type);
+    row.setAttribute('data-sort-id', id);
+    row.setAttribute('data-sort-scope', scope);
+  }
+
   /** فعال‌سازی Drag & Drop روی یک ردیف با هایلایت drop-target */
   function makeSortable(row, type, id, scope, onReorder) {
+    markSortTarget(row, type, id, scope);
     row.setAttribute('draggable', 'true');
     row.addEventListener('dragstart', function (e) {
       _drag = { type: type, id: id, scope: scope };
@@ -208,6 +243,10 @@
     row.addEventListener('dragend', function () {
       _drag = null;
       row.classList.remove('drop-target');
+      // لغو درگ (Esc/خروج از پنجره): هایلایت هر مقصد باقی‌مانده نیز پاک شود —
+      // dragleave در همه حالت‌های لغو تضمین‌شده نیست (بازبینی تکمیلی ج۱ §۶)
+      var stale = document.querySelectorAll('.drop-target');
+      for (var si = 0; si < stale.length; si++) stale[si].classList.remove('drop-target');
     });
     row.addEventListener('dragover', function (e) {
       if (!_drag || _drag.type !== type || _drag.scope !== scope || _drag.id === id) return;
@@ -225,6 +264,125 @@
       var fromId = _drag.id;
       _drag = null;
       onReorder(fromId, id);
+    });
+    makeTouchSortable(row, type, id, scope, onReorder);
+  }
+
+  /** درگ لمسی سازگار با Pointer Events — HTML5 DnD در دستگاه لمسی رخ نمی‌دهد.
+   * فشار طولانی (۳۰۰ms) روی دستگیره → آغاز درگ + Ghost شناور + هایلایت هدف با elementsFromPoint.
+   * حرکت پیش از فشار طولانی بیش از آستانه → لغو (اجازه اسکرول). عملیات دسکتاپ و کیبورد دست‌نخورده می‌ماند. */
+  function makeTouchSortable(row, type, id, scope, onReorder) {
+    if (typeof g.PointerEvent !== 'function') return;
+    var LONG_PRESS_MS = 300;
+    var MOVE_SLOP = 12;
+    var handle = row.querySelector('.drag-handle') || row;
+
+    var timer = null;
+    var dragging = false;
+    var startX = 0, startY = 0;
+    var ghost = null;
+    var targetEl = null;
+    var suppressClick = false;
+
+    function rowTitle() {
+      var t = row.querySelector('.t2-station-title, .t2-activity-title, .t2-element-title, .font-semibold');
+      return (t ? t.textContent : '').trim() || (row.textContent || '').trim().slice(0, 40);
+    }
+    function clearTarget() {
+      if (targetEl) { targetEl.classList.remove('drop-target'); targetEl = null; }
+    }
+    function findTargetEl(x, y) {
+      var stack = document.elementsFromPoint(x, y);
+      for (var i = 0; i < stack.length; i++) {
+        var el = stack[i];
+        if (!el || !el.getAttribute) continue;
+        if (el.getAttribute('data-sort-type') !== type) continue;
+        if (el.getAttribute('data-sort-scope') !== String(scope)) continue;
+        if (el.getAttribute('data-sort-id') === id) return null;
+        return el;
+      }
+      return null;
+    }
+    function moveGhost(x, y) {
+      if (!ghost) return;
+      ghost.style.left = (x - 28) + 'px';
+      ghost.style.top = (y - 22) + 'px';
+    }
+    function onWindowMove(e) {
+      if (!dragging) {
+        if (Math.abs(e.clientX - startX) > MOVE_SLOP || Math.abs(e.clientY - startY) > MOVE_SLOP) cancelWait();
+        return;
+      }
+      e.preventDefault();
+      moveGhost(e.clientX, e.clientY);
+      var t = findTargetEl(e.clientX, e.clientY);
+      if (t !== targetEl) { clearTarget(); targetEl = t; if (targetEl) targetEl.classList.add('drop-target'); }
+    }
+    function onWindowTouchMove(e) {
+      if (dragging && e.cancelable) e.preventDefault();
+    }
+    function onWindowUp(e) {
+      if (!dragging) { cancelWait(); return; }
+      var toEl = targetEl;
+      cleanup();
+      if (e && e.type === 'pointercancel') return;
+      if (!toEl) return;
+      var toId = toEl.getAttribute('data-sort-id');
+      if (toId && toId !== id) onReorder(id, toId);
+    }
+    function cancelWait() {
+      if (timer) { clearTimeout(timer); timer = null; }
+      detachWait();
+    }
+    function detachWait() {
+      window.removeEventListener('pointermove', onWindowMove);
+      window.removeEventListener('pointerup', onWindowUp);
+      window.removeEventListener('pointercancel', onWindowUp);
+    }
+    function cleanup() {
+      cancelWait();
+      document.removeEventListener('touchmove', onWindowTouchMove, { passive: false });
+      if (ghost && ghost.parentNode) ghost.parentNode.removeChild(ghost);
+      ghost = null;
+      clearTarget();
+      row.classList.remove('touch-dragging');
+      _drag = null;
+      dragging = false;
+      if (suppressClick) {
+        suppressClick = false;
+        var swallow = function (ev) {
+          ev.preventDefault();
+          ev.stopPropagation();
+          row.removeEventListener('click', swallow, true);
+        };
+        row.addEventListener('click', swallow, true);
+        setTimeout(function () { row.removeEventListener('click', swallow, true); }, 400);
+      }
+    }
+    handle.addEventListener('pointerdown', function (e) {
+      if (dragging) return;
+      if (e.pointerType !== 'touch' && e.pointerType !== 'pen') return;
+      startX = e.clientX;
+      startY = e.clientY;
+      window.addEventListener('pointermove', onWindowMove, { passive: false });
+      window.addEventListener('pointerup', onWindowUp);
+      window.addEventListener('pointercancel', onWindowUp);
+      timer = setTimeout(function () {
+        timer = null;
+        // شنونده‌های pointermove/up متصل می‌مانند — فاز انتظار با پرچم dragging
+        // از فاز درگ جدا می‌شود (در پایان درگ در cleanup حذف می‌شوند).
+        dragging = true;
+        suppressClick = true;
+        _drag = { type: type, id: id, scope: scope };
+        row.classList.add('touch-dragging');
+        document.addEventListener('touchmove', onWindowTouchMove, { passive: false });
+        ghost = U.h('div', { class: 't2-touch-ghost', 'aria-hidden': 'true' },
+          U.icon('gripVertical'), U.h('span', { class: 'truncate', text: rowTitle() }));
+        ghost.style.width = Math.min(row.offsetWidth, 320) + 'px';
+        document.body.appendChild(ghost);
+        moveGhost(startX, startY);
+        if (navigator.vibrate) { try { navigator.vibrate(15); } catch (err) {} }
+      }, LONG_PRESS_MS);
     });
   }
 
@@ -422,15 +580,25 @@
       }, U.icon('chevronsDownUp'))));
 
     // فهرست ایستگاه‌ها — قابل مرتب‌سازی با Drag & Drop + فیلتر جست‌وجو
-    var listWrap = U.h('div', { class: 'flex flex-col gap-2 p-3 scroll-slim', style: { maxHeight: 'min(26rem, calc(100vh - 23rem))', overflowY: 'auto' } });
-    var hasSearch = (_treeSearch[ctx.projectId] || '').trim().length > 0;
-    var visible = hasSearch ? stations.filter(function (s) { return stationMatches(s, _treeSearch[ctx.projectId].trim()); }) : stations;
-    if (!visible.length) {
-      listWrap.appendChild(U.h('div', { class: 'rounded-xl border border-dashed p-5 text-center', style: { borderColor: 'var(--border)' } },
-        U.h('p', { class: 'text-sm font-bold', text: hasSearch ? 'موردی منطبق با جست‌وجو یافت نشد' : 'هنوز ایستگاهی ثبت نشده است.' })));
-    } else {
-      visible.forEach(function (st) { listWrap.appendChild(stationNode(st, visible, ctx, hasSearch)); });
+    // ⚠ بازبینی تکمیلی ج۱ (§۴): رندر اولیه و بازنویسی از یک تابع مشترک؛
+    // هنگام جست‌وجو مرتب‌سازی قفل و راهنما نمایش داده می‌شود.
+    function renderStationList() {
+      var wrap = U.h('div', { class: 'flex flex-col gap-2 p-3 scroll-slim', style: { maxHeight: 'min(26rem, calc(100vh - 23rem))', overflowY: 'auto' } });
+      var q = (_treeSearch[ctx.projectId] || '').trim();
+      var has = q.length > 0;
+      var vis = has ? stations.filter(function (s) { return stationMatches(s, q); }) : stations;
+      if (has) wrap.appendChild(sortLockHint());
+      if (!vis.length) {
+        wrap.appendChild(U.h('div', { class: 'rounded-xl border border-dashed p-5 text-center', style: { borderColor: 'var(--border)' } },
+          U.h('p', { class: 'text-sm font-bold', text: has ? 'موردی منطبق با جست‌وجو یافت نشد' : 'هنوز ایستگاهی ثبت نشده است.' })));
+      } else {
+        // ⚠ همیشه آرایه «کامل» ایستگاه‌ها به گره داده می‌شود — نه فهرست فیلترشده؛
+        // callback مرتب‌سازی باید بر کل فرزندان اعمال شود (تضمین §۴).
+        vis.forEach(function (st) { wrap.appendChild(stationNode(st, stations, ctx, has)); });
+      }
+      return wrap;
     }
+    var listWrap = renderStationList();
     card.appendChild(listWrap);
 
     // پانوشت درخت: افزودن ایستگاه جدید — §۷.۶ variant متمایز
@@ -441,17 +609,7 @@
       }, U.icon('plus'), 'ایستگاه جدید')));
 
     function redrawTree() {
-      var idx = Array.prototype.indexOf.call(card.childNodes, listWrap);
-      var fresh = U.h('div', { class: 'flex flex-col gap-2 p-3 scroll-slim', style: { maxHeight: 'min(26rem, calc(100vh - 23rem))', overflowY: 'auto' } });
-      var q = (_treeSearch[ctx.projectId] || '').trim();
-      var has = q.length > 0;
-      var vis = has ? stations.filter(function (s) { return stationMatches(s, q); }) : stations;
-      if (!vis.length) {
-        fresh.appendChild(U.h('div', { class: 'rounded-xl border border-dashed p-5 text-center', style: { borderColor: 'var(--border)' } },
-          U.h('p', { class: 'text-sm font-bold', text: has ? 'موردی منطبق با جست‌وجو یافت نشد' : 'هنوز ایستگاهی ثبت نشده است.' })));
-      } else {
-        vis.forEach(function (st) { fresh.appendChild(stationNode(st, vis, ctx, has)); });
-      }
+      var fresh = renderStationList();
       card.replaceChild(fresh, listWrap);
       listWrap = fresh;
     }
@@ -532,21 +690,26 @@
     });
 
     // کارت ایستگاه — دستگیره درگ داخل کارت، چسبیده به لبه راست
-    var card = U.h('div', { class: 't2-station-card t2-sort' + (isSelected ? ' selected' : '') },
-      dragHandleEl(),
+    // ⚠ جست‌وجوی فعال → قفل مرتب‌سازی (بازبینی تکمیلی ج۱ §۴)
+    var card = U.h('div', { class: 't2-station-card t2-sort' + (isSelected ? ' selected' : '') + (hasSearch ? ' t2-sort-locked' : '') },
+      dragHandleEl(hasSearch),
       head);
 
     var node = U.h('div', null, card);
     if (isOpen) {
       node.appendChild(U.h('div', { class: 't2-acts' }, activitiesSubList(st, allActs, ctx, hasSearch)));
     }
-    makeSortable(card, 'station', st.id, ctx.projectId, function (fromId, toId) {
-      var ids = stations.map(function (s) { return s.id; });
-      ids = moveBefore(ids, fromId, toId);
-      if (!ids) return;
-      DB.reorderStations(ctx.projectId, ids);
-      appRefresh();
-    });
+    // نشانه‌گذاری همیشه + مرتب‌سازی فقط بدون فیلتر؛ callback آرایه کامل را می‌گیرد.
+    markSortTarget(card, 'station', st.id, ctx.projectId);
+    if (!hasSearch) {
+      makeSortable(card, 'station', st.id, ctx.projectId, function (fromId, toId) {
+        var ids = stations.map(function (s) { return s.id; });
+        ids = moveBefore(ids, fromId, toId);
+        if (!ids) return;
+        DB.reorderStations(ctx.projectId, ids);
+        appRefresh();
+      });
+    }
     return node;
   }
 
@@ -558,7 +721,8 @@
     if (!acts.length) {
       wrap.push(U.h('p', { class: 'text-xs text-faint text-center', text: hasSearch ? 'فعالیت منطبقی نیست' : 'فعالیتی ثبت نشده است' }));
     } else {
-      acts.forEach(function (a) { wrap.push(activityTreeRow(a, acts, station, ctx, hasSearch)); });
+      // ⚠ آرایه «کامل» فعالیت‌ها به ردیف داده می‌شود — نه فیلترشده (تضمین §۴)
+      acts.forEach(function (a) { wrap.push(activityTreeRow(a, allActs, station, ctx, hasSearch)); });
     }
     wrap.push(U.h('button', {
       class: 'btn btn-ghost btn-sm w-full', type: 'button',
@@ -593,8 +757,8 @@
       onclick: toggleOpen,
     }, U.icon('chevronDown'));
 
-    var row = U.h('div', { class: 't2-activity-row t2-sort', title: 'نوع رویداد فرایندی: ' + processLabelOf(a.processType) + (group ? ' · گروه: ' + group.name : '') + ' · ' + U.formatInt(elsCount) + ' عنصر' },
-      dragHandleEl(),
+    var row = U.h('div', { class: 't2-activity-row t2-sort' + (hasSearch ? ' t2-sort-locked' : ''), title: 'نوع رویداد فرایندی: ' + processLabelOf(a.processType) + (group ? ' · گروه: ' + group.name : '') + ' · ' + U.formatInt(elsCount) + ' عنصر' },
+      dragHandleEl(hasSearch),
       chevron,
       U.h('button', {
         type: 'button',
@@ -624,7 +788,8 @@
       if (!visibleEls.length) {
         elsList.appendChild(U.h('p', { class: 'px-1 py-1 text-[10.5px] text-faint', text: hasSearch ? 'عنصر منطبقی نیست' : 'عنصری ثبت نشده است' }));
       } else {
-        visibleEls.forEach(function (e) { elsList.appendChild(elementTreeRow(e, visibleEls, a, ctx)); });
+        // ⚠ آرایه «کامل» عناصر به ردیف داده می‌شود — نه فیلترشده (تضمین §۴)
+        visibleEls.forEach(function (e) { elsList.appendChild(elementTreeRow(e, els, a, ctx, hasSearch)); });
       }
       elsList.appendChild(U.h('button', {
         class: 'btn btn-ghost btn-sm w-full', type: 'button',
@@ -634,22 +799,28 @@
       node.appendChild(elsList);
     }
 
-    makeSortable(row, 'activity', a.id, station.id, function (fromId, toId) {
-      var ids = acts.map(function (x) { return x.id; });
-      ids = moveBefore(ids, fromId, toId);
-      if (!ids) return;
-      DB.reorderActivities(station.id, ids);
-      appRefresh();
-    });
+    // نشانه‌گذاری همیشه + مرتب‌سازی فقط بدون فیلتر؛ callback آرایه کامل را می‌گیرد.
+    markSortTarget(row, 'activity', a.id, station.id);
+    if (!hasSearch) {
+      makeSortable(row, 'activity', a.id, station.id, function (fromId, toId) {
+        var ids = acts.map(function (x) { return x.id; });
+        ids = moveBefore(ids, fromId, toId);
+        if (!ids) return;
+        DB.reorderActivities(station.id, ids);
+        appRefresh();
+      });
+    }
     return node;
   }
 
   // ── ردیف عنصر کاری در درخت — سطح چهارم (§۷.۱) ──
   // کلیک نام = دیالوگ ویرایش عنصر با الونس‌ها؛ DnD فقط درون فعالیت خود
-  function elementTreeRow(e, els, activity, ctx) {
+  // hasSearch → قفل مرتب‌سازی (بازبینی تکمیلی ج۱ §۴)
+  function elementTreeRow(e, els, activity, ctx, hasSearch) {
     var rating = DB.getElementRating(e.id);
     var typeVariant = ELEMENT_TYPE_BADGE[e.elementType] || 'muted';
-    var row = U.h('div', { class: 't2-element-row t2-sort group' },
+    var row = U.h('div', { class: 't2-element-row t2-sort group' + (hasSearch ? ' t2-sort-locked' : '') },
+      dragHandleEl(hasSearch),
       U.h('button', {
         type: 'button',
         class: 'flex min-w-0 flex-1 items-center gap-1.5 px-1 py-0.5',
@@ -678,13 +849,17 @@
     row.addEventListener('mouseenter', function () { row.lastChild.style.opacity = '1'; });
     row.addEventListener('mouseleave', function () { row.lastChild.style.opacity = '0'; });
 
-    makeSortable(row, 'element', e.id, activity.id, function (fromId, toId) {
-      var ids = els.map(function (x) { return x.id; });
-      ids = moveBefore(ids, fromId, toId);
-      if (!ids) return;
-      DB.reorderElements(activity.id, ids);
-      appRefresh();
-    });
+    // نشانه‌گذاری همیشه + مرتب‌سازی فقط بدون فیلتر؛ callback آرایه کامل را می‌گیرد.
+    markSortTarget(row, 'element', e.id, activity.id);
+    if (!hasSearch) {
+      makeSortable(row, 'element', e.id, activity.id, function (fromId, toId) {
+        var ids = els.map(function (x) { return x.id; });
+        ids = moveBefore(ids, fromId, toId);
+        if (!ids) return;
+        DB.reorderElements(activity.id, ids);
+        appRefresh();
+      });
+    }
     return row;
   }
 

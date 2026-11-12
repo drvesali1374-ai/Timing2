@@ -436,6 +436,43 @@
 
     function fmtSeconds(v) { return v === null || v === undefined ? '—' : U.formatTimeValue(v) + ' ثانیه'; }
 
+    /** برچسب مبنای زمان ثابت — null هرگز به «هر اجرا» تبدیل نمی‌شود (بازبینی تکمیلی ج۱) */
+    function basisLabel(basis) {
+      if (basis === 'PER_CYCLE') return 'هر چرخه';
+      if (basis === 'PER_ELEMENT_EXECUTION') return 'هر اجرا';
+      return 'مبنا نامشخص';
+    }
+
+    /** برچسب منوی Restore — با وضعیت واقعی تخصیص هماهنگ (الزام ۴) */
+    function restoreMenuLabel(row) {
+      if (row.status === 'CUSTOM') return 'حذف تخصیص محلی';
+      if (row.status === 'EXCLUDED') return row.parentMode === 'ACTIVE' ? 'بازگردانی الونس والد' : 'حذف استثنای محلی';
+      // والد مستقیم EXCLUDE است → Restore فقط تخصیص محلی را حذف می‌کند و وضعیت
+      // «حذف از ارث‌بری» والد دوباره برقرار می‌شود — «مقدار» والدی برای بازگشت نیست.
+      if (row.parentMode === 'EXCLUDE') return 'بازگردانی به وضعیت والد (حذف تخصیص محلی)';
+      return 'بازگردانی به مقدار والد';
+    }
+    function restoreToast(row) {
+      if (row.status === 'CUSTOM') return 'تخصیص محلی «' + row.title + '» حذف شد';
+      if (row.status === 'EXCLUDED') {
+        return row.parentMode === 'ACTIVE'
+          ? 'استثنای محلی «' + row.title + '» حذف شد و الونس والد بازگشت'
+          : 'استثنای محلی «' + row.title + '» حذف شد';
+      }
+      if (row.parentMode === 'EXCLUDE') {
+        return 'تخصیص محلی «' + row.title + '» حذف شد و وضعیت حذف از ارث‌بری والد دوباره برقرار شد';
+      }
+      return 'تخصیص محلی «' + row.title + '» حذف شد و مقدار والد بازگشت';
+    }
+    /** مقدار والد با «نوع و مبنای خودش» قالب‌بندی می‌شود — نه نوع تخصیص محلی (الزام ۳) */
+    function formatParentValue(row) {
+      if (row.parentValue === null || row.parentValue === undefined) return '—';
+      if (row.parentValueType === 'PERCENT') return U.formatPercent(row.parentValue);
+      var basis = row.parentApplicationBasis === 'PER_CYCLE' ? ' (هر چرخه)'
+        : row.parentApplicationBasis === 'PER_ELEMENT_EXECUTION' ? ' (هر اجرا)' : '';
+      return U.formatTimeValue(row.parentValue) + ' ثانیه' + basis;
+    }
+
     function draw() {
       var data;
       try { data = DB.getScopeAllowances(scopeType, scopeId); }
@@ -474,16 +511,19 @@
             row.valueType === 'FIXED_TIME' && !excluded ? { label: 'تغییر مبنای زمان ثابت…', icon: 'timer', onClick: function () { openBasisDialog(row); } } : null,
             !excluded ? { label: 'حذف از ارث‌بری', icon: 'ban', onClick: function () { confirmExclude(row); } } : null,
             row.hasLocalDecision ? '-' : null,
-            row.hasLocalDecision ? { label: row.status === 'CUSTOM' ? 'حذف تخصیص محلی' : 'بازگردانی به مقدار والد', icon: 'rotateCcw', destructive: true, onClick: function () { runOp({ definitionId: row.definitionId, action: 'RESTORE' }, 'تخصیص محلی «' + row.title + '» حذف شد و مقدار والد بازگشت'); } } : null,
+            row.hasLocalDecision ? { label: restoreMenuLabel(row), icon: 'rotateCcw', destructive: true, onClick: function () { runOp({ definitionId: row.definitionId, action: 'RESTORE' }, restoreToast(row)); } } : null,
           ].filter(Boolean), { class: 'icon-btn sm', 'aria-label': 'عملیات الونس ' + row.title });
           return [
             U.h('div', { class: 'max-w-56 text-right' },
               U.h('span', { class: 'text-[13px] font-bold', style: { display: 'block' }, text: row.title }),
               row.code ? U.h('span', { class: 'num text-[10px] text-faint', dir: 'ltr', text: row.code }) : null),
-            U.h('span', { class: 'text-xs' }, row.valueType === 'PERCENT' ? 'درصدی' : 'زمان ثابت',
-              row.valueType === 'FIXED_TIME' ? U.h('span', { class: 'block text-[10px] text-muted', text: row.applicationBasis === 'PER_CYCLE' ? 'هر چرخه' : 'هر اجرا' }) : null),
+            U.h('span', { class: 'text-xs' },
+              row.valueType === 'PERCENT' ? 'درصدی'
+              : row.valueType === 'FIXED_TIME' ? U.h('span', null, 'زمان ثابت',
+                U.h('span', { class: 'block text-[10px] text-muted', text: basisLabel(row.displayApplicationBasis) }))
+              : U.h('span', { class: 'text-faint', text: '—' })),
             U.h('span', { class: 'num font-bold' },
-              excluded ? '—' :
+              excluded || (row.valueType !== 'PERCENT' && row.valueType !== 'FIXED_TIME') ? '—' :
               row.valueType === 'PERCENT' ? U.h('span', { class: 'text-brand', text: U.formatPercent(row.percentValue) }) :
               fmtSeconds(row.timeValueSeconds)),
             U.h('span', { class: 'text-xs text-muted' }, row.sourceScopeLabel || '—',
@@ -676,9 +716,10 @@
           body.appendChild(U.h('div', { class: 'space-y-4' },
             UI.field('نوع مقدار', typeSelect),
             percentWrap, timeWrap,
-            row && row.parentValue !== null && row.parentValue !== undefined && row.status !== 'CUSTOM'
-              ? U.h('p', { class: 'text-[11px] text-muted' }, 'مقدار فعلی والد: ',
-                  U.h('b', { class: 'num', text: row.valueType === 'PERCENT' ? U.formatPercent(row.parentValue) : row.parentValue + ' ثانیه' }))
+            row && row.parentDecisionExists && row.parentMode === 'ACTIVE' && row.parentValue !== null && row.parentValue !== undefined
+              ? U.h('p', { class: 'text-[11px] text-muted' },
+                  'مقدار فعلی والد' + (row.parentScopeType && DB.CONST.ALLOWANCE_SCOPE_LABELS[row.parentScopeType] ? ' (' + DB.CONST.ALLOWANCE_SCOPE_LABELS[row.parentScopeType] + ')' : '') + ': ',
+                  U.h('b', { class: 'num', text: formatParentValue(row) }))
               : null));
         },
         footerBuilder: function () {

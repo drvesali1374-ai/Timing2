@@ -673,7 +673,7 @@
           alwRows.map(function (r) {
             return [
               { cls: 'pr-note', text: r.title + (r.code ? ' (' + r.code + ')' : '') },
-              r.valueType === 'PERCENT' ? 'درصدی' : (r.applicationBasis === 'PER_CYCLE' ? 'زمان ثابت — هر چرخه' : 'زمان ثابت — هر اجرا'),
+              r.valueType === 'PERCENT' ? 'درصدی' : (r.displayApplicationBasis === 'PER_CYCLE' ? 'زمان ثابت — هر چرخه' : r.displayApplicationBasis === 'PER_ELEMENT_EXECUTION' ? 'زمان ثابت — هر اجرا' : 'زمان ثابت — مبنا نامشخص'),
               r.valueType === 'PERCENT' ? U.formatPercent(r.percentValue) : U.formatTimeValue(r.timeValueSeconds, 1) + 's',
               r.sourceScopeLabel || '—',
               ALLOWANCE_STATUS_LABELS[r.status] || r.status,
