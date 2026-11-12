@@ -285,7 +285,7 @@
       if (r.isActive) relByPair[r.elementLowId + '|' + r.elementHighId] = r.id;
     });
 
-    // زوج‌های دارای خطا (برای نشانگذاری سلول) — localFailures + tripleIssues
+    // زوج‌های دارای خطا (برای نشانگذاری سلول) — localFailures + tripleIssues + intervalIssues قطعی
     var failedPairs = {};
     if (matrix.validation) {
       matrix.validation.localFailures.forEach(function (lf) {
@@ -296,6 +296,9 @@
         for (var i = 0; i < ids.length; i++) {
           for (var j = i + 1; j < ids.length; j++) failedPairs[pairKey(ids[i], ids[j])] = true;
         }
+      });
+      (matrix.validation.intervalIssues || []).forEach(function (ii) {
+        if (ii.kind === 'DEFINITE') failedPairs[pairKey(ii.pair[0], ii.pair[1])] = true;
       });
     }
 
@@ -332,19 +335,32 @@
         }
         var eff = effectiveCell(matrix, relationId);
         var failed = failedPairs[low + '|' + high];
+        // §۵ ممیزی جلسه ۲ — زوج غیرقابل‌مقایسه در چرخهٔ انتخاب‌شده قابل ویرایش نیست
+        var comparable = !cycleId || !matrix.comparability || !matrix.comparability[relationId] || matrix.comparability[relationId].isComparable !== false;
+        var notComparableReason = (matrix.comparability && matrix.comparability[relationId] && matrix.comparability[relationId].notComparableReason) || null;
+        var cellEditable = !!cycleId && comparable;
         tr.appendChild(U.h('td', { class: failed ? 'mx-cell-failed' : null },
-          U.h('button', {
-            class: 'mx-cell-btn' + (eff.isDraft ? ' is-draft' : ''),
-            type: 'button',
-            'aria-label': 'ویرایش هم‌پوشانی ' + row.name + ' و ' + col.name,
-            title: cycleId ? 'ویرایش مقدار' : 'برای ویرایش، ابتدا یک چرخه انتخاب کنید',
-            disabled: cycleId ? null : true,
-            onclick: function () {
-              var cur = openCell;
-              openCell = (cur && cur.relationId === relationId && cur.rowId === row.elementId) ? null : { relationId: relationId, rowId: row.elementId };
-              rerender();
-            },
-          }, statusChipEl(eff))));
+          cellEditable
+            ? U.h('button', {
+                class: 'mx-cell-btn' + (eff.isDraft ? ' is-draft' : ''),
+                type: 'button',
+                'aria-label': 'ویرایش هم‌پوشانی ' + row.name + ' و ' + col.name,
+                title: 'ویرایش مقدار',
+                onclick: function () {
+                  var cur = openCell;
+                  openCell = (cur && cur.relationId === relationId && cur.rowId === row.elementId) ? null : { relationId: relationId, rowId: row.elementId };
+                  rerender();
+                },
+              }, statusChipEl(eff))
+            : U.h('span', {
+                class: 'mx-cell-static',
+                title: !cycleId
+                  ? 'برای ویرایش مقدار، ابتدا یک چرخه انتخاب کنید'
+                  : notComparableReason || 'در این چرخه قابل‌مقایسه نیست',
+                'aria-disabled': 'true',
+              }, comparable
+                ? statusChipEl(eff)
+                : U.h('span', { class: 'mx-chip not-comparable', text: 'در این چرخه قابل‌مقایسه نیست' }))));
       });
       tbody.appendChild(tr);
       // ردیف ویرایشگر بازشده — درست زیر ردیفی که سلول آن باز شده است
@@ -450,14 +466,18 @@
               (b ? b.activityName : '؟') + ' / ' + (b ? b.stationName : '؟'))),
           U.h('span', { class: 'shrink-0' }, statusChipEl(eff, true))));
       if (isOpen) {
-        if (cycleId) {
+        var comparable = !cycleId || !matrix.comparability || !matrix.comparability[r.id] || matrix.comparability[r.id].isComparable !== false;
+        var notComparableReason = (matrix.comparability && matrix.comparability[r.id] && matrix.comparability[r.id].notComparableReason) || null;
+        if (cycleId && comparable) {
           card.appendChild(U.h('div', { class: 'mx-pair-expand' },
             buildCellEditor(r.id, a ? a.name : '؟', b ? b.name : '؟', eff)));
         } else {
           card.appendChild(U.h('p', {
             class: 'text-xs text-muted',
             style: { marginTop: '12px', paddingTop: '12px', borderTop: '1px solid var(--border)' },
-            text: 'برای ویرایش مقدار، ابتدا یک چرخه انتخاب کنید.',
+            text: !cycleId
+              ? 'برای ویرایش مقدار، ابتدا یک چرخه انتخاب کنید.'
+              : notComparableReason || 'این زوج در این چرخه قابل‌مقایسه نیست.',
           }));
         }
       }
@@ -511,16 +531,23 @@
     };
 
     var verdictBadge;
-    if (v.verdict === 'VALID') {
+    // §۳ ممیزی جلسه ۲ — دو حکم مستقل: سازگاری دادهٔ تأییدشده vs نتیجهٔ نهایی
+    var confirmedVerdict = v.confirmedVerdict || v.verdict;
+    var overallVerdict = v.overallVerdict || v.verdict;
+    if (overallVerdict === 'VALID') {
       verdictBadge = UI.badge('داده‌های تأییدشدهٔ این چرخه سازگارند', 'green', 'checkCircle');
-    } else if (v.verdict === 'INVALID') {
+    } else if (overallVerdict === 'INVALID') {
       verdictBadge = UI.badge('داده‌های ناسازگار — تأیید نهایی مسدود است', 'red', 'alertTriangle');
+    } else if (confirmedVerdict === 'VALID') {
+      verdictBadge = UI.badge('داده‌های تأییدشده سازگارند؛ اعتبارسنجی کامل نیست', 'amber', 'circleHelp');
     } else {
       verdictBadge = UI.badge('نامعین — داده کامل نیست', 'amber', 'circleHelp');
     }
 
+    var intervalIssues = v.intervalIssues || [];
     var hasAny =
       v.localFailures.length > 0 || v.tripleIssues.length > 0 || v.globalIssues.length > 0 ||
+      intervalIssues.length > 0 ||
       v.provisionalWarnings.length > 0 || v.multiOverlaps.length > 0 || v.unions.length > 0;
     if (!hasAny) return U.h('div', { class: 'flex justify-center' }, verdictBadge);
 
@@ -529,8 +556,9 @@
         U.h('p', { class: 'text-sm font-bold', text: 'اعتبارسنجی و محاسبات وابسته (چرخهٔ انتخاب‌شده)' }),
         verdictBadge));
 
-    // خطاهای قطعی — مسدودکننده (§۸.۱)
-    if (v.localFailures.length > 0 || v.tripleIssues.length > 0 || v.globalIssues.length > 0) {
+    // خطاهای قطعی — مسدودکننده (§۸.۱) + تعارض با بازهٔ واقعی (§۴ ممیزی جلسه ۲)
+    if (v.localFailures.length > 0 || v.tripleIssues.length > 0 || v.globalIssues.length > 0 ||
+        intervalIssues.some(function (i) { return i.kind === 'DEFINITE'; })) {
       var definite = U.h('ul', { class: 'list-none flex flex-col gap-1.5' });
       v.localFailures.forEach(function (lf) {
         lf.failures.forEach(function (f) {
@@ -544,7 +572,23 @@
       v.globalIssues.forEach(function (gi) {
         definite.appendChild(U.h('li', { class: 'mx-issue-red', text: gi.message }));
       });
+      intervalIssues.forEach(function (i) {
+        if (i.kind !== 'DEFINITE') return;
+        definite.appendChild(U.h('li', { class: 'mx-issue-red' },
+          U.h('b', { text: nameOf(i.pair[0]) + ' ↔ ' + nameOf(i.pair[1]) + ': ' }), i.message));
+      });
       panel.appendChild(definite);
+    }
+
+    // بازهٔ ناقص — ادعای VALID قطعی ممکن نیست (§۴ ممیزی جلسه ۲)
+    if (intervalIssues.some(function (i) { return i.kind === 'INDETERMINATE'; })) {
+      var incomplete = U.h('ul', { class: 'list-none flex flex-col gap-1.5' });
+      intervalIssues.forEach(function (i) {
+        if (i.kind !== 'INDETERMINATE') return;
+        incomplete.appendChild(U.h('li', { class: 'mx-issue-amber' }, U.icon('circleHelp'),
+          U.h('span', { text: i.message })));
+      });
+      panel.appendChild(incomplete);
     }
 
     // هشدارهای موقتی (§۸.۲)
@@ -812,11 +856,16 @@
 
   // ═══════════════════════════════════════════════════════════
   // بخش «عناصر موازی و اطلاعات هم‌پوشانی» — مشترک بین دیالوگ عنصر
-  // (views-structure.js) و استفاده‌های بعدی — منبع داده: سرویس مرکزی (§۴.۲)
-  // امضا: (container, projectId, elementId, elementName)
+  // (views-structure.js) و پاپ‌اور سربرگ ستون برگهٔ زمان‌سنجی — منبع داده:
+  // سرویس مرکزی (§۴.۲).
+  // امضا: (container, projectId, elementId, elementName, opts?)
+  // opts.sessionId — §۶ ممیزی جلسه ۲: در زمینهٔ زمان‌سنجی، داده به جلسهٔ جاری محدود می‌شود
+  // opts.cycles — چرخه‌های زمینهٔ جاری (در زمان‌سنجی: چرخه‌های همین جلسه)
   // ═══════════════════════════════════════════════════════════
 
-  g.T2VIEWS._parallelRelationsSection = function (container, projectId, elementId, elementName) {
+  g.T2VIEWS._parallelRelationsSection = function (container, projectId, elementId, elementName, opts) {
+    opts = opts || {};
+    var sessionScoped = !!opts.sessionId;
     var sectionEl = U.h('section', {
       class: 'mx-parallel-section flex flex-col gap-3',
       'aria-label': 'عناصر موازی و اطلاعات هم‌پوشانی «' + elementName + '»',
@@ -828,7 +877,7 @@
     function draw() {
       var data;
       try {
-        data = DB.getElementRelations(elementId);
+        data = DB.getElementRelations(elementId, { sessionId: opts.sessionId || null });
       } catch (err) {
         U.clear(sectionEl);
         sectionEl.appendChild(U.h('div', { class: 'banner error' }, U.icon('alertTriangle'),
@@ -886,12 +935,17 @@
             chip = U.h('span', { class: 'mx-val text-xs', dir: 'ltr' },
               U.formatTimeValue(r.latest.overlapDuration), U.h('span', { class: 'mx-unit', text: ' s' }));
           }
+          // §۶ ممیزی جلسه ۲ — برچسب صریح دامنهٔ «آخرین ثبت»؛ در زمینهٔ زمان‌سنجی
+          // دادهٔ جلسه/اپراتور دیگر نمایش داده نمی‌شود
           latestBlock = U.h('span', { class: 'flex flex-col items-end gap-1 shrink-0' },
             chip,
             U.h('span', { class: 'text-muted', style: { fontSize: '10px' } },
-              'آخرین ثبت: چرخهٔ ' + U.formatInt(r.latest.cycleNo) + ' — ' + r.latest.operatorName + ' — ' + r.latest.activityName));
+              (sessionScoped ? 'آخرین ثبت در این جلسه: چرخهٔ ' : 'آخرین ثبت در کل پروژه: چرخهٔ ') +
+              U.formatInt(r.latest.cycleNo) +
+              (sessionScoped ? '' : ' — ' + r.latest.operatorName + ' — ' + r.latest.activityName)));
         } else {
-          latestBlock = U.h('span', { class: 'text-muted shrink-0', style: { fontSize: '10px' }, text: 'هنوز مقداری ثبت نشده است' });
+          latestBlock = U.h('span', { class: 'text-muted shrink-0', style: { fontSize: '10px' },
+            text: sessionScoped ? 'در این جلسه هنوز مقداری ثبت نشده است' : 'هنوز مقداری ثبت نشده است' });
         }
 
         li.appendChild(U.h('div', { class: 'flex flex-wrap items-center justify-between gap-2' },
@@ -936,32 +990,59 @@
       return li;
     }
 
-    /** ویرایش سریع مقدار یک رابطه برای یک چرخه — با تأیید اثرات (§۴.۴) */
+    /** ویرایش سریع مقدار یک رابطه برای یک چرخه — با تأیید اثرات (§۴.۴)
+     *  §۶ ممیزی جلسه ۲ — مقدار اولیه status از رکورد واقعی چرخهٔ انتخاب‌شده خوانده
+     *  می‌شود؛ مقدار قبلی با UNREVIEWED خالی جایگزین نمی‌شود. چرخهٔ پیش‌فرض فقط
+     *  از جلسهٔ جاری (در زمینهٔ زمان‌سنجی) انتخاب می‌شود. */
     function buildQuickEditor(r) {
       var box = U.h('div', { class: 'mx-quick-editor flex flex-col gap-2.5', style: { marginTop: '8px' } });
       var cycles = [];
-      try {
-        cycles = DB.getOverlapMatrix(projectId, null).cycles;
-      } catch (e) { cycles = []; }
+      if (sessionScoped && opts.cycles) {
+        // چرخه‌های همان جلسهٔ جاری — بدون افتادن به چرخه‌های جلسات دیگر
+        cycles = opts.cycles.map(function (c) {
+          return { cycleId: c.cycleId, cycleNo: c.cycleNo, sessionId: opts.sessionId, operatorName: '', activityName: '', timingMethod: '', sessionStatus: '', activityId: '', createdAt: '' };
+        });
+      } else {
+        try {
+          cycles = DB.getOverlapMatrix(projectId, null).cycles;
+        } catch (e) { cycles = []; }
+      }
       if (cycles.length === 0) {
         box.appendChild(U.h('p', { class: 'text-xs text-muted', text: 'چرخه‌ای برای ثبت وجود ندارد؛ ابتدا در زمان‌سنجی داده ثبت کنید.' }));
         return box;
       }
 
-      // پیش‌فرض: آخرین چرخهٔ دارای مقدار، وگرنه آخرین چرخهٔ پروژه
-      var cycleId = null;
-      if (r.latest && cycles.some(function (c) { return c.cycleId === r.latest.cycleId; })) cycleId = r.latest.cycleId;
-      else cycleId = cycles[cycles.length - 1].cycleId;
+      // پیش‌فرض: آخرین چرخهٔ زمینهٔ جاری (زمان‌سنجی: همین جلسه؛ ساختار: کل پروژه)
+      var cycleId = cycles[cycles.length - 1].cycleId;
       var status = 'UNREVIEWED';
       var duration = null;
       var confirming = false;
+
+      /** خواندن مقدار واقعی رابطه در چرخهٔ انتخاب‌شده — منبع واحد ماتریس (§۶ ممیزی) */
+      function loadCycleValue(cid) {
+        var m = null;
+        try { m = DB.getOverlapMatrix(projectId, cid); } catch (e) { return null; }
+        return m;
+      }
+      var cycleMatrix = loadCycleValue(cycleId);
+      function syncFromRecord() {
+        var cell = cycleMatrix && cycleMatrix.cells ? cycleMatrix.cells[r.relationId] : null;
+        status = cell ? cell.status : 'UNREVIEWED';
+        duration = cell && cell.overlapDuration != null ? cell.overlapDuration : null;
+      }
+      syncFromRecord();
+      function comparabilityOf(cid) {
+        var m = cid === cycleId ? cycleMatrix : loadCycleValue(cid);
+        if (!m || !m.comparability || !m.comparability[r.relationId]) return { isComparable: true, notComparableReason: null };
+        return m.comparability[r.relationId];
+      }
 
       var sel = U.h('select', { class: 'select', 'aria-label': 'انتخاب چرخه' });
       var sessionIds = [];
       var bySession = {};
       cycles.forEach(function (c) {
         if (!bySession[c.sessionId]) {
-          bySession[c.sessionId] = { label: c.activityName + ' — ' + c.operatorName, cycles: [] };
+          bySession[c.sessionId] = { label: sessionScoped ? 'جلسهٔ جاری' : (c.activityName + ' — ' + c.operatorName), cycles: [] };
           sessionIds.push(c.sessionId);
         }
         bySession[c.sessionId].cycles.push(c);
@@ -970,17 +1051,27 @@
         var s = bySession[sid];
         var og = U.h('optgroup', { label: s.label });
         s.cycles.forEach(function (c) {
-          var opt = U.h('option', { value: c.cycleId },
-            'چرخهٔ ' + U.formatInt(c.cycleNo) + ' — ' + c.operatorName + ' — ' + c.activityName);
+          var label = sessionScoped
+            ? 'چرخهٔ ' + U.formatInt(c.cycleNo)
+            : 'چرخهٔ ' + U.formatInt(c.cycleNo) + ' — ' + c.operatorName + ' — ' + c.activityName;
+          var opt = U.h('option', { value: c.cycleId }, label);
           if (cycleId === c.cycleId) opt.selected = true;
           og.appendChild(opt);
         });
         sel.appendChild(og);
       });
-      sel.addEventListener('change', function () { cycleId = sel.value || null; sync(); });
+      sel.addEventListener('change', function () {
+        cycleId = sel.value || null;
+        // §۶ ممیزی جلسه ۲ — با تغییر چرخه، مقدار از رکورد واقعی چرخهٔ جدید خوانده می‌شود
+        cycleMatrix = loadCycleValue(cycleId);
+        syncFromRecord();
+        confirming = false;
+        drawEditor();
+      });
 
       var saveBtn = U.h('button', { class: 'btn btn-brand btn-sm', type: 'button', text: 'ثبت تغییر', onclick: function () { confirming = true; drawEditor(); } });
       var confirmWrap = U.h('div');
+      var notComparableWrap = U.h('div');
 
       var RADIO_OPTIONS = [
         { value: 'UNREVIEWED', label: 'بررسی‌نشده' },
@@ -988,14 +1079,16 @@
         { value: 'OVERLAP', label: 'دارای هم‌پوشانی' },
       ];
       var radiosWrap = U.h('div', { class: 'flex flex-col gap-1.5' });
+      var radioInputs = [];
       RADIO_OPTIONS.forEach(function (o) {
         var radio = U.h('label', { class: 'mx-radio' },
-          U.h('input', { type: 'radio', name: 'mxq-' + r.relationId, checked: status === o.value, style: { accentColor: 'var(--brand)' } }),
+          U.h('input', { type: 'radio', name: 'mxq-' + r.relationId, value: o.value, checked: status === o.value, style: { accentColor: 'var(--brand)' } }),
           U.h('span', { text: o.label }));
-        radio.querySelector('input').addEventListener('change', function () {
+        var input = radio.querySelector('input');
+        radioInputs.push({ input: input, radio: radio, value: o.value });
+        input.addEventListener('change', function () {
           status = o.value;
-          radiosWrap.querySelectorAll('.mx-radio').forEach(function (x) { x.classList.remove('selected'); });
-          radio.classList.add('selected');
+          confirming = false;
           sync();
         });
         radiosWrap.appendChild(radio);
@@ -1005,7 +1098,22 @@
 
       function sync() {
         drawValue();
-        saveBtn.disabled = !cycleId || (status === 'OVERLAP' && (duration === null || isNaN(duration) || duration <= 0));
+        // همگام‌سازی بصری گزینه‌ها با مقدار واقعی رکورد چرخه (prefill — §۶ ممیزی)
+        radioInputs.forEach(function (ri) {
+          ri.input.checked = ri.value === status;
+          ri.radio.classList.toggle('selected', ri.value === status);
+        });
+        var comp = comparabilityOf(cycleId);
+        // §۵ ممیزی جلسه ۲ — زوج غیرقابل‌مقایسه در چرخهٔ انتخاب‌شده قابل ثبت نیست
+        U.clear(notComparableWrap);
+        if (cycleId && comp.isComparable === false) {
+          notComparableWrap.appendChild(U.h('p', {
+            class: 'text-xs text-muted', style: { background: 'var(--muted)', borderRadius: '8px', padding: '8px' },
+            text: comp.notComparableReason || 'این زوج در این چرخه قابل‌مقایسه نیست.',
+          }));
+        }
+        saveBtn.disabled = !cycleId || comp.isComparable === false ||
+          (status === 'OVERLAP' && (duration === null || isNaN(duration) || duration <= 0));
       }
       function drawValue() {
         U.clear(valueWrap);
@@ -1024,6 +1132,7 @@
         box.appendChild(U.h('div', { class: 'flex flex-col gap-1' },
           U.h('label', { class: 'field-label', style: { marginBottom: 0 }, text: 'چرخه' }),
           sel));
+        box.appendChild(notComparableWrap);
         box.appendChild(radiosWrap);
         box.appendChild(valueWrap);
         box.appendChild(U.h('div', { class: 'flex justify-end gap-2' }, saveBtn));
@@ -1037,11 +1146,15 @@
                 class: 'btn btn-brand btn-sm', type: 'button', text: 'بله، ثبت کن',
                 onclick: function () {
                   try {
+                    var cell = cycleMatrix && cycleMatrix.cells ? cycleMatrix.cells[r.relationId] : null;
                     var res = DB.setCycleOverlaps(cycleId, [{
                       relationId: r.relationId,
                       status: status,
                       overlapDuration: status === 'OVERLAP' ? duration : (status === 'NO_OVERLAP' ? 0 : null),
-                    }]);
+                      expectedVersion: cell ? cell.version : undefined,
+                    }], {
+                      expectedOverlapRevision: cycleMatrix && cycleMatrix.selectedCycle ? cycleMatrix.selectedCycle.overlapRevision : undefined,
+                    });
                     UI.toast('مقدار هم‌پوشانی ثبت شد', { description: 'فرم عنصر مقابل و ماتریس مرکزی هم‌زمان به‌روز شدند.' });
                     res.warnings.forEach(function (w) {
                       UI.toast('هشدار — نتیجه موقتی است', { type: 'warning', description: w });

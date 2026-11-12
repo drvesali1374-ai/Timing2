@@ -72,11 +72,12 @@ async function main() {
   const s2 = await req('POST', `/api/activities/${activityId}/sessions`, { operatorId: operator2Id, timingMethod: 'SNAPBACK' })
   const session2 = s2.data.session.id
 
-  // چرخه ۱ جلسه ۱: A=[0,50) B=[-10,30) C=[30,50) → AB=30 AC=20 BC=0 (آزمون ۵)
-  // چرخه ۲ جلسه ۱: مقادیر متفاوت (آزمون ۹ — استقلال چرخه‌ها)
-  await req('POST', `/api/sessions/${session1}/cycles`, { count: 2 })
+  // چرخه ۱ جلسه ۱: A=[10,60) B=[0,40) C=[40,60) → AB=30 AC=20 BC=0 (آزمون ۵)
+  // چرخه ۲ جلسه ۱: A=[0,40) B=[10,30) C=[30,60) → AB=20 AC=10 BC=0 (آزمون ۹ — استقلال چرخه‌ها)
+  // چرخه ۴ جلسه ۱: A=[0,10) B=[2,12) C=[2,12) → AB=8 AC=8 BC=10 (سناریوی سه‌تایی قطعی §۱۱ ممیزی)
+  await req('POST', `/api/sessions/${session1}/cycles`, { count: 4 })
   const sheet1 = (await req('GET', `/api/sessions/${session1}`)).data.sheet
-  const [c1, c2] = sheet1.cycles
+  const [c1, c2, , c4] = sheet1.cycles
   await req('PUT', `/api/cycles/${c1.id}/cells`, {
     cells: [
       { cycleId: c1.id, workElementId: elIds.A, startOffset: 10, endOffset: 60 },
@@ -89,6 +90,17 @@ async function main() {
       { cycleId: c2.id, workElementId: elIds.A, startOffset: 0, endOffset: 40 },
       { cycleId: c2.id, workElementId: elIds.B, startOffset: 10, endOffset: 30 },
       { cycleId: c2.id, workElementId: elIds.C, startOffset: 30, endOffset: 60 },
+      // D و E هم مشاهده دارند تا حکم «سازگاری دادهٔ تأییدشده» قطعی و بدون نکتهٔ
+      // «مدت ثبت نشده» باشد (D-E بررسی‌نشده می‌ماند → نتیجهٔ نهایی INDETERMINATE)
+      { cycleId: c2.id, workElementId: elIds.D, startOffset: 50, endOffset: 60 },
+      { cycleId: c2.id, workElementId: elIds.E, startOffset: 70, endOffset: 80 },
+    ],
+  })
+  await req('PUT', `/api/cycles/${c4.id}/cells`, {
+    cells: [
+      { cycleId: c4.id, workElementId: elIds.A, startOffset: 0, endOffset: 10 },
+      { cycleId: c4.id, workElementId: elIds.B, startOffset: 2, endOffset: 12 },
+      { cycleId: c4.id, workElementId: elIds.C, startOffset: 2, endOffset: 12 },
     ],
   })
   // یک چرخه در جلسهٔ دوم (اپراتور مستقل)
@@ -168,31 +180,55 @@ async function main() {
     )
   }
 
-  console.log('── §۹/۲: نقض سه‌تایی → INVALID (AB=30، AC=20، BC=1 با D_A=50)')
+  console.log('── §۱۱ ممیزی: سناریوی سه‌تایی قطعی — D=10/10/10، AB=8، AC=8، BC=1')
   {
-    // در چرخهٔ ۱: A=[0,50) B=[-10,30) C=[30,50)
+    // چرخهٔ ۴: A=[0,10) B=[2,12) C=[2,12) → بازهٔ واقعی AB=8 و AC=8 سازگار؛
+    // BC=1 ناسازگار با قید سه‌تایی (O_BC ≥ 8+8−10 = 6) و با بازهٔ واقعی BC=10.
+    const relBC = await req('POST', `/api/projects/${projectId}/overlap/relations`, { elementAId: elIds.B, elementBId: elIds.C })
+    check('ایجاد B-C', relBC.status === 201)
+    const setABAC = await req('PUT', `/api/cycles/${c4.id}/overlaps`, {
+      updates: [
+        { relationId: relAB.data.relation.id, status: 'OVERLAP', overlapDuration: 8 },
+        { relationId: relAC.data.relation.id, status: 'OVERLAP', overlapDuration: 8 },
+      ],
+    })
+    check('ثبت AB=8 و AC=8 موفق شد', setABAC.status === 200, JSON.stringify(setABAC.data).slice(0, 200))
+    // تصویر وضعیت پایگاه پیش از درخواست نامعتبر
+    const before = (await req('GET', `/api/projects/${projectId}/overlap/matrix?cycleId=${c4.id}`)).data
+    const bad = await req('PUT', `/api/cycles/${c4.id}/overlaps`, {
+      updates: [{ relationId: relBC.data.relation.id, status: 'OVERLAP', overlapDuration: 1 }],
+    })
+    check('ثبت BC=1 با 422 رد شد (حداقل سه‌تایی: 6)', bad.status === 422, `status=${bad.status}`)
+    const after = (await req('GET', `/api/projects/${projectId}/overlap/matrix?cycleId=${c4.id}`)).data
+    check('مقدار قبلی AB (8) حفظ شد', after.cells[relAB.data.relation.id]?.overlapDuration === 8)
+    check('مقدار قبلی AC (8) حفظ شد', after.cells[relAC.data.relation.id]?.overlapDuration === 8)
+    check('مقدار نامعتبر BC ذخیره نشد', after.cells[relBC.data.relation.id] == null)
+    check(
+      'وضعیت پایگاه دقیقاً با قبل از درخواست نامعتبر برابر است',
+      JSON.stringify(after.cells) === JSON.stringify(before.cells) &&
+        JSON.stringify(after.validation?.localFailures) === JSON.stringify(before.validation?.localFailures),
+    )
+    // اثبات rollback واقعی: درخواست ترکیبی (AB=9 معتبر + BC=1 نامعتبر) → همه یا هیچ
+    const combined = await req('PUT', `/api/cycles/${c4.id}/overlaps`, {
+      updates: [
+        { relationId: relAB.data.relation.id, status: 'OVERLAP', overlapDuration: 9 },
+        { relationId: relBC.data.relation.id, status: 'OVERLAP', overlapDuration: 1 },
+      ],
+    })
+    check('درخواست ترکیبی نامعتبر نیز 422 خورد', combined.status === 422, `status=${combined.status}`)
+    const afterCombined = (await req('GET', `/api/projects/${projectId}/overlap/matrix?cycleId=${c4.id}`)).data
+    check('rollback واقعی: AB همچنان 8 است (نه 9)', afterCombined.cells[relAB.data.relation.id]?.overlapDuration === 8)
+    check('rollback واقعی: BC بدون رکورد ماند', afterCombined.cells[relBC.data.relation.id] == null)
+  }
+
+  console.log('── §۹/۲: چرخهٔ ۲ — AB=20 و AC=10 (سازگار با بازه) و رد محلی AB=25')
+  {
     await req('PUT', `/api/cycles/${c1.id}/overlaps`, {
       updates: [
         { relationId: relAC.data.relation.id, status: 'OVERLAP', overlapDuration: 20 },
       ],
     })
-    const relBC = await req('POST', `/api/projects/${projectId}/overlap/relations`, { elementAId: elIds.B, elementBId: elIds.C })
-    check('ایجاد B-C', relBC.status === 201)
-    const bad = await req('PUT', `/api/cycles/${c1.id}/overlaps`, {
-      updates: [{ relationId: relBC.data.relation.id, status: 'OVERLAP', overlapDuration: 1 }],
-    })
-    check('BC=1 رد شد (حداقل لازم: 30+20−50=0؟ نه — 30+20−50=0... آزمایش دقیق)', bad.status === 422 || bad.status === 200, `status=${bad.status}`)
-    // نکته: با D_A=50، حداقل BC = max(0, 30+20−50) = 0 → 1 قابل قبول است!
-    // پس این آزمون با دادهٔ این fixture معنادار نیست؛ عوضش آزمون ۲ را با چرخهٔ ۲ اجرا می‌کنیم.
-    if (bad.status === 200) {
-      console.log('    (توضیح: در این fixture حداقل BC = 0 است؛ ثبت 1 مجاز — به چرخهٔ ۲ می‌رویم)')
-      // پاک کردن BC=1 برای ادامه
-      await req('PUT', `/api/cycles/${c1.id}/overlaps`, {
-        updates: [{ relationId: relBC.data.relation.id, status: 'NO_OVERLAP' }],
-      })
-    }
-    // چرخهٔ ۲: A=40, B=20, C=30 (مدت‌ها)؛ AB=20, AC=10 → حداقل BC = 20+10−40 = ...
-    // مدت‌ها: A=[0,40) B=[10,30) C=[30,60) → AB=20, AC=10, BC=0 (تماس مرزی)
+    // چرخهٔ ۲: A=[0,40) B=[10,30) C=[30,60) → AB=20 و AC=10 دقیقاً بازهٔ واقعی‌اند
     const setAB = await req('PUT', `/api/cycles/${c2.id}/overlaps`, {
       updates: [
         { relationId: relAB.data.relation.id, status: 'OVERLAP', overlapDuration: 20 },
@@ -200,11 +236,6 @@ async function main() {
       ],
     })
     check('ثبت AB=20 و AC=10 در چرخهٔ ۲', setAB.status === 200, JSON.stringify(setAB.data).slice(0, 200))
-    const badT = await req('PUT', `/api/cycles/${c2.id}/overlaps`, {
-      updates: [{ relationId: relBC.data.relation.id, status: 'NO_OVERLAP' }],
-    })
-    // D_A=40: حداقل BC = max(0, 20+10−40) = 0 → NO_OVERLAP مجاز؛ برای نقض واقعی AB=25 می‌خواهیم
-    // تغییر AB به 25 (ناممکن با بازه‌های واقعی چرخهٔ ۲؟ A=[0,40) B=[10,30) → AB واقعی=20 → 25 > 20 ناممکن محلی؟ 25 ≤ min(40,20)=20؟ نه 25>20 → رد محلی)
     const badLocal = await req('PUT', `/api/cycles/${c2.id}/overlaps`, {
       updates: [{ relationId: relAB.data.relation.id, status: 'OVERLAP', overlapDuration: 25 }],
     })
@@ -213,13 +244,18 @@ async function main() {
 
   console.log('── §۹/۴: رابطهٔ بررسی‌نشده با حداقل لازم → هشدار موقت')
   {
-    // BC را به بررسی‌نشده برمی‌گردانیم تا سناریوی §۹/۴ واقعی شود
+    // بازگرداندن B-C به بررسی‌نشده تا سناریوی §۹/۴ واقعی شود
     const relsAll = (await req('GET', `/api/projects/${projectId}/overlap/relations`)).data.relations
     const bcRel = relsAll.find((r: any) => (r.elementLowId === elIds.B && r.elementHighId === elIds.C) || (r.elementLowId === elIds.C && r.elementHighId === elIds.B))
     const resetBC = await req('PUT', `/api/cycles/${c2.id}/overlaps`, {
       updates: [{ relationId: bcRel.id, status: 'UNREVIEWED' }],
     })
     check('بازگردانی BC به بررسی‌نشده', resetBC.status === 200, JSON.stringify(resetBC.data).slice(0, 200))
+    // برای AC=25: بازهٔ C در چرخهٔ ۲ را به [15,55) تغییر می‌دهیم تا با بازهٔ واقعی سازگار شود
+    // (A=[0,40) ∩ C=[15,55) = 25) — دادهٔ خام فقط بازهٔ همین چرخه است و مقدار دستی با آن تطبیق دارد
+    await req('PUT', `/api/cycles/${c2.id}/cells`, {
+      cells: [{ cycleId: c2.id, workElementId: elIds.C, startOffset: 15, endOffset: 55 }],
+    })
     // چرخهٔ ۲: AB=20, AC=25, D_A=40 → حداقل BC = max(0, 20+25−40) = 5 → هشدار (نه رد قطعی)
     const setAC = await req('PUT', `/api/cycles/${c2.id}/overlaps`, {
       updates: [{ relationId: relAC.data.relation.id, status: 'OVERLAP', overlapDuration: 25 }],
@@ -228,7 +264,8 @@ async function main() {
     const m = (await req('GET', `/api/projects/${projectId}/overlap/matrix?cycleId=${c2.id}`)).data
     const warns = m.validation?.provisionalWarnings ?? []
     check('هشدار «حداقل ۵ ثانیه» برای BC صادر شد', warns.some((w: any) => w.message.includes('حداقل') && w.message.includes('۵') || w.message.includes('حداقل 5')), JSON.stringify(warns).slice(0, 400))
-    check('دادهٔ تأییدشده INVALID نیست (فقط هشدار)', m.validation?.verdict === 'VALID' || m.validation?.verdict === 'INDETERMINATE', `verdict=${m.validation?.verdict}`)
+    check('دادهٔ تأییدشده INVALID نیست (فقط هشدار)', m.validation?.confirmedVerdict === 'VALID', `confirmedVerdict=${m.validation?.confirmedVerdict}`)
+    check('نتیجهٔ نهایی به دلیل BC بررسی‌نشده INDETERMINATE است (§۳ ممیزی)', m.validation?.overallVerdict === 'INDETERMINATE', `overallVerdict=${m.validation?.overallVerdict}`)
   }
 
   console.log('── §۱۹.۱: سه وضعیت DB — UNREVIEWED=null، NO_OVERLAP=0، OVERLAP>0')
@@ -266,16 +303,24 @@ async function main() {
     check('خود-رابطه رد شد', self.status === 422)
   }
 
-  console.log('── §۱۹.۱: operator/session مستقل مخلوط نمی‌شود')
+  console.log('── §۵ ممیزی: چرخهٔ غیرقابل‌مقایسه — عنصر بدون مشاهده در چرخه')
   {
+    // چرخهٔ ۳ فقط A را دارد (بدون B) → زوج A-B در این چرخه قابل‌مقایسه نیست؛
+    // ثبت NO_OVERLAP تأییدشده باید رد شود و هیچ رکوردی ساخته نشود (§۵ ممیزی جلسه ۲)
     const m3 = (await req('GET', `/api/projects/${projectId}/overlap/matrix?cycleId=${c3.id}`)).data
     check('چرخهٔ اپراتور دوم مقدار AB ندارد (جلسات مستقل)', m3.cells[relAB.data.relation.id] == null)
+    check(
+      'ماتریس زوج A-B را در چرخهٔ ۳ غیرقابل‌مقایسه اعلام می‌کند',
+      m3.comparability?.[relAB.data.relation.id]?.isComparable === false,
+      JSON.stringify(m3.comparability?.[relAB.data.relation.id]),
+    )
     const set3 = await req('PUT', `/api/cycles/${c3.id}/overlaps`, {
       updates: [{ relationId: relAB.data.relation.id, status: 'NO_OVERLAP' }],
     })
-    check('ثبت NO_OVERLAP در جلسهٔ دوم مستقل', set3.status === 200)
+    check('ثبت NO_OVERLAP در چرخهٔ غیرقابل‌مقایسه با 422 رد شد', set3.status === 422, `status=${set3.status}`)
+    check('پیام خطا «قابل‌مقایسه» را بیان می‌کند', String(set3.data?.error?.message ?? '').includes('قابل‌مقایسه'), JSON.stringify(set3.data?.error?.message).slice(0, 200))
     const m3b = (await req('GET', `/api/projects/${projectId}/overlap/matrix?cycleId=${c3.id}`)).data
-    check('NO_OVERLAP با مقدار صفر', m3b.cells[relAB.data.relation.id]?.overlapDuration === 0 && m3b.cells[relAB.data.relation.id]?.status === 'NO_OVERLAP')
+    check('هیچ رکورد قطعی جعلی ساخته نشد (سلول همچنان خالی)', m3b.cells[relAB.data.relation.id] == null)
     const m1 = (await req('GET', `/api/projects/${projectId}/overlap/matrix?cycleId=${c1.id}`)).data
     check('چرخهٔ 1 جلسهٔ 1 تغییری نکرد', m1.cells[relAB.data.relation.id]?.overlapDuration === 30)
   }

@@ -361,6 +361,11 @@
     var tblIds = tables.map(function (x) { return x.id; });
     state.elementObservations = state.elementObservations.filter(function (o) { return elIds.indexOf(o.workElementId) < 0 && cycIds.indexOf(o.cycleId) < 0; });
     state.timelineLanes = state.timelineLanes.filter(function (l) { return cycIds.indexOf(l.cycleId) < 0; });
+    // §۹ ممیزی جلسه ۲ — حذف صریح روابط هم‌پوشانی و مقادیر چرخه‌ای پروژه (بدون رکورد یتیم)
+    var projRelIds = {};
+    state.overlapRelations.forEach(function (r) { if (r.projectId === id) projRelIds[r.id] = true; });
+    state.observationOverlaps = state.observationOverlaps.filter(function (o) { return !projRelIds[o.relationId] && cycIds.indexOf(o.cycleId) < 0; });
+    state.overlapRelations = state.overlapRelations.filter(function (r) { return r.projectId !== id; });
     state.cycleObservations = state.cycleObservations.filter(function (c) { return sesIds.indexOf(c.sessionId) < 0; });
     state.ratingAssessments = state.ratingAssessments.filter(function (r) { return elIds.indexOf(r.workElementId) < 0 && tblIds.indexOf(r.ratingTableId) < 0; });
     state.studySessions = state.studySessions.filter(function (s) { return actIds.indexOf(s.activityId) < 0; });
@@ -440,6 +445,10 @@
       sessions = sessions.concat(filterBy('studySessions', 'activityId', a.id));
     });
     var deps = { 'فعالیت': acts.length, 'عنصر کاری': els.length, 'جلسه زمان‌سنجی': sessions.length };
+    // §۹ ممیزی جلسه ۲ — آرشیو روابط موازی تمام عناصر کاری زیرمجموعه
+    var archivedRelations = 0;
+    els.forEach(function (e) { archivedRelations += archiveOverlapRelationsForElement(e.id); });
+    if (archivedRelations > 0) deps['رابطهٔ موازی (آرشیو شد)'] = archivedRelations;
     var ids = [id].concat(acts.map(function (a) { return a.id; })).concat(els.map(function (e) { return e.id; })).concat(sessions.map(function (s) { return s.id; }));
     cascadeDelete(ids);
     markDeleted('Station', [id]);
@@ -451,6 +460,9 @@
     state.ratingAssessments = state.ratingAssessments.filter(function (r) { return ids.indexOf(r.workElementId) < 0; });
     state.elementObservations = state.elementObservations.filter(function (r) { return ids.indexOf(r.workElementId) < 0 && ids.indexOf(r.cycleId) < 0; });
     state.timelineLanes = state.timelineLanes.filter(function (r) { return ids.indexOf(r.cycleId) < 0; });
+    // §۸/§۹ ممیزی جلسه ۲ — مقادیر هم‌پوشانی چرخه‌های حذف‌شده نیز حذف می‌شوند (بدون ردیف یتیم)؛
+    // مقادیر روابط آرشیو‌شدهٔ عناصر (relationId) دست‌نخورده می‌مانند (حفظ تاریخچه)
+    state.observationOverlaps = state.observationOverlaps.filter(function (r) { return ids.indexOf(r.cycleId) < 0; });
     state.cycleObservations = state.cycleObservations.filter(function (r) { return ids.indexOf(r.id) < 0 && ids.indexOf(r.sessionId) < 0; });
     state.studySessions = state.studySessions.filter(function (r) { return ids.indexOf(r.id) < 0 && ids.indexOf(r.activityId) < 0 && ids.indexOf(r.operatorId) < 0; });
     state.workElements = state.workElements.filter(function (r) { return ids.indexOf(r.id) < 0 && ids.indexOf(r.activityId) < 0; });
@@ -508,6 +520,10 @@
     var els = sortElements(id);
     var sessions = filterBy('studySessions', 'activityId', id);
     var deps = { 'عنصر کاری': els.length, 'جلسه زمان‌سنجی': sessions.length };
+    // §۹ ممیزی جلسه ۲ — آرشیو روابط موازی تمام عناصر کاری زیرمجموعه
+    var archivedRelations = 0;
+    els.forEach(function (e) { archivedRelations += archiveOverlapRelationsForElement(e.id); });
+    if (archivedRelations > 0) deps['رابطهٔ موازی (آرشیو شد)'] = archivedRelations;
     var ids = [id].concat(els.map(function (e) { return e.id; })).concat(sessions.map(function (s) { return s.id; }));
     cascadeDelete(ids);
     markDeleted('Activity', [id]);
@@ -1427,7 +1443,7 @@
     var nextNo = existing.length ? Math.max.apply(null, existing.map(function (c) { return c.cycleNo; })) + 1 : 1;
     var created = 0;
     for (var i = 0; i < count; i++) {
-      state.cycleObservations.push({ id: U.uid(), sessionId: sessionId, cycleNo: nextNo + i, notes: null, isComplete: false, createdAt: U.nowISO(), updatedAt: U.nowISO() });
+      state.cycleObservations.push({ id: U.uid(), sessionId: sessionId, cycleNo: nextNo + i, notes: null, isComplete: false, overlapRevision: 0, createdAt: U.nowISO(), updatedAt: U.nowISO() });
       created++;
     }
     commit();
@@ -3103,16 +3119,17 @@
     putCells(s4.id, cells4);
 
     // ── جلسه دوم: روابط موازی نمونه با مقادیر چرخه‌ای (دموی ماتریس هم‌پوشانی) ──
-    var relPE = createOverlapRelation(projectId, e3.id, e2.id); // «پرس اتوماتیک» ↔ «بستن چهار پیچ» (هم‌زمان مونتاژ)
-    var relPR = createOverlapRelation(projectId, e4.id, e1.id); // «پرس کوبی روتور» ↔ «برداشتن قطعه از گراناق» (بارگذاری هم‌زمان)
-    var s3cycles = filterBy('cycleObservations', 'sessionId', s3.id).sort(function (a, b) { return a.cycleNo - b.cycleNo; });
-    if (s3cycles.length >= 2) {
-      setCycleOverlaps(s3cycles[0].id, [{ relationId: relPR.id, status: 'OVERLAP', overlapDuration: 3.2 }]);
-      setCycleOverlaps(s3cycles[1].id, [{ relationId: relPR.id, status: 'NO_OVERLAP' }]);
-    }
+    var relPE = createOverlapRelation(projectId, e3.id, e2.id); // «پرس اتوماتیک» ↔ «بستن چهار پیچ» (هم‌زمان مونتاژ — همان فعالیت)
+    // رابطهٔ بین‌فعالیتتی: «پرس کوبی روتور» (فعالیت پرس) ↔ «برداشتن قطعه از گراناق» (فعالیت مونتاژ)
+    // §۵ ممیزی جلسه ۲ — تعریف رابطه در سطح پروژه بین عناصر دو Activity مجاز است؛
+    // اما چون هر چرخه به یک جلسه/فعالیت تعلق دارد، عنصر فعالیت دیگر هرگز در همین
+    // چرخه مشاهده ندارد → این زوج در هیچ چرخه‌ای قابل‌مقایسه نیست و مقدار چرخه‌ای
+    // ثبت نمی‌شود (نمایش «در این چرخه قابل‌مقایسه نیست» — بدون مقدار ساختگی).
+    var relPR = createOverlapRelation(projectId, e4.id, e1.id);
     var s1cycles = filterBy('cycleObservations', 'sessionId', s1.id).sort(function (a, b) { return a.cycleNo - b.cycleNo; });
-    if (s1cycles.length >= 1) {
+    if (s1cycles.length >= 2) {
       setCycleOverlaps(s1cycles[0].id, [{ relationId: relPE.id, status: 'OVERLAP', overlapDuration: 2.5 }]);
+      setCycleOverlaps(s1cycles[1].id, [{ relationId: relPE.id, status: 'NO_OVERLAP' }]);
     }
 
     refreshOutliersForProject(projectId, { silent: true });
@@ -3239,19 +3256,24 @@
     return { cycle: cycle, session: session, durations: durations, intervals: intervals };
   }
 
-  function overlapValidationSummary(out, elementsSorted) {
+  function overlapValidationSummary(out, elementsSorted, memberList, pairLookup) {
     var nameOf = {};
     elementsSorted.forEach(function (e) { nameOf[e.elementId] = e.name; });
-    var verdict = (out.localFailures.length > 0 || out.tripleIssues.length > 0 || out.confirmed.verdict === 'INVALID')
-      ? 'INVALID'
-      : (out.confirmed.verdict === 'INDETERMINATE' ? 'INDETERMINATE' : 'VALID');
+    // §۳ ممیزی جلسه ۲ — دو حکم مستقل: confirmedVerdict (سازگاری دادهٔ تأییدشده)
+    // و overallVerdict (نتیجهٔ نهایی — روابط بررسی‌نشده/بازهٔ ناقص → INDETERMINATE)
+    var verdicts = T2F.computeVerdicts(memberList, pairLookup, out);
     return {
-      verdict: verdict,
+      verdict: verdicts.overallVerdict,
+      confirmedVerdict: verdicts.confirmedVerdict,
+      overallVerdict: verdicts.overallVerdict,
       localFailures: out.localFailures.map(function (lf) {
         return { pair: lf.pair, failures: lf.failures, pairLabel: (nameOf[lf.pair[0]] || lf.pair[0]) + ' ↔ ' + (nameOf[lf.pair[1]] || lf.pair[1]) };
       }),
       tripleIssues: out.tripleIssues,
       globalIssues: out.confirmed.issues,
+      intervalIssues: out.intervalIssues.map(function (i) {
+        return { pair: i.pair, recorded: i.recorded, computed: i.computed, message: i.message, kind: i.kind };
+      }),
       provisionalWarnings: out.provisional.warnings,
       multiOverlaps: Object.keys(out.multiOverlaps).map(function (key) {
         return { members: key.split('|'), memberNames: key.split('|').map(function (id) { return nameOf[id] || id; }), value: out.multiOverlaps[key].value, provisional: out.multiOverlaps[key].provisional };
@@ -3260,6 +3282,30 @@
         return { members: key.split('|'), memberNames: key.split('|').map(function (id) { return nameOf[id] || id; }), value: out.unions[key].value, source: out.unions[key].source };
       }),
     };
+  }
+
+  /* §۵ ممیزی جلسه ۲ — مقایسه‌پذیری زوج‌ها در یک چرخه */
+  function isObservedInCycle(elementId, durations) {
+    return Object.prototype.hasOwnProperty.call(durations, elementId);
+  }
+  function hasComparableEvidence(elementId, durations, intervals) {
+    var iv = intervals[elementId];
+    if (iv && iv.startOffset != null && iv.endOffset != null) return true;
+    return durations[elementId] != null;
+  }
+  function comparabilityForRelations(activeRelations, durations, intervals, nameOf) {
+    var out = {};
+    activeRelations.forEach(function (r) {
+      var reasons = [];
+      [r.elementLowId, r.elementHighId].forEach(function (eid) {
+        if (!isObservedInCycle(eid, durations)) reasons.push('«' + nameOf(eid) + '» در این چرخه مشاهده‌ای ندارد');
+        else if (!hasComparableEvidence(eid, durations, intervals)) reasons.push('«' + nameOf(eid) + '» در این چرخه مدت یا بازهٔ قابل‌مقایسه ندارد');
+      });
+      out[r.id] = reasons.length === 0
+        ? { isComparable: true, notComparableReason: null }
+        : { isComparable: false, notComparableReason: 'در این چرخه قابل‌مقایسه نیست: ' + reasons.join('؛ ') };
+    });
+    return out;
   }
 
   /** projection ماتریس — عضویت پویا از روابط فعال؛ مقادیر چرخهٔ انتخاب‌شده */
@@ -3285,11 +3331,13 @@
           cycleId: c.id, cycleNo: c.cycleNo, sessionId: ss.id, operatorId: ss.operatorId,
           operatorName: op ? op.displayName : '؟', timingMethod: ss.timingMethod, sessionStatus: ss.status,
           activityId: ss.activityId, activityName: act.name, createdAt: c.createdAt,
+          overlapRevision: c.overlapRevision || 0,
         });
       });
     });
 
     var cells = {};
+    var comparability = {};
     var selectedCycle = null;
     var validation = null;
     if (cycleId) {
@@ -3299,19 +3347,23 @@
         cells[v.relationId] = { relationId: v.relationId, status: v.status, overlapDuration: v.overlapDuration, version: v.version || 1, updatedAt: v.updatedAt };
       });
       var ctx = cycleOverlapContext(cycleId);
-      var pairLookup = function (a, b) {
-        var rel = activeRelations.find(function (r) { return (r.elementLowId === a && r.elementHighId === b) || (r.elementLowId === b && r.elementHighId === a); });
-        if (!rel) return undefined;
-        var cell = cells[rel.id];
-        if (!cell) return undefined;
-        return { status: cell.status, overlapDuration: cell.overlapDuration };
-      };
       var nameOfFn = function (id) {
         var el = elementsSorted.find(function (e) { return e.elementId === id; });
         return el ? el.name : id;
       };
-      var out = T2F.runFullValidation(members.map(function (m) { return m.elementId; }), ctx.durations, ctx.intervals, pairLookup, nameOfFn);
-      validation = overlapValidationSummary(out, elementsSorted);
+      var memberList = members.map(function (m) { return m.elementId; });
+      // §۳ ممیزی جلسه ۲ — قرارداد یکسان: رابطهٔ فعال بدون رکورد = UNREVIEWED
+      var pairLookup = function (a, b) {
+        var rel = activeRelations.find(function (r) { return (r.elementLowId === a && r.elementHighId === b) || (r.elementLowId === b && r.elementHighId === a); });
+        if (!rel) return undefined;
+        var cell = cells[rel.id];
+        if (!cell) return { status: 'UNREVIEWED', overlapDuration: null };
+        return { status: cell.status, overlapDuration: cell.overlapDuration };
+      };
+      var out = T2F.runFullValidation(memberList, ctx.durations, ctx.intervals, pairLookup, nameOfFn);
+      validation = overlapValidationSummary(out, elementsSorted, memberList, pairLookup);
+      // مقایسه‌پذیری زوج‌ها در این چرخه — §۵ ممیزی جلسه ۲
+      comparability = comparabilityForRelations(activeRelations, ctx.durations, ctx.intervals, nameOfFn);
     }
 
     return {
@@ -3319,6 +3371,7 @@
       members: members,
       relations: relations.map(function (r) { return { id: r.id, elementLowId: r.elementLowId, elementHighId: r.elementHighId, isActive: r.isActive, version: r.version || 1, createdAt: r.createdAt, updatedAt: r.updatedAt }; }),
       cells: cells,
+      comparability: comparability,
       selectedCycle: selectedCycle,
       cycles: cycles,
       elementsCatalog: elementsSorted,
@@ -3326,8 +3379,11 @@
     };
   }
 
-  /** ثبت مقادیر هم‌پوشانی یک چرخه — خط کامل اعتبارسنجی + rollback (§۱۰) */
-  function setCycleOverlaps(cycleId, updates) {
+  /** ثبت مقادیر هم‌پوشانی یک چرخه — خط کامل اعتبارسنجی + rollback (§۱۰)
+   *  §۵ ممیزی جلسه ۲: ثبت مقدار قطعی فقط برای زوج قابل‌مقایسه در چرخهٔ جاری.
+   *  §۱۰ ممیزی جلسه ۲: opts.expectedOverlapRevision — اجرای آفلاین هم‌گام و اتمیک
+   *  است (تک‌نخی/در حافظه)؛ نسخهٔ مجموعه برای هم‌ارزی قرارداد آنلاین کنترل می‌شود. */
+  function setCycleOverlaps(cycleId, updates, opts) {
     if (!updates || updates.length === 0) throw new Error('تغییری برای ثبت وجود ندارد.');
     var ctx = cycleOverlapContext(cycleId);
     var projectId = projectIdOfActivity(ctx.session.activityId);
@@ -3345,6 +3401,31 @@
       relationById[rel.id] = rel;
     });
 
+    // §۵ ممیزی جلسه ۲ — مقایسه‌پذیری: هر دو عنصر باید در همین چرخه مشاهده
+    // و شواهد قابل‌مقایسه (بازه یا مدت) داشته باشند؛ در غیر این صورت ثبت
+    // مقدار قطعی رد می‌شود و هیچ رکورد ساختگی/NO_OVERLAP ساخته نمی‌شود.
+    updates.forEach(function (u) {
+      var rel = relationById[u.relationId];
+      if (u.status === 'UNREVIEWED') return; // پاک‌کردن مقدار همیشه مجاز است
+      [rel.elementLowId, rel.elementHighId].forEach(function (eid) {
+        if (!isObservedInCycle(eid, ctx.durations)) {
+          throw new Error('ثبت مقدار ممکن نیست — «' + nameOfFn(eid) + '» در چرخهٔ ' + ctx.cycle.cycleNo + ' مشاهده‌ای ندارد؛ این زوج در این چرخه قابل‌مقایسه نیست (در این چرخه قابل‌مقایسه نیست).');
+        }
+        if (!hasComparableEvidence(eid, ctx.durations, ctx.intervals)) {
+          throw new Error('ثبت مقدار ممکن نیست — «' + nameOfFn(eid) + '» در چرخهٔ ' + ctx.cycle.cycleNo + ' مدت یا بازهٔ قابل‌مقایسه ندارد؛ این زوج در این چرخه قابل‌مقایسه نیست.');
+        }
+      });
+    });
+
+    // §۱۰ ممیزی جلسه ۲ — کنترل نسخهٔ مجموعهٔ مقادیر چرخه
+    if (opts && opts.expectedOverlapRevision != null) {
+      if ((ctx.cycle.overlapRevision || 0) !== opts.expectedOverlapRevision) {
+        var conflict = new Error('مجموعهٔ مقادیر هم‌پوشانی این چرخه از محل دیگری هم‌زمان تغییر کرده است؛ صفحه را نوسازی کنید.');
+        conflict.code = 'OVERLAP_REVISION_CONFLICT';
+        throw conflict;
+      }
+    }
+
     var allActive = state.overlapRelations.filter(function (r) { return r.projectId === projectId && r.isActive; });
     var valueByKey = {};
     filterBy('observationOverlaps', 'cycleId', cycleId).forEach(function (v) { valueByKey[v.relationId] = v; });
@@ -3357,21 +3438,25 @@
     var memberIds = {};
     allActive.forEach(function (r) { memberIds[r.elementLowId] = true; memberIds[r.elementHighId] = true; });
     var memberList = Object.keys(memberIds);
+    // §۳ ممیزی جلسه ۲ — رابطهٔ فعال بدون رکورد چرخه = UNREVIEWED (نه undefined)
     var pairLookup = function (a, b) {
       var rel = allActive.find(function (r) { return (r.elementLowId === a && r.elementHighId === b) || (r.elementLowId === b && r.elementHighId === a); });
       if (!rel) return undefined;
       var v = newByKey[rel.id];
-      if (!v) return undefined;
+      if (!v) return { status: 'UNREVIEWED', overlapDuration: null };
       return { status: v.status, overlapDuration: v.overlapDuration };
     };
     var out = T2F.runFullValidation(memberList, ctx.durations, ctx.intervals, pairLookup, nameOfFn);
-    var hasDefinite = out.localFailures.length > 0 || out.tripleIssues.length > 0 || out.confirmed.verdict === 'INVALID';
+    var hasDefinite = out.localFailures.length > 0 || out.tripleIssues.length > 0 ||
+      out.intervalIssues.some(function (i) { return i.kind === 'DEFINITE'; }) ||
+      out.confirmed.verdict === 'INVALID';
     if (hasDefinite) {
       var msgs = [];
       out.localFailures.forEach(function (lf) {
         lf.failures.forEach(function (f) { msgs.push(nameOfFn(lf.pair[0]) + ' ↔ ' + nameOfFn(lf.pair[1]) + ': ' + f.message); });
       });
       out.tripleIssues.forEach(function (i) { msgs.push(i.message); });
+      out.intervalIssues.forEach(function (i) { if (i.kind === 'DEFINITE') msgs.push(i.message); });
       out.confirmed.issues.forEach(function (i) { if (i.kind === 'DEFINITE') msgs.push(i.message); });
       var err = new Error('ثبت تغییرات ممکن نیست — دادهٔ غیرممکن رد شد:\n' + msgs.join('\n'));
       err.code = 'OVERLAP_VALIDATION_FAILED';
@@ -3403,17 +3488,22 @@
         projectId: projectId,
       });
     });
+    // افزایش نسخهٔ مجموعهٔ مقادیر این چرخه — §۱۰ ممیزی جلسه ۲
+    ctx.cycle.overlapRevision = (ctx.cycle.overlapRevision || 0) + 1;
+    touch(ctx.cycle);
     markProjectCalculationsStale(projectId);
     commit();
     var after = getOverlapMatrix(projectId, cycleId);
     return { cells: after.cells, validation: after.validation, warnings: out.provisional.warnings.map(function (w) { return w.message; }) };
   }
 
-  /** روابط یک عنصر برای فرم — منبع واحد (§۴.۲) */
-  function getElementRelations(elementId) {
+  /** روابط یک عنصر برای فرم — منبع واحد (§۴.۲)
+   *  §۶ ممیزی جلسه ۲ — opts.sessionId مقدار نمایشی را به چرخه‌های همان جلسه محدود می‌کند */
+  function getElementRelations(elementId, opts) {
     var element = byId('workElements', elementId);
     if (!element) throw new Error('عنصر کاری یافت نشد.');
     var projectId = projectIdOfActivity(element.activityId);
+    var sessionScoped = !!(opts && opts.sessionId);
     var relations = state.overlapRelations.filter(function (r) { return r.elementLowId === elementId || r.elementHighId === elementId; });
     var rows = relations.map(function (r) {
       var otherId = r.elementLowId === elementId ? r.elementHighId : r.elementLowId;
@@ -3422,7 +3512,13 @@
       var otherStation = otherActivity ? byId('stations', otherActivity.stationId) : null;
       var latest = null;
       if (r.isActive) {
-        var lastValue = state.observationOverlaps.filter(function (v) { return v.relationId === r.id; }).sort(function (a, b) { return (b.updatedAt || '').localeCompare(a.updatedAt || ''); })[0];
+        var candidates = state.observationOverlaps.filter(function (v) {
+          if (v.relationId !== r.id) return false;
+          if (!sessionScoped) return true;
+          var cyc = byId('cycleObservations', v.cycleId);
+          return !!cyc && cyc.sessionId === opts.sessionId;
+        }).sort(function (a, b) { return (b.updatedAt || '').localeCompare(a.updatedAt || ''); });
+        var lastValue = candidates[0];
         if (lastValue) {
           var cyc = byId('cycleObservations', lastValue.cycleId);
           if (cyc) {
@@ -3450,7 +3546,7 @@
         latest: latest,
       };
     });
-    return { elementId: elementId, elementName: element.name, rows: rows, projectId: projectId };
+    return { elementId: elementId, elementName: element.name, rows: rows, projectId: projectId, scope: sessionScoped ? 'SESSION' : 'PROJECT' };
   }
 
   /** تنظیمات گزارش/بوم نمودار — بر پایهٔ projectSettings با پیش‌فرض امن */
@@ -3555,6 +3651,8 @@
         cycles: state.cycleObservations.filter(function (c) { return cidMap[c.id]; }).map(function (c) { return JSON.parse(JSON.stringify(c)); }),
         lanes: state.timelineLanes.filter(function (l) { return cidMap[l.cycleId]; }).map(function (l) { return JSON.parse(JSON.stringify(l)); }),
         observations: state.elementObservations.filter(function (o) { return cidMap[o.cycleId]; }).map(function (o) { return JSON.parse(JSON.stringify(o)); }),
+        // §۸ ممیزی جلسه ۲ — مقادیر هم‌پوشانی چرخه‌های همین جلسه نیز در snapshot می‌آیند
+        overlaps: state.observationOverlaps.filter(function (o) { return cidMap[o.cycleId]; }).map(function (o) { return JSON.parse(JSON.stringify(o)); }),
       };
     },
     replaceSessionRows: function (sessionId, snap) {
@@ -3563,9 +3661,12 @@
       state.cycleObservations = state.cycleObservations.filter(function (c) { return !oldCycleIds[c.id]; });
       state.timelineLanes = state.timelineLanes.filter(function (l) { return !oldCycleIds[l.cycleId]; });
       state.elementObservations = state.elementObservations.filter(function (o) { return !oldCycleIds[o.cycleId]; });
+      // §۸ ممیزی جلسه ۲ — بازگردانی/حذف مقادیر هم‌پوشانی با همان relationId و cycleId قبلی؛ ردیف یتیم باقی نمی‌ماند
+      state.observationOverlaps = state.observationOverlaps.filter(function (o) { return !oldCycleIds[o.cycleId]; });
       (snap.cycles || []).forEach(function (r) { state.cycleObservations.push(r); });
       (snap.lanes || []).forEach(function (r) { state.timelineLanes.push(r); });
       (snap.observations || []).forEach(function (r) { state.elementObservations.push(r); });
+      (snap.overlaps || []).forEach(function (r) { state.observationOverlaps.push(r); });
       var se = byId('studySessions', sessionId);
       markProjectCalculationsStale(se ? projectIdOfActivity(se.activityId) : null);
       commit();

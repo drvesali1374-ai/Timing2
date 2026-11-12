@@ -315,7 +315,8 @@
   /** حذف واقعی یک چرخه — دور زدن باگ هسته:
       DB.deleteCycle فقط مشاهدات/خطوط را پاک می‌کند و خود ردیف چرخه را
       (به دلیل فیلتر cascadeDelete بر sessionId به‌جای id) باقی می‌گذارد.
-      اینجا حذف از مسیر عمومی snapshot + replaceSessionRows انجام می‌شود. */
+      اینجا حذف از مسیر عمومی snapshot + replaceSessionRows انجام می‌شود.
+      §۸ ممیزی جلسه ۲ — مقادیر هم‌پوشانی چرخه نیز حذف و با Undo بازگردانده می‌شوند. */
   function deleteCycleSafe(sessionId, cycleId) {
     var snap = DB.snapshotSessionRows(sessionId);
     var before = snap.cycles.length;
@@ -323,6 +324,7 @@
     if (snap.cycles.length === before) throw new Error('چرخه یافت نشد.');
     snap.lanes = snap.lanes.filter(function (l) { return l.cycleId !== cycleId; });
     snap.observations = snap.observations.filter(function (o) { return o.cycleId !== cycleId; });
+    snap.overlaps = (snap.overlaps || []).filter(function (o) { return o.cycleId !== cycleId; });
     DB.replaceSessionRows(sessionId, snap);
   }
   /** حذف واقعی جلسه — دور زدن باگ هسته:
@@ -857,11 +859,40 @@
           },
         }, mode === 'SEQ' ? (method === 'CONTINUOUS' ? 'قرائت' : 'مدت') : 'شروع/پایان');
       }
+      /* §۶ ممیزی جلسه ۲ — دکمهٔ روابط موازی عنصر در سربرگ ستون برگهٔ زمان‌سنجی؛
+         مقادیر به چرخه‌های همین جلسه محدود می‌شود (هم‌ارز نسخهٔ آنلاین) */
+      var parallelBtn = U.h('button', {
+        class: 't2t-entry-chip', type: 'button',
+        title: 'عناصر موازی و اطلاعات هم‌پوشانی «' + el.name + '»',
+        'aria-label': 'عناصر موازی و اطلاعات هم‌پوشانی «' + el.name + '»',
+        onclick: function (e) {
+          e.stopPropagation();
+          UI.dialog({
+            title: 'عناصر موازی و اطلاعات هم‌پوشانی',
+            desc: 'عنصر «' + el.name + '» — مقادیر چرخه‌های همین جلسه',
+            bodyBuilder: function (body) {
+              if (g.T2VIEWS && g.T2VIEWS._parallelRelationsSection) {
+                g.T2VIEWS._parallelRelationsSection(body, sheet.activity.projectId, el.id, el.name, {
+                  sessionId: sessionId,
+                  cycles: sheet.cycles.map(function (c) {
+                    return { cycleId: c.id, cycleNo: c.cycleNo };
+                  }),
+                });
+              }
+            },
+            footerBuilder: function (close) {
+              return U.h('div', { class: 'dialog-footer' },
+                U.h('button', { class: 'btn btn-outline', type: 'button', text: 'بستن', onclick: close }));
+            },
+          });
+        },
+      }, U.icon('network'));
       theadRow.appendChild(U.h('th', null,
         U.h('div', { class: 'font-bold text-xs truncate', title: el.name, text: el.name }),
         U.h('div', { class: 'flex flex-wrap items-center justify-center gap-1 mt-0.5' },
           UI.badge(tb.label, tb.variant),
-          chipBtn)));
+          chipBtn,
+          parallelBtn)));
     });
     theadRow.appendChild(U.h('th', { text: 'سپری‌شده' }));
     table.appendChild(U.h('thead', null, theadRow));
