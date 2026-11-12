@@ -408,6 +408,7 @@ export function SheetGrid({
                             label: `چرخهٔ ${c.cycleNo}`,
                           }))}
                           defaultCycleId={sheet.cycles.at(-1)?.id ?? null}
+                          sessionId={sheet.session.id ?? null}
                         />
                       </div>
                     </div>

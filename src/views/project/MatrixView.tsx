@@ -54,8 +54,8 @@ export default function MatrixView({ projectId }: { projectId: string }) {
   }
 
   const commitMutation = useMutation({
-    mutationFn: async (payload: { cycleId: string; updates: Array<{ relationId: string; status: OverlapStatusValue; overlapDuration: number | null; expectedVersion?: number }> }) =>
-      overlapApi.setCycleOverlaps(payload.cycleId, { updates: payload.updates }),
+    mutationFn: async (payload: { cycleId: string; expectedOverlapRevision?: number; updates: Array<{ relationId: string; status: OverlapStatusValue; overlapDuration: number | null; expectedVersion?: number }> }) =>
+      overlapApi.setCycleOverlaps(payload.cycleId, { updates: payload.updates, expectedOverlapRevision: payload.expectedOverlapRevision }),
     onSuccess: (res) => {
       setDrafts({})
       invalidate()
@@ -82,6 +82,13 @@ export default function MatrixView({ projectId }: { projectId: string }) {
     })
   }
 
+  // §۷ ممیزی جلسه ۲ — تغییر چرخه باید Draftهای قبلی را پاک کند؛
+  // Draft چرخهٔ قبلی هرگز روی چرخهٔ جدید اعمال نمی‌شود.
+  const changeCycle = (nextCycleId: string | null) => {
+    setCycleId(nextCycleId)
+    setDrafts({})
+  }
+
   const commitDrafts = async () => {
     if (!cycleId || !matrix) return
     const updates = Object.entries(drafts).map(([relationId, d]) => {
@@ -95,7 +102,11 @@ export default function MatrixView({ projectId }: { projectId: string }) {
     })
     setBusy(true)
     try {
-      await commitMutation.mutateAsync({ cycleId, updates })
+      await commitMutation.mutateAsync({
+        cycleId,
+        expectedOverlapRevision: matrix.selectedCycle?.overlapRevision,
+        updates,
+      })
     } finally {
       setBusy(false)
     }
@@ -135,7 +146,7 @@ export default function MatrixView({ projectId }: { projectId: string }) {
             matrix={matrix ?? null}
             isLoading={matrixQ.isLoading}
             cycleId={cycleId}
-            onChange={setCycleId}
+            onChange={changeCycle}
           />
 
           {/* نوار ثبت تغییرات draft (§۴.۴) */}
@@ -190,12 +201,15 @@ export default function MatrixView({ projectId }: { projectId: string }) {
                 </p>
               )}
 
-              {/* جدول دسکتاپ / لیست موبایل */}
+              {/* جدول دسکتاپ / لیست موبایل — §۷ ممیزی جلسه ۲:
+                  تا زمانی که چرخه‌ای انتخاب نشده، سلول‌ها کاملاً غیرقابل‌ویرایش‌اند؛
+                  موبایل و دسکتاپ رفتار یکسان دارند. */}
               <div className="hidden md:block">
                 <MatrixTable
                   matrix={matrix ?? null}
                   drafts={drafts}
                   onDraft={setDraft}
+                  cycleSelected={!!cycleId}
                 />
               </div>
               <div className="md:hidden">

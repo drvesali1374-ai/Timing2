@@ -117,6 +117,17 @@ export async function getStationDependencyCounts(stationId: string) {
 
 export async function deleteStation(stationId: string) {
   const { station, counts } = await getStationDependencyCounts(stationId)
+  // §۹ ممیزی جلسه ۲ — پیش از حذف، روابط موازی تمام عناصر کاری همهٔ فعالیت‌های
+  // زیرمجموعه آرشیو می‌شوند تا هیچ رابطهٔ فعالی با endpoint حذف‌شده باقی نماند.
+  const { archiveRelationsForElement } = await import('./overlap-service')
+  const stationElements = await db.workElement.findMany({
+    where: { activity: { stationId } },
+    select: { id: true },
+  })
+  let archivedRelations = 0
+  for (const el of stationElements) {
+    archivedRelations += await archiveRelationsForElement(el.id)
+  }
   const treeIds = await (await import('@/infrastructure/deletion')).collectStationsTreeIds([stationId])
   await db.$transaction(async (tx) => {
     for (const [entityType, ids] of Object.entries(treeIds)) {
@@ -132,7 +143,7 @@ export async function deleteStation(stationId: string) {
     entityType: 'Station', entityId: stationId, action: 'DELETE', entityName: station.name,
     projectId: station.projectId,
   })
-  return counts
+  return { ...counts, archivedRelations }
 }
 
 export async function reorderStations(projectId: string, ids: string[]) {
@@ -238,6 +249,16 @@ export async function getActivityDependencyCounts(activityId: string) {
 
 export async function deleteActivity(activityId: string) {
   const { activity, counts } = await getActivityDependencyCounts(activityId)
+  // §۹ ممیزی جلسه ۲ — پیش از حذف، روابط موازی تمام عناصر کاری زیرمجموعه آرشیو می‌شوند
+  const { archiveRelationsForElement } = await import('./overlap-service')
+  const activityElements = await db.workElement.findMany({
+    where: { activityId },
+    select: { id: true },
+  })
+  let archivedRelations = 0
+  for (const el of activityElements) {
+    archivedRelations += await archiveRelationsForElement(el.id)
+  }
   const treeIds = await collectActivitiesTreeIds([activityId])
   await db.$transaction(async (tx) => {
     for (const [entityType, ids] of Object.entries(treeIds)) {
@@ -255,7 +276,7 @@ export async function deleteActivity(activityId: string) {
     entityType: 'Activity', entityId: activityId, action: 'DELETE', entityName: activity.name,
     projectId: activity.station.projectId,
   })
-  return counts
+  return { ...counts, archivedRelations }
 }
 
 export async function reorderActivities(stationId: string, ids: string[]) {

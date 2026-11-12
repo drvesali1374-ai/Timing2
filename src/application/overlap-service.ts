@@ -14,8 +14,10 @@ import { recordAudit } from '@/infrastructure/audit'
 import { markProjectCalculationsStale } from './calc-stale'
 import {
   runFullValidation,
+  computeVerdicts,
   pairKey,
   type FullValidationOutput,
+  type IntervalCheckIssue,
   type OverlapStatus,
   type PairOverlapValue,
 } from '@/calculation/overlap-matrix'
@@ -64,6 +66,8 @@ export interface CycleOption {
   activityId: string
   activityName: string
   createdAt: string
+  /** نسخهٔ مجموعهٔ مقادیر هم‌پوشانی این چرخه — کنترل هم‌زمانی §۱۰ ممیزی جلسه ۲ */
+  overlapRevision: number
 }
 
 export interface CatalogEntry {
@@ -76,21 +80,42 @@ export interface CatalogEntry {
 }
 
 export interface ValidationSummaryDto {
+  /** نتیجهٔ نهایی — با توجه به کامل‌بودن اعتبارسنجی (روابط بررسی‌نشده → INDETERMINATE) */
   verdict: 'VALID' | 'INVALID' | 'INDETERMINATE'
+  /** سازگاری داده‌های تأییدشده با هم — مستقل از کامل‌بودن — §۳ ممیزی جلسه ۲ */
+  confirmedVerdict: 'VALID' | 'INVALID' | 'INDETERMINATE'
+  /** همان verdict — برای تمایز صریح دو مفهوم در DTO */
+  overallVerdict: 'VALID' | 'INVALID' | 'INDETERMINATE'
   localFailures: Array<{ pair: [string, string]; failures: Array<{ code: string; message: string }> }>
   tripleIssues: Array<{ message: string; responsibleElementIds?: string[] }>
   globalIssues: Array<{ message: string; responsibleElementIds?: string[] }>
+  /** تطبیق مقادیر ثبت‌شده با بازهٔ واقعی چرخه — §۴ ممیزی جلسه ۲ */
+  intervalIssues: Array<{
+    pair: [string, string]
+    recorded: number | null
+    computed: number | null
+    message: string
+    kind: 'DEFINITE' | 'INDETERMINATE'
+  }>
   provisionalWarnings: Array<{ message: string; responsiblePairs?: Array<[string, string]> }>
   multiOverlaps: Array<{ members: string[]; value: number | null; provisional: boolean }>
   unions: Array<{ members: string[]; value: number | null; source: string }>
+}
+
+/** مقایسه‌پذیری یک زوج در چرخهٔ انتخاب‌شده — §۵ ممیزی جلسه ۲ */
+export interface ComparabilityDto {
+  isComparable: boolean
+  notComparableReason: string | null
 }
 
 export interface OverlapMatrixDto {
   projectId: string
   members: MatrixMember[]
   relations: RelationDto[]
-  /** مقادیر چرخهٔ انتخاب‌شده — کلید: relationId */
+  /** مقادیر چرخهٔ انتخاب‌شده — کلید: relationId؛ فقط رکوردهای واقعی (بدون رکورد ساختگی) */
   cells: Record<string, CellValueDto>
+  /** مقایسه‌پذیری هر رابطهٔ فعال در چرخهٔ انتخاب‌شده — خالی وقتی چرخه‌ای انتخاب نشده */
+  comparability: Record<string, ComparabilityDto>
   selectedCycle: CycleOption | null
   cycles: CycleOption[]
   elementsCatalog: CatalogEntry[]
@@ -179,17 +204,26 @@ async function loadCycleContext(cycleId: string) {
   return { cycle, durations, intervals }
 }
 
-function toValidationSummary(out: FullValidationOutput): ValidationSummaryDto {
+function toValidationSummary(
+  out: FullValidationOutput,
+  memberList: string[],
+  pairLookup: (a: string, b: string) => PairOverlapValue | undefined,
+): ValidationSummaryDto {
+  const { confirmedVerdict, overallVerdict } = computeVerdicts(memberList, pairLookup, out)
   return {
-    verdict:
-      out.localFailures.length > 0 || out.tripleIssues.length > 0 || out.confirmed.verdict === 'INVALID'
-        ? 'INVALID'
-        : out.confirmed.verdict === 'INDETERMINATE'
-          ? 'INDETERMINATE'
-          : 'VALID',
+    verdict: overallVerdict,
+    confirmedVerdict,
+    overallVerdict,
     localFailures: out.localFailures,
     tripleIssues: out.tripleIssues.map((i) => ({ message: i.message, responsibleElementIds: i.responsibleElementIds })),
     globalIssues: out.confirmed.issues.map((i) => ({ message: i.message, responsibleElementIds: i.responsibleElementIds })),
+    intervalIssues: out.intervalIssues.map((i) => ({
+      pair: i.pair,
+      recorded: i.recorded,
+      computed: i.computed,
+      message: i.message,
+      kind: i.kind === 'DEFINITE' ? 'DEFINITE' : 'INDETERMINATE',
+    })),
     provisionalWarnings: out.provisional.warnings.map((w) => ({ message: w.message, responsiblePairs: w.responsiblePairs })),
     multiOverlaps: Object.entries(out.multiOverlaps).map(([key, r]) => ({
       members: key.split('|'),
@@ -202,6 +236,53 @@ function toValidationSummary(out: FullValidationOutput): ValidationSummaryDto {
       source: u.source,
     })),
   }
+}
+
+// ── مقایسه‌پذیری زوج‌ها در یک چرخه — §۵ ممیزی جلسه ۲ ──
+// رابطه در سطح پروژه بین عناصر دو Activity متفاوت مجاز است؛ اما ثبت مقدار چرخه‌ای
+// فقط وقتی معنا دارد که هر دو عنصر در همان چرخه روی یک محور زمانی مشترک داده
+// قابل‌مقایسه داشته باشند. چون هر چرخه به یک جلسه (و هر جلسه به یک فعالیت)
+// تعلق دارد، عنصرِ فعالیت دیگر هرگز در این چرخه مشاهده‌ای ندارد → غیرقابل‌مقایسه.
+// این وضعیت به‌عنوان NO_OVERLAP ذخیره نمی‌شود و رکورد قطعی جعلی ساخته نمی‌شود.
+
+/** آیا عنصر در این چرخه ردیف مشاهده دارد؟ (حضور در durations — حتی با مقدار تهی) */
+function isObservedInCycle(elementId: string, durations: Record<string, number | null>): boolean {
+  return Object.prototype.hasOwnProperty.call(durations, elementId)
+}
+
+/** آیا عنصر شواهد قابل‌مقایسه (بازهٔ واقعی یا مدت غیرتهی) در چرخه دارد؟ */
+function hasComparableEvidence(
+  elementId: string,
+  durations: Record<string, number | null>,
+  intervals: Record<string, { startOffset: number; endOffset: number } | null>,
+): boolean {
+  const iv = intervals[elementId]
+  if (iv && iv.startOffset != null && iv.endOffset != null) return true
+  return durations[elementId] != null
+}
+
+function comparabilityForRelations(
+  activeRelations: Array<{ id: string; elementLowId: string; elementHighId: string }>,
+  durations: Record<string, number | null>,
+  intervals: Record<string, { startOffset: number; endOffset: number } | null>,
+  nameOf: (id: string) => string,
+): Record<string, ComparabilityDto> {
+  const out: Record<string, ComparabilityDto> = {}
+  for (const r of activeRelations) {
+    const reasons: string[] = []
+    for (const eid of [r.elementLowId, r.elementHighId]) {
+      if (!isObservedInCycle(eid, durations)) {
+        reasons.push(`«${nameOf(eid)}» در این چرخه مشاهده‌ای ندارد`)
+      } else if (!hasComparableEvidence(eid, durations, intervals)) {
+        reasons.push(`«${nameOf(eid)}» در این چرخه مدت یا بازهٔ قابل‌مقایسه ندارد`)
+      }
+    }
+    out[r.id] =
+      reasons.length === 0
+        ? { isComparable: true, notComparableReason: null }
+        : { isComparable: false, notComparableReason: `در این چرخه قابل‌مقایسه نیست: ${reasons.join('؛ ')}` }
+  }
+  return out
 }
 
 // ─────────────────── رابطه‌ها (OverlapRelationService) ───────────────────
@@ -383,7 +464,7 @@ export async function getOverlapMatrix(projectId: string, cycleId?: string | nul
       activityId: true,
       activity: { select: { name: true } },
       operator: { select: { id: true, displayName: true } },
-      cycles: { select: { id: true, cycleNo: true, createdAt: true }, orderBy: { cycleNo: 'asc' } },
+      cycles: { select: { id: true, cycleNo: true, overlapRevision: true, createdAt: true }, orderBy: { cycleNo: 'asc' } },
     },
     orderBy: { startedAt: 'asc' },
   })
@@ -401,12 +482,14 @@ export async function getOverlapMatrix(projectId: string, cycleId?: string | nul
         activityId: s.activityId,
         activityName: s.activity.name,
         createdAt: c.createdAt.toISOString(),
+        overlapRevision: c.overlapRevision,
       })
     }
   }
 
   // مقادیر چرخهٔ انتخاب‌شده
   const cells: Record<string, CellValueDto> = {}
+  const comparability: Record<string, ComparabilityDto> = {}
   let selectedCycle: CycleOption | null = null
   let validation: ValidationSummaryDto | null = null
   if (cycleId) {
@@ -426,6 +509,9 @@ export async function getOverlapMatrix(projectId: string, cycleId?: string | nul
     // اعتبارسنجی و محاسبات وابسته (§۱۰)
     const { durations, intervals } = await loadCycleContext(cycleId)
     const memberList = members.map((m) => m.elementId)
+    // §۳ ممیزی جلسه ۲ — قرارداد یکسان در همهٔ مسیرها:
+    //   نبود OverlapRelation → undefined (رابطه تعریف‌نشده)
+    //   رابطهٔ فعال بدون رکورد چرخه → UNREVIEWED (رابطه بررسی‌نشده — صفر قطعی نیست)
     const pairLookup = (a: string, b: string): PairOverlapValue | undefined => {
       const rel = activeRelations.find(
         (r) =>
@@ -433,11 +519,13 @@ export async function getOverlapMatrix(projectId: string, cycleId?: string | nul
       )
       if (!rel) return undefined
       const cell = cells[rel.id]
-      if (!cell) return undefined
+      if (!cell) return { status: 'UNREVIEWED', overlapDuration: null }
       return { status: cell.status, overlapDuration: cell.overlapDuration }
     }
     const out = runFullValidation(memberList, durations, intervals, pairLookup, nameOf)
-    validation = toValidationSummary(out)
+    validation = toValidationSummary(out, memberList, pairLookup)
+    // مقایسه‌پذیری زوج‌ها در این چرخه — §۵ ممیزی جلسه ۲
+    Object.assign(comparability, comparabilityForRelations(activeRelations, durations, intervals, nameOf))
   }
 
   return {
@@ -445,6 +533,7 @@ export async function getOverlapMatrix(projectId: string, cycleId?: string | nul
     members,
     relations: relations.map(serializeRelation),
     cells,
+    comparability,
     selectedCycle,
     cycles,
     elementsCatalog: elements.map((e) => ({
@@ -467,7 +556,11 @@ export interface SetOverlapsResult {
   warnings: string[]
 }
 
-export async function setCycleOverlaps(cycleId: string, updates: RelationUpdateInput[]): Promise<SetOverlapsResult> {
+export async function setCycleOverlaps(
+  cycleId: string,
+  updates: RelationUpdateInput[],
+  opts?: { expectedOverlapRevision?: number },
+): Promise<SetOverlapsResult> {
   if (updates.length === 0) throw new AppError('NO_UPDATES', 'تغلیاتی برای ثبت وجود ندارد.', 422)
   const { cycle, durations, intervals } = await loadCycleContext(cycleId)
   const projectId = await projectOfActivity(cycle.session.activityId)
@@ -489,69 +582,71 @@ export async function setCycleOverlaps(cycleId: string, updates: RelationUpdateI
     if (!rel.isActive) {
       throw new AppError('RELATION_ARCHIVED', 'رابطهٔ آرشیوشده قابل ویرایش نیست؛ ابتدا آن را بازگردانی کنید.', 422)
     }
-    if (u.expectedVersion != null) {
-      // کنترل هم‌زمانی خوش‌بینانه بعداً در تراکنش اعمال می‌شود
+    assertStatus(u.status)
+  }
+
+  // §۵ ممیزی جلسه ۲ — مقایسه‌پذیری زوج در چرخهٔ جاری:
+  // ثبت مقدار قطعی (OVERLAP/NO_OVERLAP) فقط وقتی مجاز است که هر دو عنصر
+  // در همین چرخه مشاهده داشته باشند و شواهد قابل‌مقایسه (بازه یا مدت) موجود باشد.
+  // چرخه به همین پروژه تعلق دارد (projectOfActivity + کنترل projectId رابطه).
+  // این وضعیت هرگز به‌عنوان NO_OVERLAP ذخیره نمی‌شود و رکورد قطعی جعلی ساخته نمی‌شود.
+  for (const u of updates) {
+    const rel = relationById.get(u.relationId)!
+    if (u.status === 'UNREVIEWED') continue // پاک‌کردن مقدار همیشه مجاز است
+    for (const eid of [rel.elementLowId, rel.elementHighId]) {
+      if (!isObservedInCycle(eid, durations)) {
+        throw new AppError(
+          'NOT_COMPARABLE_IN_CYCLE',
+          `ثبت مقدار ممکن نیست — «${nameOf(eid)}» در چرخهٔ ${cycle.cycleNo} مشاهده‌ای ندارد؛ این زوج در این چرخه قابل‌مقایسه نیست (در این چرخه قابل‌مقایسه نیست).`,
+          422,
+          { elementId: eid, notComparableReason: `«${nameOf(eid)}» در این چرخه مشاهده‌ای ندارد` },
+        )
+      }
+      if (!hasComparableEvidence(eid, durations, intervals)) {
+        throw new AppError(
+          'NOT_COMPARABLE_IN_CYCLE',
+          `ثبت مقدار ممکن نیست — «${nameOf(eid)}» در چرخهٔ ${cycle.cycleNo} مدت یا بازهٔ قابل‌مقایسه ندارد؛ این زوج در این چرخه قابل‌مقایسه نیست.`,
+          422,
+          { elementId: eid, notComparableReason: `«${nameOf(eid)}» در این چرخه مدت یا بازهٔ قابل‌مقایسه ندارد` },
+        )
+      }
     }
   }
 
-  // پیش‌نمایش مقادیر جدید (بدون ثبت) برای کل خط اعتبارسنجی
-  const allRelations = await db.overlapRelation.findMany({ where: { projectId, isActive: true } })
-  const existingValues = await db.observationOverlap.findMany({ where: { cycleId } })
-  const valueByKey = new Map(existingValues.map((v) => [`${v.relationId}`, v]))
-  const newByKey = new Map(valueByKey)
-  for (const u of updates) {
-    assertStatus(u.status)
-    newByKey.set(u.relationId, {
-      id: 'draft',
-      relationId: u.relationId,
-      cycleId,
-      status: u.status,
-      overlapDuration: u.status === 'NO_OVERLAP' ? 0 : u.status === 'UNREVIEWED' ? null : u.overlapDuration ?? null,
-      version: valueByKey.get(u.relationId)?.version ?? 0,
-      updatedAt: new Date(),
-    })
-  }
+  // سازوکار اعتبارسنجی + ثبت اتمیک — §۱۰ ممیزی جلسه ۲:
+  // پیش‌اعتبارسنجی بیرون تراکنش فقط یک مسیر سریعِ خطاست؛ اعتبارسنجی نهایی
+  // «درون تراکنش» روی snapshot قفل‌شده انجام می‌شود. نخستین نوشتنِ تراکنش
+  // (افزایش overlapRevision) قفل نوشتن SQLite را می‌گیرد و تضمین می‌کند
+  // همهٔ خواندن‌های بعدی روی یک snapshot معتبر انجام شوند؛ بنابراین دو
+  // درخواست هم‌زمان یا سریال می‌شوند یا درخواست با مبنا کهنه با 409 رد می‌شود.
+  const allRelationsPre = await db.overlapRelation.findMany({ where: { projectId, isActive: true } })
+  const preValues = await db.observationOverlap.findMany({ where: { cycleId } })
+  const preOut = validateOverlapSet(allRelationsPre, preValues, updates, cycleId, durations, intervals, nameOf)
+  assertNoDefiniteFailure(preOut, nameOf)
 
-  // عضویت و pairLookup کامل چرخه
-  const memberIds = new Set<string>()
-  for (const r of allRelations) {
-    memberIds.add(r.elementLowId)
-    memberIds.add(r.elementHighId)
-  }
-  const memberList = [...memberIds]
-  const pairLookup = (a: string, b: string): PairOverlapValue | undefined => {
-    const rel = allRelations.find(
-      (r) => (r.elementLowId === a && r.elementHighId === b) || (r.elementLowId === b && r.elementHighId === a),
-    )
-    if (!rel) return undefined
-    const v = newByKey.get(rel.id)
-    if (!v) return undefined
-    return { status: v.status as OverlapStatus, overlapDuration: v.overlapDuration }
-  }
-
-  const out = runFullValidation(memberList, durations, intervals, pairLookup, nameOf)
-  const hasDefinite =
-    out.localFailures.length > 0 || out.tripleIssues.length > 0 || out.confirmed.verdict === 'INVALID'
-  if (hasDefinite) {
-    // خطای قطعی → rollback کامل و پیام روشن (§۱۰-۶)
-    const msgs = [
-      ...out.localFailures.flatMap((lf) => lf.failures.map((f) => `${nameOf(lf.pair[0])} ↔ ${nameOf(lf.pair[1])}: ${f.message}`)),
-      ...out.tripleIssues.map((i) => i.message),
-      ...out.confirmed.issues.filter((i) => i.kind === 'DEFINITE').map((i) => i.message),
-    ]
-    throw new AppError(
-      'OVERLAP_VALIDATION_FAILED',
-      'ثبت تغییرات ممکن نیست — دادهٔ غیرممکن رد شد:\n' + msgs.join('\n'),
-      422,
-      { issues: msgs, localFailures: out.localFailures, tripleIssues: out.tripleIssues, globalIssues: out.confirmed.issues },
-    )
-  }
-
-  // ثبت تراکنشی — توجه: recordAudit از db سراسری استفاده می‌کند و نباید داخل
-  // تراکنش باز SQLite فراخوانی شود (بن‌بست قفل نوشتن)؛ رویدادها بعد از commit ثبت می‌شوند.
   const cells: Record<string, CellValueDto> = {}
   const pendingAudits: Array<Parameters<typeof recordAudit>[0]> = []
   await db.$transaction(async (tx) => {
+    // ۱) قفل نوشتن + کنترل نسخهٔ مجموعهٔ مقادیر چرخه
+    const bumped = await tx.cycleObservation.update({
+      where: { id: cycleId },
+      data: { overlapRevision: { increment: 1 } },
+      select: { overlapRevision: true },
+    })
+    if (opts?.expectedOverlapRevision != null && bumped.overlapRevision - 1 !== opts.expectedOverlapRevision) {
+      throw new AppError(
+        'OVERLAP_REVISION_CONFLICT',
+        'مجموعهٔ مقادیر هم‌پوشانی این چرخه از محل دیگری هم‌زمان تغییر کرده است؛ صفحه را نوسازی کنید.',
+        409,
+      )
+    }
+    // ۲) خواندن تازهٔ کل وضعیت مؤثر (روی snapshot قفل‌شده)
+    const allRelationsTx = await tx.overlapRelation.findMany({ where: { projectId, isActive: true } })
+    const existingValuesTx = await tx.observationOverlap.findMany({ where: { cycleId } })
+    // ۳) اعتبارسنجی نهایی روی snapshot معتبر
+    const out = validateOverlapSet(allRelationsTx, existingValuesTx, updates, cycleId, durations, intervals, nameOf)
+    assertNoDefiniteFailure(out, nameOf)
+    // ۴) ثبت
     for (const u of updates) {
       assertStatus(u.status)
       const normalizedDuration = u.status === 'NO_OVERLAP' ? 0 : u.status === 'UNREVIEWED' ? null : u.overlapDuration
@@ -599,16 +694,81 @@ export async function setCycleOverlaps(cycleId: string, updates: RelationUpdateI
 
   // اعتبارسنجی پس از ثبت برای پاسخ (از همان منبع واحد خوانده می‌شود)
   const { validation } = await getOverlapMatrix(projectId, cycleId)
-  const warnings = out.provisional.warnings.map((w) => w.message)
+  const warnings = preOut.provisional.warnings.map((w) => w.message)
   return { cells, validation: validation ?? emptyValidation(), warnings }
+}
+
+/** ساخت pairLookup از رابطه‌های فعال + مقادیر موجود + به‌روزرسانی‌های درخواست و اجرای خط کامل اعتبارسنجی */
+function validateOverlapSet(
+  allRelations: Array<{ id: string; projectId: string; elementLowId: string; elementHighId: string; isActive: boolean }>,
+  existingValues: Array<{ relationId: string; cycleId: string; status: string; overlapDuration: number | null; version: number }>,
+  updates: RelationUpdateInput[],
+  cycleId: string,
+  durations: Record<string, number | null>,
+  intervals: Record<string, { startOffset: number; endOffset: number } | null>,
+  nameOf: (id: string) => string,
+): FullValidationOutput {
+  const valueByKey = new Map(existingValues.map((v) => [v.relationId, v]))
+  const newByKey = new Map(valueByKey)
+  for (const u of updates) {
+    newByKey.set(u.relationId, {
+      relationId: u.relationId,
+      cycleId,
+      status: u.status,
+      overlapDuration: u.status === 'NO_OVERLAP' ? 0 : u.status === 'UNREVIEWED' ? null : u.overlapDuration ?? null,
+      version: valueByKey.get(u.relationId)?.version ?? 0,
+    })
+  }
+  const memberIds = new Set<string>()
+  for (const r of allRelations) {
+    memberIds.add(r.elementLowId)
+    memberIds.add(r.elementHighId)
+  }
+  const memberList = [...memberIds]
+  // §۳ ممیزی جلسه ۲ — رابطهٔ فعال بدون رکورد چرخه = UNREVIEWED (نه undefined)
+  const pairLookup = (a: string, b: string): PairOverlapValue | undefined => {
+    const rel = allRelations.find(
+      (r) => (r.elementLowId === a && r.elementHighId === b) || (r.elementLowId === b && r.elementHighId === a),
+    )
+    if (!rel) return undefined
+    const v = newByKey.get(rel.id)
+    if (!v) return { status: 'UNREVIEWED', overlapDuration: null }
+    return { status: v.status as OverlapStatus, overlapDuration: v.overlapDuration }
+  }
+  return runFullValidation(memberList, durations, intervals, pairLookup, nameOf)
+}
+
+/** خطای قطعی → استاپ با پیام روشن (rollback کامل — §۱۰-۶) */
+function assertNoDefiniteFailure(out: FullValidationOutput, nameOf: (id: string) => string): void {
+  const hasDefinite =
+    out.localFailures.length > 0 ||
+    out.tripleIssues.length > 0 ||
+    out.intervalIssues.some((i) => i.kind === 'DEFINITE') ||
+    out.confirmed.verdict === 'INVALID'
+  if (!hasDefinite) return
+  const msgs = [
+    ...out.localFailures.flatMap((lf) => lf.failures.map((f) => `${nameOf(lf.pair[0])} ↔ ${nameOf(lf.pair[1])}: ${f.message}`)),
+    ...out.tripleIssues.map((i) => i.message),
+    ...out.intervalIssues.filter((i) => i.kind === 'DEFINITE').map((i) => i.message),
+    ...out.confirmed.issues.filter((i) => i.kind === 'DEFINITE').map((i) => i.message),
+  ]
+  throw new AppError(
+    'OVERLAP_VALIDATION_FAILED',
+    'ثبت تغییرات ممکن نیست — دادهٔ غیرممکن رد شد:\n' + msgs.join('\n'),
+    422,
+    { issues: msgs, localFailures: out.localFailures, tripleIssues: out.tripleIssues, globalIssues: out.confirmed.issues },
+  )
 }
 
 function emptyValidation(): ValidationSummaryDto {
   return {
     verdict: 'INDETERMINATE',
+    confirmedVerdict: 'INDETERMINATE',
+    overallVerdict: 'INDETERMINATE',
     localFailures: [],
     tripleIssues: [],
     globalIssues: [],
+    intervalIssues: [],
     provisionalWarnings: [],
     multiOverlaps: [],
     unions: [],
@@ -649,11 +809,14 @@ export interface ElementRelationRow {
   otherActivityName: string
   otherStationName: string
   isActive: boolean
-  /** مقدار چرخهٔ آخر ثبت‌شده این رابطه در کل پروژه */
+  /** مقدار چرخهٔ آخر ثبت‌شده این رابطه — در حالت Session-محدود فقط چرخه‌های همان جلسه (§۶ ممیزی جلسه ۲) */
   latest: { cycleNo: number; operatorName: string; activityName: string; status: OverlapStatus; overlapDuration: number | null; cycleId: string } | null
 }
 
-export async function getElementRelations(elementId: string): Promise<{ elementId: string; elementName: string; rows: ElementRelationRow[] }> {
+export async function getElementRelations(
+  elementId: string,
+  opts?: { sessionId?: string | null },
+): Promise<{ elementId: string; elementName: string; rows: ElementRelationRow[]; scope: 'PROJECT' | 'SESSION' }> {
   const element = await db.workElement.findUnique({
     where: { id: elementId },
     select: { id: true, name: true, activity: { select: { station: { select: { projectId: true } } } } },
@@ -674,6 +837,10 @@ export async function getElementRelations(elementId: string): Promise<{ elementI
     },
   })
   const otherById = new Map(others.map((o) => [o.id, o]))
+  // §۶ ممیزی جلسه ۲ — در فرم زمان‌سنجی، مقدار نمایشی به چرخه‌های Session جاری محدود می‌شود؛
+  // دادهٔ جلسه/اپراتور دیگر هرگز وارد فرم Timing فعلی نمی‌شود. در فرم ساختار پروژه،
+  // نمایش آخرین مقدار کل پروژه مجاز است ولی باید با برچسب «آخرین ثبت در کل پروژه» مشخص باشد.
+  const sessionScoped = opts?.sessionId != null
 
   const rows: ElementRelationRow[] = []
   for (const r of relations) {
@@ -682,7 +849,7 @@ export async function getElementRelations(elementId: string): Promise<{ elementI
     let latest: ElementRelationRow['latest'] = null
     if (r.isActive) {
       const lastValue = await db.observationOverlap.findFirst({
-        where: { relationId: r.id },
+        where: sessionScoped ? { relationId: r.id, cycle: { sessionId: opts!.sessionId! } } : { relationId: r.id },
         orderBy: { updatedAt: 'desc' },
       })
       if (lastValue) {
@@ -715,5 +882,5 @@ export async function getElementRelations(elementId: string): Promise<{ elementI
       latest,
     })
   }
-  return { elementId, elementName: element.name, rows }
+  return { elementId, elementName: element.name, rows, scope: sessionScoped ? 'SESSION' : 'PROJECT' }
 }

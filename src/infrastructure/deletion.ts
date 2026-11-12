@@ -23,7 +23,7 @@ export async function markDeleted(tx: Tx, entityType: string, ids: string[]): Pr
 
 /** شناسه تمام فرزندان وابسته به یک پروژه (برای نشانگذاری پیش از حذف) */
 export async function collectProjectTreeIds(projectId: string): Promise<Record<string, string[]>> {
-  const [settings, stations, groups, categories, operators, ratingTables, chartNodes, chartEdges, runs, finalization] =
+  const [settings, stations, groups, categories, operators, ratingTables, chartNodes, chartEdges, runs, finalization, overlapRelations, observationOverlaps] =
     await Promise.all([
       db.projectSetting.findMany({ where: { projectId }, select: { id: true } }),
       db.station.findMany({ where: { projectId }, select: { id: true } }),
@@ -35,6 +35,10 @@ export async function collectProjectTreeIds(projectId: string): Promise<Record<s
       db.chartEdge.findMany({ where: { projectId }, select: { id: true } }),
       db.calculationRun.findMany({ where: { projectId }, select: { id: true } }),
       db.finalizationInfo.findMany({ where: { projectId }, select: { id: true } }),
+      // §۹ ممیزی جلسه ۲ — مدل OverlapRelation FK مستقیم به Project ندارد؛
+      // در مدیریت وابستگی‌ها باید صریحاً لحاظ شود تا رابطه/مقدار یتیم باقی نماند.
+      db.overlapRelation.findMany({ where: { projectId }, select: { id: true } }),
+      db.observationOverlap.findMany({ where: { relation: { projectId } }, select: { id: true } }),
     ])
   const stationIds = stations.map((s) => s.id)
   const activityTree = await collectStationsTreeIds(stationIds)
@@ -50,6 +54,8 @@ export async function collectProjectTreeIds(projectId: string): Promise<Record<s
     ChartEdge: chartEdges.map((x) => x.id),
     CalculationRun: runs.map((x) => x.id),
     FinalizationInfo: finalization.map((x) => x.id),
+    OverlapRelation: overlapRelations.map((x) => x.id),
+    ObservationOverlap: observationOverlaps.map((x) => x.id),
     ...activityTree,
   }
 }

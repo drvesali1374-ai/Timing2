@@ -344,6 +344,17 @@ export const cyclesAddSchema = z.object({
         notes: z.string().trim().max(2000).nullable().optional(),
         isComplete: z.boolean().optional(),
         observations: z.array(observationPayloadSchema).default([]),
+        /** §۸ ممیزی جلسه ۲ — بازگردانی مقادیر هم‌پوشانی چرخهٔ حذف‌شده (Undo) */
+        overlaps: z
+          .array(
+            z.object({
+              relationId: z.string().uuid('رابطه معتبر نیست'),
+              status: z.enum(['UNREVIEWED', 'NO_OVERLAP', 'OVERLAP']),
+              overlapDuration: z.number().nullable().optional(),
+              version: z.number().int().min(1).optional(),
+            }),
+          )
+          .default([]),
       })
     )
     .max(200)

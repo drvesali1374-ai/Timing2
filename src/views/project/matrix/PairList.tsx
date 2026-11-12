@@ -42,11 +42,14 @@ export default function PairList({
         const b = nameOf(r.elementHighId)
         const cell = matrix.cells[r.id] ?? null
         const draft = drafts[r.id] ?? null
+        const comparable = matrix.comparability[r.id]?.isComparable !== false
+        const notComparableReason = matrix.comparability[r.id]?.notComparableReason ?? null
         const effective: CellDraft = draft ?? {
           status: cell?.status ?? 'UNREVIEWED',
           overlapDuration: cell?.overlapDuration ?? null,
         }
         const isOpen = expanded === r.id
+        const editable = cycleSelected && comparable
         return (
           <li key={r.id} className="rounded-xl border bg-card p-3">
             <button
@@ -79,7 +82,14 @@ export default function PairList({
                 )}
               </span>
             </button>
-            {isOpen && cycleSelected && (
+            {isOpen && !editable && (
+              <p className="mt-3 border-t pt-3 text-xs text-muted-foreground">
+                {!cycleSelected
+                  ? 'برای ویرایش مقدار، ابتدا یک چرخه انتخاب کنید.'
+                  : notComparableReason ?? 'این زوج در این چرخه قابل‌مقایسه نیست.'}
+              </p>
+            )}
+            {isOpen && editable && (
               <div className="mt-3 space-y-3 border-t pt-3">
                 <RadioGroup
                   value={effective.status}
@@ -132,10 +142,10 @@ export default function PairList({
                 )}
               </div>
             )}
-            {isOpen && !cycleSelected && (
-              <p className="mt-3 border-t pt-3 text-xs text-muted-foreground">
-                برای ویرایش مقدار، ابتدا یک چرخه انتخاب کنید.
-              </p>
+            {isOpen && editable && draft && (
+              <Button variant="ghost" size="sm" onClick={() => onDraft(r.id, null)}>
+                بازگردانی سلول
+              </Button>
             )}
           </li>
         )

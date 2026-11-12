@@ -12,12 +12,15 @@ export default function ElementParallelPopover({
   elementName,
   cycleOptions,
   defaultCycleId,
+  sessionId,
 }: {
   projectId: string
   elementId: string
   elementName: string
   cycleOptions: CycleContextOption[]
   defaultCycleId: string | null
+  /** §۶ ممیزی جلسه ۲ — جلسهٔ جاری؛ دادهٔ جلسه/اپراتور دیگر نمایش داده نمی‌شود */
+  sessionId: string | null
 }) {
   const [open, setOpen] = useState(false)
   return (
@@ -47,6 +50,7 @@ export default function ElementParallelPopover({
             elementName={elementName}
             cycleOptions={cycleOptions}
             defaultCycleId={defaultCycleId}
+            sessionId={sessionId}
             compact
           />
         )}

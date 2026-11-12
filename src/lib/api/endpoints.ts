@@ -442,6 +442,13 @@ export interface RemovedCycleDataDto {
       validityStatus: string
       exclusionReason: string | null
     }[]
+    /** §۸ ممیزی جلسه ۲ — مقادیر هم‌پوشانی چرخهٔ حذف‌شده برای بازگردانی Undo */
+    overlaps: {
+      relationId: string
+      status: string
+      overlapDuration: number | null
+      version: number
+    }[]
   }
 }
 
@@ -929,6 +936,8 @@ export interface OverlapCycleOptionDto {
   activityId: string
   activityName: string
   createdAt: string
+  /** نسخهٔ مجموعهٔ مقادیر هم‌پوشانی — کنترل هم‌زمانی §۱۰ ممیزی جلسه ۲ */
+  overlapRevision: number
 }
 
 export interface OverlapCatalogEntryDto {
@@ -942,12 +951,30 @@ export interface OverlapCatalogEntryDto {
 
 export interface OverlapValidationDto {
   verdict: 'VALID' | 'INVALID' | 'INDETERMINATE'
+  /** سازگاری داده‌های تأییدشده — مستقل از کامل‌بودن — §۳ ممیزی جلسه ۲ */
+  confirmedVerdict: 'VALID' | 'INVALID' | 'INDETERMINATE'
+  /** نتیجهٔ نهایی — روابط بررسی‌نشده/بازهٔ ناقص → INDETERMINATE */
+  overallVerdict: 'VALID' | 'INVALID' | 'INDETERMINATE'
   localFailures: Array<{ pair: [string, string]; failures: Array<{ code: string; message: string }> }>
   tripleIssues: Array<{ message: string; responsibleElementIds?: string[] }>
   globalIssues: Array<{ message: string; responsibleElementIds?: string[] }>
+  /** تطبیق مقادیر ثبت‌شده با بازهٔ واقعی چرخه — §۴ ممیزی جلسه ۲ */
+  intervalIssues: Array<{
+    pair: [string, string]
+    recorded: number | null
+    computed: number | null
+    message: string
+    kind: 'DEFINITE' | 'INDETERMINATE'
+  }>
   provisionalWarnings: Array<{ message: string; responsiblePairs?: Array<[string, string]> }>
   multiOverlaps: Array<{ members: string[]; value: number | null; provisional: boolean }>
   unions: Array<{ members: string[]; value: number | null; source: string }>
+}
+
+/** مقایسه‌پذیری یک زوج در چرخهٔ انتخاب‌شده — §۵ ممیزی جلسه ۲ */
+export interface OverlapComparabilityDto {
+  isComparable: boolean
+  notComparableReason: string | null
 }
 
 export interface OverlapMatrixDto {
@@ -955,6 +982,8 @@ export interface OverlapMatrixDto {
   members: MatrixMemberDto[]
   relations: OverlapRelationDto[]
   cells: Record<string, OverlapCellDto>
+  /** مقایسه‌پذیری هر رابطهٔ فعال در چرخهٔ انتخاب‌شده — خالی وقتی چرخه‌ای انتخاب نشده */
+  comparability: Record<string, OverlapComparabilityDto>
   selectedCycle: OverlapCycleOptionDto | null
   cycles: OverlapCycleOptionDto[]
   elementsCatalog: OverlapCatalogEntryDto[]
@@ -996,14 +1025,21 @@ export const overlapApi = {
         overlapDuration?: number | null
         expectedVersion?: number
       }>
+      /** §۱۰ ممیزی جلسه ۲ — کنترل هم‌زمانی در سطح مجموعهٔ مقادیر چرخه */
+      expectedOverlapRevision?: number
     }
   ) =>
     api.put<{ cells: Record<string, OverlapCellDto>; validation: OverlapValidationDto; warnings: string[] }>(
       `/api/cycles/${cycleId}/overlaps`,
       body
     ),
-  elementRelations: (elementId: string) =>
-    api.get<{ elementId: string; elementName: string; rows: ElementRelationRowDto[] }>(`/api/elements/${elementId}/relations`),
+  elementRelations: (elementId: string, sessionId?: string | null) =>
+    api.get<{
+      elementId: string
+      elementName: string
+      rows: ElementRelationRowDto[]
+      scope: 'PROJECT' | 'SESSION'
+    }>(`/api/elements/${elementId}/relations${sessionId ? `?sessionId=${sessionId}` : ''}`),
 }
 
 

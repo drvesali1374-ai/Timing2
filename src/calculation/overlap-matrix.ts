@@ -51,6 +51,15 @@ export interface RealizabilityResult {
   cycleKey?: string
 }
 
+/** نتیجهٔ تطبیق مقدار ثبت‌شدهٔ زوج با بازهٔ واقعی زمان‌سنجی — §۴ ممیزی جلسه ۲ */
+export interface IntervalCheckIssue extends ValidationIssue {
+  pair: [string, string]
+  /** مقدار ثبت‌شده (۰ برای NO_OVERLAP) */
+  recorded: number | null
+  /** مقدار محاسبه‌شده از بازه‌های واقعی؛ null = بازه کامل نیست */
+  computed: number | null
+}
+
 // ─────────────────── ۱) overlap دوتایی ───────────────────
 
 /** O(A,B) = max(0, min(E_A,E_B) − max(S_A,S_B)) — برحسب ثانیه */
@@ -687,6 +696,8 @@ export interface FullValidationOutput {
   localFailures: Array<{ pair: [string, string]; failures: LocalCheckFailure[] }>
   /** نقض سه‌تایی */
   tripleIssues: ValidationIssue[]
+  /** تطبیق مقادیر ثبت‌شده با بازهٔ واقعی چرخه — DEFINITE = تعارض قطعی، INDETERMINATE = بازه ناقص */
+  intervalIssues: IntervalCheckIssue[]
   /** تحلیل provisional با فرض صفر */
   provisional: ProvisionalAnalysis
   /** multi-overlap قطعی هر مؤلفه (کلید: اعضای مرتب با |) */
@@ -695,9 +706,50 @@ export interface FullValidationOutput {
   unions: Record<string, { value: number | null; source: 'INTERVALS' | 'INCLUSION_EXCLUSION' | 'NOT_COMPUTABLE' }>
 }
 
+/** آیا در میان اعضا رابطهٔ فعال بررسی‌نشده هست؟ (رابطهٔ تعریف‌نشده ≠ بررسی‌نشده — §۳ ممیزی) */
+export function hasUnreviewedRelation(
+  memberIds: string[],
+  pairLookup: (a: string, b: string) => PairOverlapValue | undefined,
+): boolean {
+  for (let i = 0; i < memberIds.length; i++) {
+    for (let j = i + 1; j < memberIds.length; j++) {
+      const p = pairLookup(memberIds[i], memberIds[j])
+      if (p && p.status === 'UNREVIEWED') return true
+    }
+  }
+  return false
+}
+
+/**
+ * دو حکم مستقل (§۳ ممیزی جلسه ۲):
+ *   confirmedVerdict — سازگاری داده‌های تأییدشده با هم
+ *   overallVerdict   — نتیجهٔ نهایی با توجه به کامل‌بودن اعتبارسنجی؛
+ * روابط بررسی‌نشده یا بازهٔ ناقص، نتیجهٔ نهایی را INDETERMINATE می‌کنند
+ * بدون آنکه دادهٔ تأییدشدهٔ سازگار را INVALID کنند.
+ */
+export function computeVerdicts(
+  memberIds: string[],
+  pairLookup: (a: string, b: string) => PairOverlapValue | undefined,
+  out: FullValidationOutput,
+): { confirmedVerdict: RealizabilityVerdict; overallVerdict: RealizabilityVerdict } {
+  const hasDefinite =
+    out.localFailures.length > 0 ||
+    out.tripleIssues.length > 0 ||
+    out.intervalIssues.some((i) => i.kind === 'DEFINITE') ||
+    out.confirmed.verdict === 'INVALID'
+  if (hasDefinite) return { confirmedVerdict: 'INVALID', overallVerdict: 'INVALID' }
+  const confirmedVerdict = out.confirmed.verdict
+  const hasIncomplete =
+    confirmedVerdict === 'INDETERMINATE' ||
+    out.intervalIssues.some((i) => i.kind === 'INDETERMINATE') ||
+    hasUnreviewedRelation(memberIds, pairLookup)
+  if (hasIncomplete) return { confirmedVerdict, overallVerdict: 'INDETERMINATE' }
+  return { confirmedVerdict, overallVerdict: 'VALID' }
+}
+
 /**
  * OverlapCalculationOrchestrator — کل خط اعتبارسنجی و محاسبهٔ وابسته
- * برای یک چرخه: محلی → سه‌تایی → سراسری → provisional → چندتایی → union.
+ * برای یک چرخه: محلی → بازهٔ واقعی → سه‌تایی → سراسری → provisional → چندتایی → union.
  */
 export function runFullValidation(
   memberIds: string[],
@@ -719,6 +771,50 @@ export function runFullValidation(
         durations,
       )
       if (failures.length > 0) localFailures.push({ pair: [a, b], failures })
+    }
+  }
+  // ۱.۵) تطبیق مقدار ثبت‌شده با بازهٔ واقعی چرخه — §۴ ممیزی جلسه ۲
+  // برای هر زوج با مقدار قطعی (OVERLAP/NO_OVERLAP):
+  //   • هر دو بازهٔ واقعی موجود → مقدار ثبت‌شده باید با
+  //     max(0, min(E_A,E_B) − max(S_A,S_B)) برابر باشد؛ اختلاف = خطای قطعی (رد ثبت).
+  //     تماس در نقطهٔ مرزی هم‌پوشانی مثبت نیست (مقدار ۰).
+  //   • بازهٔ یکی از دو عنصر ناقص → ادعای VALID قطعی ممکن نیست (INDETERMINATE)؛
+  //     اعتبارسنجی بر اساس مدت‌ها و solver ادامه می‌یابد اما سیستم ادعا نمی‌کند
+  //     مقدار با بازهٔ واقعی تطبیق داده شده است. دادهٔ خام زمان‌سنجی هرگز تغییر نمی‌کند.
+  const intervalIssues: IntervalCheckIssue[] = []
+  for (let i = 0; i < memberIds.length; i++) {
+    for (let j = i + 1; j < memberIds.length; j++) {
+      const a = memberIds[i]
+      const b = memberIds[j]
+      const p = pairLookup(a, b)
+      if (!p || p.status === 'UNREVIEWED') continue
+      const recorded = p.status === 'NO_OVERLAP' ? 0 : p.overlapDuration ?? 0
+      const ivA = intervals[a]
+      const ivB = intervals[b]
+      const completeA = !!ivA && ivA.startOffset != null && ivA.endOffset != null
+      const completeB = !!ivB && ivB.startOffset != null && ivB.endOffset != null
+      if (completeA && completeB) {
+        const computed = pairwiseOverlap(ivA!, ivB!)
+        if (Math.abs(recorded - computed) > 1e-6) {
+          intervalIssues.push({
+            pair: [a, b],
+            recorded,
+            computed,
+            message: `مقدار ثبت‌شدهٔ هم‌پوشانی «${nameOf(a)}» و «${nameOf(b)}» (${round12(recorded)}) با هم‌پوشانی واقعی بازه‌های زمان‌سنجی این چرخه (${round12(computed)} ثانیه) تطبیق ندارد؛ مقدار پیشنهادی ${round12(computed)} است.`,
+            responsiblePairs: [[a, b]],
+            kind: 'DEFINITE',
+          })
+        }
+      } else {
+        intervalIssues.push({
+          pair: [a, b],
+          recorded,
+          computed: null,
+          message: `بازهٔ واقعی «${nameOf(a)}» یا «${nameOf(b)}» در این چرخه کامل نیست؛ مقدار ثبت‌شده با بازهٔ واقعی تطبیق داده نشد و اعتبارسنجی بر اساس مدت‌ها انجام شد.`,
+          responsiblePairs: [[a, b]],
+          kind: 'INDETERMINATE',
+        })
+      }
     }
   }
   // ۲) سه‌تایی
@@ -757,5 +853,5 @@ export function runFullValidation(
       else unions[key] = { value: null, source: 'NOT_COMPUTABLE' }
     }
   }
-  return { confirmed, localFailures, tripleIssues, provisional, multiOverlaps, unions }
+  return { confirmed, localFailures, tripleIssues, intervalIssues, provisional, multiOverlaps, unions }
 }

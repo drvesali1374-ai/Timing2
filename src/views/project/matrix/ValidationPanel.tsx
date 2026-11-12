@@ -13,14 +13,21 @@ export default function ValidationPanel({ matrix }: { matrix: OverlapMatrixDto |
   const v = matrix.validation
   const nameOf = (id: string) => matrix.members.find((m) => m.elementId === id)?.name ?? id
 
+  // §۳ ممیزی جلسه ۲ — دو حکم مستقل: سازگاری دادهٔ تأییدشده vs نتیجهٔ نهایی
+  const confirmed = v.confirmedVerdict ?? v.verdict
+  const overall = v.overallVerdict ?? v.verdict
   const verdictBadge =
-    v.verdict === 'VALID' ? (
+    overall === 'VALID' ? (
       <Badge className="bg-green-soft text-green-foreground hover:bg-green-soft">
         <CircleCheck className="size-3.5" aria-hidden /> داده‌های تأییدشدهٔ این چرخه سازگارند
       </Badge>
-    ) : v.verdict === 'INVALID' ? (
+    ) : overall === 'INVALID' ? (
       <Badge className="bg-red-soft text-red-foreground hover:bg-red-soft">
         <AlertTriangle className="size-3.5" aria-hidden /> داده‌های ناسازگار — تأیید نهایی مسدود است
+      </Badge>
+    ) : confirmed === 'VALID' ? (
+      <Badge className="bg-amber-soft text-amber-foreground hover:bg-amber-soft">
+        <CircleHelp className="size-3.5" aria-hidden /> داده‌های تأییدشده سازگارند؛ اعتبارسنجی کامل نیست
       </Badge>
     ) : (
       <Badge className="bg-amber-soft text-amber-foreground hover:bg-amber-soft">
@@ -32,6 +39,7 @@ export default function ValidationPanel({ matrix }: { matrix: OverlapMatrixDto |
     v.localFailures.length > 0 ||
     v.tripleIssues.length > 0 ||
     v.globalIssues.length > 0 ||
+    (v.intervalIssues?.length ?? 0) > 0 ||
     v.provisionalWarnings.length > 0 ||
     v.multiOverlaps.length > 0 ||
     v.unions.length > 0
@@ -45,8 +53,8 @@ export default function ValidationPanel({ matrix }: { matrix: OverlapMatrixDto |
         {verdictBadge}
       </div>
 
-      {/* خطاهای قطعی — مسدودکننده (§۸.۱) */}
-      {(v.localFailures.length > 0 || v.tripleIssues.length > 0 || v.globalIssues.length > 0) && (
+      {/* خطاهای قطعی — مسدودکننده (§۸.۱) + تعارض با بازهٔ واقعی (§۴ ممیزی) */}
+      {(v.localFailures.length > 0 || v.tripleIssues.length > 0 || v.globalIssues.length > 0 || (v.intervalIssues?.some((i) => i.kind === 'DEFINITE') ?? false)) && (
         <ul className="space-y-1.5">
           {v.localFailures.map((lf, i) =>
             lf.failures.map((f, j) => (
@@ -63,6 +71,23 @@ export default function ValidationPanel({ matrix }: { matrix: OverlapMatrixDto |
           {v.globalIssues.map((g, i) => (
             <li key={`g-${i}`} className="rounded-lg bg-red-soft/60 p-2 text-xs leading-5">
               {g.message}
+            </li>
+          ))}
+          {v.intervalIssues?.filter((i) => i.kind === 'DEFINITE').map((i, k) => (
+            <li key={`iv-${k}`} className="rounded-lg bg-red-soft/60 p-2 text-xs leading-5">
+              <b>{nameOf(i.pair[0])} ↔ {nameOf(i.pair[1])}:</b> {i.message}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {/* بازهٔ ناقص — ادعای VALID قطعی ممکن نیست (§۴ ممیزی جلسه ۲) */}
+      {(v.intervalIssues?.filter((i) => i.kind === 'INDETERMINATE').length ?? 0) > 0 && (
+        <ul className="space-y-1.5">
+          {v.intervalIssues?.filter((i) => i.kind === 'INDETERMINATE').map((i, k) => (
+            <li key={`ivi-${k}`} className="rounded-lg bg-amber-soft/60 p-2 text-xs leading-5">
+              <CircleHelp className="ml-1 inline size-3.5 text-amber" aria-hidden />
+              {i.message}
             </li>
           ))}
         </ul>

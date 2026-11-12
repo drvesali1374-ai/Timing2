@@ -18,7 +18,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Badge } from '@/components/ui/badge'
 import { Network, Pencil, Plus, Trash2 } from 'lucide-react'
 import { qk } from '@/lib/api/keys'
-import { overlapApi, type OverlapStatusValue } from '@/lib/api/endpoints'
+import { overlapApi, type OverlapMatrixDto, type OverlapStatusValue } from '@/lib/api/endpoints'
 import { formatTimeValue } from '@/lib/format'
 import { useDisplayPrefs } from '@/store/display-store'
 import { useAppStore } from '@/store/app-store'
@@ -47,6 +47,8 @@ export default function ParallelRelationsSection({
   cycleOptions,
   defaultCycleId,
   compact,
+  /** §۶ ممیزی جلسه ۲ — در زمینهٔ زمان‌سنجی: شناسهٔ جلسهٔ جاری؛ دادهٔ جلسه/اپراتور دیگر نمایش داده نمی‌شود */
+  sessionId,
 }: {
   projectId: string
   elementId: string
@@ -54,6 +56,7 @@ export default function ParallelRelationsSection({
   cycleOptions?: CycleContextOption[]
   defaultCycleId?: string | null
   compact?: boolean
+  sessionId?: string | null
 }) {
   const prefs = useDisplayPrefs()
   const qc = useQueryClient()
@@ -63,7 +66,7 @@ export default function ParallelRelationsSection({
 
   const rowsQ = useQuery({
     queryKey: qk.elementRelations(elementId),
-    queryFn: () => overlapApi.elementRelations(elementId),
+    queryFn: () => overlapApi.elementRelations(elementId, sessionId ?? undefined),
   })
   // کاتالوگ عناصر برای افزودن — از ماتریس بدون چرخه (سبک)
   const catalogQ = useQuery({
@@ -78,6 +81,8 @@ export default function ParallelRelationsSection({
   }
 
   const rows = rowsQ.data?.rows.filter((r) => r.isActive) ?? []
+  // §۶ ممیزی جلسه ۲ — برچسب صریح دامنهٔ «آخرین ثبت»
+  const latestScopeLabel = sessionId ? 'آخرین ثبت در این جلسه' : 'آخرین ثبت در کل پروژه'
 
   return (
     <div className={cn('space-y-3 rounded-xl border bg-surface-2/60 p-3', compact && 'p-2.5')}>
@@ -134,12 +139,14 @@ export default function ParallelRelationsSection({
                         )}
                       </span>
                       <span className="text-[10px] text-muted-foreground">
-                        آخرین ثبت: چرخهٔ {r.latest.cycleNo.toLocaleString('fa-IR')} — {r.latest.operatorName} —{' '}
-                        {r.latest.activityName}
+                        {latestScopeLabel}: چرخهٔ {r.latest.cycleNo.toLocaleString('fa-IR')}
+                        {sessionId ? '' : ` — ${r.latest.operatorName} — ${r.latest.activityName}`}
                       </span>
                     </>
                   ) : (
-                    <span className="text-[10px] text-muted-foreground">هنوز مقداری ثبت نشده است</span>
+                    <span className="text-[10px] text-muted-foreground">
+                      {sessionId ? 'در این جلسه هنوز مقداری ثبت نشده است' : 'هنوز مقداری ثبت نشده است'}
+                    </span>
                   )}
                 </div>
               </div>
@@ -157,9 +164,15 @@ export default function ParallelRelationsSection({
               {editing === r.relationId && (
                 <QuickValueEditor
                   projectId={projectId}
+                  elementId={elementId}
                   relationId={r.relationId}
+                  otherElementName={r.otherElementName}
                   pairLabel={`${elementName} ↔ ${r.otherElementName}`}
-                  cycleOptions={cycleOptions ?? defaultProjectCycles(catalogQ.data?.cycles ?? [])}
+                  cycleOptions={
+                    sessionId
+                      ? (cycleOptions ?? [])
+                      : (cycleOptions ?? defaultProjectCycles(catalogQ.data?.cycles ?? []))
+                  }
                   defaultCycleId={defaultCycleId ?? null}
                   onDone={() => {
                     setEditing(null)
@@ -198,17 +211,23 @@ function defaultProjectCycles(cycles: Array<{ cycleId: string; cycleNo: number; 
   }))
 }
 
-/** ویرایش سریع مقدار یک رابطه برای یک چرخه — با draft و تأیید اثرات (§۴.۴) */
+/** ویرایش سریع مقدار یک رابطه برای یک چرخه — با draft و تأیید اثرات (§۴.۴)
+ *  §۶ ممیزی جلسه ۲ — مقدار اولیه status از رکورد واقعی چرخهٔ انتخاب‌شده خوانده
+ *  می‌شود؛ مقدار قبلی نمایش داده می‌شود و با UNREVIEWED خالی جایگزین نمی‌شود. */
 function QuickValueEditor({
-  projectId: _projectId,
+  projectId,
+  elementId,
   relationId,
+  otherElementName,
   pairLabel,
   cycleOptions,
   defaultCycleId,
   onDone,
 }: {
   projectId: string
+  elementId: string
   relationId: string
+  otherElementName: string
   pairLabel: string
   cycleOptions: CycleContextOption[]
   defaultCycleId: string | null
@@ -218,6 +237,30 @@ function QuickValueEditor({
   const [status, setStatus] = useState<OverlapStatusValue>('UNREVIEWED')
   const [duration, setDuration] = useState<string>('')
   const [confirming, setConfirming] = useState(false)
+  const [prefilledFor, setPrefilledFor] = useState<string | null>(null)
+
+  // مقدار واقعی این رابطه در چرخهٔ انتخاب‌شده — از همان منبع واحد ماتریس
+  const cellQ = useQuery({
+    queryKey: qk.overlapMatrix(projectId, cycleId),
+    queryFn: () => overlapApi.matrix(projectId, cycleId ?? undefined),
+    enabled: !!cycleId,
+    staleTime: 0,
+  })
+  const cell = cycleId ? cellQ.data?.cells?.[relationId] ?? null : null
+  const comparable = cycleId ? cellQ.data?.comparability?.[relationId]?.isComparable !== false : true
+  const notComparableReason = cycleQ_notComparableReason(cellQ.data, relationId)
+  // prefill: هنگام باز شدن یا تغییر چرخه، مقدار قبلی از رکورد واقعی خوانده می‌شود
+  if (cycleId && prefilledFor !== cycleId && !cellQ.isFetching && cellQ.data) {
+    setPrefilledFor(cycleId)
+    setStatus(cell?.status ?? 'UNREVIEWED')
+    setDuration(cell?.overlapDuration != null ? String(cell.overlapDuration) : '')
+    setConfirming(false)
+  }
+  if (prefilledFor !== null && !cycleId) {
+    setPrefilledFor(null)
+    setStatus('UNREVIEWED')
+    setDuration('')
+  }
 
   const save = useMutation({
     mutationFn: () =>
@@ -227,8 +270,10 @@ function QuickValueEditor({
             relationId,
             status,
             overlapDuration: status === 'OVERLAP' ? Number(duration) : status === 'NO_OVERLAP' ? 0 : null,
+            expectedVersion: cell?.version,
           },
         ],
+        expectedOverlapRevision: cellQ.data?.selectedCycle?.overlapRevision,
       }),
     onSuccess: (res) => {
       onDone()
@@ -262,6 +307,11 @@ function QuickValueEditor({
           </SelectContent>
         </Select>
       </div>
+      {cycleId && !comparable && (
+        <p className="rounded-lg bg-muted/60 p-2 text-xs leading-5 text-muted-foreground">
+          {notComparableReason ?? 'این زوج در این چرخه قابل‌مقایسه نیست.'}
+        </p>
+      )}
       <RadioGroup value={status} onValueChange={(v) => setStatus(v as OverlapStatusValue)} className="gap-1.5">
         <Label className="flex items-center gap-2 text-xs font-normal">
           <RadioGroupItem value="UNREVIEWED" /> بررسی‌نشده
@@ -280,7 +330,16 @@ function QuickValueEditor({
         </div>
       )}
       <div className="flex justify-end gap-2">
-        <Button size="sm" disabled={!cycleId || save.isPending || (status === 'OVERLAP' && (duration === '' || Number(duration) <= 0))} onClick={() => setConfirming(true)}>
+        <Button
+          size="sm"
+          disabled={
+            !cycleId ||
+            !comparable ||
+            save.isPending ||
+            (status === 'OVERLAP' && (duration === '' || Number(duration) <= 0))
+          }
+          onClick={() => setConfirming(true)}
+        >
           ثبت تغییر
         </Button>
       </div>
@@ -299,8 +358,15 @@ function QuickValueEditor({
           </div>
         </div>
       )}
+      <p className="sr-only">
+        ویرایشگر مقدار هم‌پوشانی عنصر {elementId} با {otherElementName}
+      </p>
     </div>
   )
+}
+
+function cycleQ_notComparableReason(data: OverlapMatrixDto | undefined, relationId: string): string | null {
+  return data?.comparability?.[relationId]?.notComparableReason ?? null
 }
 
 function ArchiveRelationButton({ relationId, label, onDone }: { relationId: string; label: string; onDone: () => void }) {

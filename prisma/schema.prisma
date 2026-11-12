@@ -268,6 +268,9 @@ model CycleObservation {
   cycleNo    Int      @map("cycle_no")
   notes      String?
   isComplete Boolean  @default(false) @map("is_complete")
+  // نسخهٔ مجموعهٔ مقادیر هم‌پوشانی این چرخه — §۱۰ ممیزی جلسه ۲:
+  // هر ثبت موفق یک واحد افزایش می‌یابد؛ درخواست هم‌زمان با نسخهٔ کهنه → 409
+  overlapRevision Int  @default(0) @map("overlap_revision")
   createdAt  DateTime @default(now()) @map("created_at")
   updatedAt  DateTime @updatedAt @map("updated_at")
   session      StudySession        @relation(fields: [sessionId], references: [id], onDelete: Cascade)

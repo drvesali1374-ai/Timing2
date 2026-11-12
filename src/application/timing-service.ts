@@ -719,6 +719,7 @@ export async function addCycles(sessionId: string, input: CyclesAddInput) {
     const entries: {
       cycleNo: number
       notes?: string | null
+      overlaps?: Array<{ relationId: string; status: string; overlapDuration?: number | null; version?: number }>
       observations: NonNullable<CyclesAddInput['withData']>[number]['observations']
     }[] = []
     if (input.withData && input.withData.length > 0) {
@@ -727,7 +728,7 @@ export async function addCycles(sessionId: string, input: CyclesAddInput) {
         const no = !taken.has(wd.cycleNo) ? wd.cycleNo : nextNo++
         taken.add(no)
         if (no >= nextNo) nextNo = no + 1
-        entries.push({ cycleNo: no, notes: wd.notes, observations: wd.observations })
+        entries.push({ cycleNo: no, notes: wd.notes, observations: wd.observations, overlaps: wd.overlaps })
       }
     } else {
       for (let i = 0; i < (input.count ?? 1); i++) {
@@ -773,6 +774,35 @@ export async function addCycles(sessionId: string, input: CyclesAddInput) {
           }
         }
       }
+
+      // §۸ ممیزی جلسه ۲ — بازگردانی مقادیر هم‌پوشانی چرخهٔ حذف‌شده (Undo):
+      // رکوردها با شناسهٔ چرخهٔ جدید بازسازی می‌شوند؛ relationId، status،
+      // overlapDuration و version معتبر حفظ می‌شوند و مقادیر سایر چرخه‌ها
+      // دست نمی‌خورد. رابطهٔ حذف‌شدهٔ کامل (فقط در حذف پروژه) نادیده گرفته می‌شود.
+      if (entry.overlaps && entry.overlaps.length > 0) {
+        for (const ov of entry.overlaps) {
+          const rel = await tx.overlapRelation.findUnique({
+            where: { id: ov.relationId },
+            select: { id: true, isActive: true },
+          })
+          if (!rel) continue
+          const normalized = ov.status === 'NO_OVERLAP' ? 0 : ov.status === 'UNREVIEWED' ? null : ov.overlapDuration ?? null
+          await tx.observationOverlap.create({
+            data: {
+              relationId: ov.relationId,
+              cycleId: cycle.id,
+              status: ov.status,
+              overlapDuration: normalized,
+              ...(ov.version != null ? { version: ov.version } : {}),
+            },
+          })
+        }
+        // نسخهٔ مجموعهٔ مقادیر چرخهٔ جدید نیز جلو می‌رود (§۱۰)
+        await tx.cycleObservation.update({
+          where: { id: cycle.id },
+          data: { overlapRevision: { increment: 1 } },
+        })
+      }
     }
 
     await recomputeSession(tx, sessionId)
@@ -803,7 +833,9 @@ export async function deleteCycle(cycleId: string) {
   assertSessionOpen(cycle.session)
 
   // دادهٔ حذف‌شده برای Undo برگردانده می‌شود — FR-07
+  // §۸ ممیزی جلسه ۲ — مقادیر هم‌پوشانی چرخه نیز همراه داده حذف‌شده ذخیره و حذف می‌شوند
   const observations = await db.elementObservation.findMany({ where: { cycleId } })
+  const overlaps = await db.observationOverlap.findMany({ where: { cycleId } })
   const removedData = {
     cycle: {
       cycleNo: cycle.cycleNo,
@@ -818,6 +850,12 @@ export async function deleteCycle(cycleId: string) {
         validityStatus: o.validityStatus,
         exclusionReason: o.exclusionReason,
       })),
+      overlaps: overlaps.map((o) => ({
+        relationId: o.relationId,
+        status: o.status,
+        overlapDuration: o.overlapDuration,
+        version: o.version,
+      })),
     },
   }
 
@@ -825,6 +863,9 @@ export async function deleteCycle(cycleId: string) {
   await db.$transaction(async (tx) => {
     await markDeleted(tx, 'ElementObservation', observations.map((o) => o.id))
     await markDeleted(tx, 'TimelineLane', laneIds)
+    // §۸ ممیزی جلسه ۲ — حذف صریح مقادیر هم‌پوشانی چرخه (بدون ردیف یتیم)
+    await markDeleted(tx, 'ObservationOverlap', overlaps.map((o) => o.id))
+    await tx.observationOverlap.deleteMany({ where: { cycleId } })
     await markDeleted(tx, 'CycleObservation', [cycleId])
     await tx.cycleObservation.delete({ where: { id: cycleId } })
     await recomputeSession(tx, cycle.sessionId)

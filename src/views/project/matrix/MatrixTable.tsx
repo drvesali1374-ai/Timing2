@@ -24,14 +24,17 @@ export default function MatrixTable({
   matrix,
   drafts,
   onDraft,
+  cycleSelected,
 }: {
   matrix: OverlapMatrixDto | null
   drafts: Record<string, CellDraft>
   onDraft: (relationId: string, draft: CellDraft | null) => void
+  /** §۷ ممیزی جلسه ۲ — بدون چرخه، سلول‌ها کاملاً غیرقابل‌ویرایش‌اند */
+  cycleSelected: boolean
 }) {
   const prefs = useDisplayPrefs()
   if (!matrix) return null
-  const { members, relations, cells } = matrix
+  const { members, relations, cells, comparability } = matrix
   const activeRelations = relations.filter((r) => r.isActive)
   const relByPair = new Map<string, string>()
   for (const r of activeRelations) relByPair.set(`${r.elementLowId}|${r.elementHighId}`, r.id)
@@ -51,6 +54,11 @@ export default function MatrixTable({
           failedPairs.add(key)
         }
       }
+    }
+    for (const ii of matrix.validation.intervalIssues ?? []) {
+      if (ii.kind !== 'DEFINITE') continue
+      const key = ii.pair[0] < ii.pair[1] ? `${ii.pair[0]}|${ii.pair[1]}` : `${ii.pair[1]}|${ii.pair[0]}`
+      failedPairs.add(key)
     }
   }
 
@@ -113,6 +121,9 @@ export default function MatrixTable({
                       prefs={prefs}
                       rowName={row.name}
                       colName={col.name}
+                      cycleSelected={cycleSelected}
+                      comparable={comparability[relationId]?.isComparable !== false}
+                      notComparableReason={comparability[relationId]?.notComparableReason ?? null}
                     />
                   </td>
                 )
@@ -133,6 +144,9 @@ function MatrixCell({
   prefs,
   rowName,
   colName,
+  cycleSelected,
+  comparable,
+  notComparableReason,
 }: {
   relationId: string
   cell: OverlapMatrixDto['cells'][string] | null
@@ -141,6 +155,9 @@ function MatrixCell({
   prefs: ReturnType<typeof useDisplayPrefs>
   rowName: string
   colName: string
+  cycleSelected: boolean
+  comparable: boolean
+  notComparableReason: string | null
 }) {
   const [open, setOpen] = useState(false)
   const effective: CellDraft = draft ?? {
@@ -148,6 +165,28 @@ function MatrixCell({
     overlapDuration: cell?.overlapDuration ?? null,
   }
   const isDraft = draft != null
+  // §۷ ممیزی جلسه ۲ — بدون چرخه یا برای زوج غیرقابل‌مقایسه، ویرایش غیرفعال است
+  const editable = cycleSelected && comparable
+  if (!editable) {
+    return (
+      <span
+        className="flex w-full min-h-[38px] cursor-not-allowed items-center justify-center rounded-lg px-1.5 py-1 opacity-80"
+        title={
+          !cycleSelected
+            ? 'برای ویرایش مقدار، ابتدا یک چرخه انتخاب کنید'
+            : notComparableReason ?? 'در این چرخه قابل‌مقایسه نیست'
+        }
+      >
+        {comparable ? (
+          <CellContent status={effective.status} duration={effective.overlapDuration} prefs={prefs} />
+        ) : (
+          <span className="rounded-md border border-dashed border-muted-foreground/50 bg-muted/60 px-1.5 py-0.5 text-[10px] text-muted-foreground">
+            در این چرخه قابل‌مقایسه نیست
+          </span>
+        )}
+      </span>
+    )
+  }
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>

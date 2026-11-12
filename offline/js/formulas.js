@@ -938,6 +938,38 @@
         if (failures.length > 0) localFailures.push({ pair: [a, b], failures: failures });
       }
     }
+    /* ۱.۵) تطبیق مقدار ثبت‌شده با بازهٔ واقعی چرخه — §۴ ممیزی جلسه ۲
+       برای هر زوج با مقدار قطعی: هر دو بازه موجود → باید با
+       max(0, min(E_A,E_B) − max(S_A,S_B)) برابر باشد (اختلاف = خطای قطعی)؛
+       بازهٔ ناقص → ادعای VALID قطعی ممکن نیست (INDETERMINATE). */
+    var intervalIssues = [];
+    for (var ii = 0; ii < memberIds.length; ii++) {
+      for (var jj = ii + 1; jj < memberIds.length; jj++) {
+        var ia = memberIds[ii], ib = memberIds[jj];
+        var ip = pairLookup(ia, ib);
+        if (!ip || ip.status === 'UNREVIEWED') continue;
+        var recorded = ip.status === 'NO_OVERLAP' ? 0 : (ip.overlapDuration != null ? ip.overlapDuration : 0);
+        var ivA = intervals[ia], ivB = intervals[ib];
+        var completeA = !!ivA && ivA.startOffset != null && ivA.endOffset != null;
+        var completeB = !!ivB && ivB.startOffset != null && ivB.endOffset != null;
+        if (completeA && completeB) {
+          var computed = pairwiseOverlap(ivA, ivB);
+          if (Math.abs(recorded - computed) > 1e-6) {
+            intervalIssues.push({
+              pair: [ia, ib], recorded: recorded, computed: computed,
+              message: 'مقدار ثبت‌شدهٔ هم‌پوشانی «' + nameOf(ia) + '» و «' + nameOf(ib) + '» (' + round12(recorded) + ') با هم‌پوشانی واقعی بازه‌های زمان‌سنجی این چرخه (' + round12(computed) + ' ثانیه) تطبیق ندارد؛ مقدار پیشنهادی ' + round12(computed) + ' است.',
+              responsiblePairs: [[ia, ib]], kind: 'DEFINITE',
+            });
+          }
+        } else {
+          intervalIssues.push({
+            pair: [ia, ib], recorded: recorded, computed: null,
+            message: 'بازهٔ واقعی «' + nameOf(ia) + '» یا «' + nameOf(ib) + '» در این چرخه کامل نیست؛ مقدار ثبت‌شده با بازهٔ واقعی تطبیق داده نشد و اعتبارسنجی بر اساس مدت‌ها انجام شد.',
+            responsiblePairs: [[ia, ib]], kind: 'INDETERMINATE',
+          });
+        }
+      }
+    }
     var tripleIssues = tripleConstraintViolations(memberIds, durations, pairLookup, nameOf);
     var confirmed = validateIntervalRealizability(memberIds, durations, pairLookup, { nameOf: nameOf });
     var provisional = analyzeProvisional(memberIds, durations, pairLookup, nameOf);
@@ -968,7 +1000,34 @@
         else unions[key] = { value: null, source: 'NOT_COMPUTABLE' };
       }
     }
-    return { confirmed: confirmed, localFailures: localFailures, tripleIssues: tripleIssues, provisional: provisional, multiOverlaps: multiOverlaps, unions: unions };
+    return { confirmed: confirmed, localFailures: localFailures, tripleIssues: tripleIssues, intervalIssues: intervalIssues, provisional: provisional, multiOverlaps: multiOverlaps, unions: unions };
+  }
+
+  /* آیا در میان اعضا رابطهٔ فعال بررسی‌نشده هست؟ (رابطهٔ تعریف‌نشده ≠ بررسی‌نشده — §۳ ممیزی) */
+  function hasUnreviewedRelation(memberIds, pairLookup) {
+    for (var i = 0; i < memberIds.length; i++) {
+      for (var j = i + 1; j < memberIds.length; j++) {
+        var p = pairLookup(memberIds[i], memberIds[j]);
+        if (p && p.status === 'UNREVIEWED') return true;
+      }
+    }
+    return false;
+  }
+
+  /* دو حکم مستقل — §۳ ممیزی جلسه ۲:
+     confirmedVerdict = سازگاری داده‌های تأییدشده؛ overallVerdict = نتیجهٔ نهایی
+     با توجه به کامل‌بودن اعتبارسنجی (روابط بررسی‌نشده/بازهٔ ناقص → INDETERMINATE). */
+  function computeVerdicts(memberIds, pairLookup, out) {
+    var hasDefinite = out.localFailures.length > 0 || out.tripleIssues.length > 0 ||
+      out.intervalIssues.some(function (i) { return i.kind === 'DEFINITE'; }) ||
+      out.confirmed.verdict === 'INVALID';
+    if (hasDefinite) return { confirmedVerdict: 'INVALID', overallVerdict: 'INVALID' };
+    var confirmedVerdict = out.confirmed.verdict;
+    var hasIncomplete = confirmedVerdict === 'INDETERMINATE' ||
+      out.intervalIssues.some(function (i) { return i.kind === 'INDETERMINATE'; }) ||
+      hasUnreviewedRelation(memberIds, pairLookup);
+    if (hasIncomplete) return { confirmedVerdict: confirmedVerdict, overallVerdict: 'INDETERMINATE' };
+    return { confirmedVerdict: confirmedVerdict, overallVerdict: 'VALID' };
   }
 
   g.T2F = {
@@ -989,5 +1048,6 @@
     validatePairLocally: validatePairLocally, tripleConstraintViolations: tripleConstraintViolations,
     minimumRequiredOverlap: minimumRequiredOverlap, validateIntervalRealizability: validateIntervalRealizability,
     connectedComponents: connectedComponents, analyzeProvisional: analyzeProvisional, runFullValidation: runFullValidation,
+    hasUnreviewedRelation: hasUnreviewedRelation, computeVerdicts: computeVerdicts,
   };
 })(typeof window !== 'undefined' ? window : globalThis);
