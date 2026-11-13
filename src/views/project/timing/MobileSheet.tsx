@@ -594,9 +594,13 @@ function MobileOverlapCell({
   const cmp = relationComparability(cycle, relation, nameOf)
   const computed = computedOverlapFor(cycle, relation)
   const [value, setValue] = useState(cell.status === 'UNREVIEWED' ? '' : String(cell.overlapDuration ?? ''))
-  const [prevCell, setPrevCell] = useState(cell)
-  if (cell !== prevCell) {
-    setPrevCell(cell)
+  // الگوی derive-state با «کلید پایدار» — overlapCellOf هر بار شیء جدید می‌سازد؛
+  // مقایسهٔ مرجع هرگر همگرا نمی‌شود و حلقهٔ رندر بی‌نهایت می‌سازد. کلید محتوایی
+  // پایدار است و فقط تغییر واقعی داده ورودی مقدار ویرایش را بازنشانی می‌کند.
+  const cellKey = `${cell.status}:${cell.overlapDuration ?? 'n'}:${cell.version}`
+  const [prevKey, setPrevKey] = useState(cellKey)
+  if (cellKey !== prevKey) {
+    setPrevKey(cellKey)
     setValue(cell.status === 'UNREVIEWED' ? '' : String(cell.overlapDuration ?? ''))
   }
 
