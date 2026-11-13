@@ -22,7 +22,6 @@
   var outlierCardOpen = false; /* باز بودن کارت تنظیمات تشخیص غیرعادی */
 
   /* بج نوع عنصر — MANUAL بنفش، MACHINE فیروزه‌ای، WAITING کهربایی، OVERLAP سبز */
-  var TYPE_BADGE_VARIANT = { MANUAL: 'brand', MACHINE: 'cyan', WAITING: 'amber', OVERLAP: 'green' };
 
   /* ═══════════ محتوای راهنمای کمک‌نقطه‌ها (عیناً از نسخهٔ وب) ═══════════ */
   var HELP_SNAPSHOT = {
@@ -88,9 +87,6 @@
   }
 
   /* ═══════════ ابزارهای کوچک ═══════════ */
-  function typeBadge(elementType) {
-    return UI.badge(DB.CONST.ELEMENT_TYPE_LABELS[elementType] || elementType, TYPE_BADGE_VARIANT[elementType] || 'muted');
-  }
   function legendItem(colorVar, label) {
     return U.h('span', { class: 'flex items-center gap-1' },
       U.h('span', { class: 't2a-dot', style: { background: colorVar } }),
@@ -379,7 +375,6 @@
       host.appendChild(summaryCards(an));
       host.appendChild(methodCard(an));
       host.appendChild(elementsCard(an));
-      host.appendChild(typeTotalsCard(an));
       host.appendChild(cycleStatsCard(an));
       host.appendChild(deepDiveCard(an, ctx));
       host.appendChild(suspectsCard(an, ctx));
@@ -504,7 +499,7 @@
         UI.helpDot('جدول نتایج عناصر', HELP_ELEMENTS)));
 
     card.appendChild(UI.table(
-      ['عنصر', 'نوع', 'در محاسبات', 'مشکوک / خارج', 'OT (ثانیه)', 'R', 'NT (ثانیه)', 'ST (ثانیه)'],
+      ['عنصر', 'در محاسبات', 'مشکوک / خارج', 'OT (ثانیه)', 'R', 'NT (ثانیه)', 'ST (ثانیه)'],
       function (tbody) {
         an.elements.forEach(function (e) {
           var stCell;
@@ -519,7 +514,6 @@
           }
           tbody.appendChild(U.h('tr', null,
             U.h('td', { class: 'font-medium' }, e.name),
-            U.h('td', null, typeBadge(e.elementType)),
             U.h('td', { class: 'num', title: 'مشاهدات وارد محاسبه از کل' },
               U.h('span', { class: 'font-semibold' }, U.formatInt(e.counts.calcBasis)),
               U.h('span', { class: 'text-xs text-faint' }, ' / ' + U.formatInt(e.counts.total))),
@@ -555,21 +549,6 @@
     }
     card.appendChild(box);
     return card;
-  }
-
-  /* ── کارت «شاخص‌های نوع زمان (از OT)» ── */
-  function typeTotalsCard(an) {
-    var t = an.elementTypeTotals || {};
-    return U.h('section', { class: 'card p-4', 'aria-label': 'شاخص‌های نوع زمان' },
-      U.h('div', { class: 'flex items-center gap-2' },
-        U.h('span', { class: 'chip-icon' }, U.icon('timer')),
-        U.h('h2', { class: 'font-bold', text: 'شاخص‌های نوع زمان (از OT)' })),
-      U.h('div', { class: 'grid sm:grid-cols-2 lg:grid-cols-4 gap-2 mt-3' },
-        UI.metric('کار دستی', U.formatTimeValue(t.manual)),
-        UI.metric('خودکار ماشین', U.formatTimeValue(t.machine)),
-        UI.metric('انتظار', U.formatTimeValue(t.waiting)),
-        UI.metric('جمع هم‌زمان (شاخص)', U.formatTimeValue(t.overlapSum))),
-      U.h('p', { class: 'text-xs text-muted mt-2', text: 'جمع مدت عناصر هم‌پوشان فقط شاخص است و زمان سپری‌شدهٔ چرخه محسوب نمی‌شود.' }));
   }
 
   /* ── کارت «آمار زمان سپری‌شدهٔ چرخه» ── */

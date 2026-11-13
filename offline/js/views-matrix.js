@@ -30,20 +30,14 @@
   };
 
   // ═══════════ وضعیت ماژول ═══════════
-  // چرخهٔ انتخاب‌شده در طول جلسه (بدون localStorage) per پروژه حفظ می‌شود؛
-  // پیش‌نویس‌ها فقط تا خروج از این نما زنده‌اند (هم‌ارز unmount در نسخه وب).
+  // چرخهٔ انتخاب‌شده در طول جلسه (بدون localStorage) per پروژه حفظ می‌شود.
+  // v1.5.0 §۱۱ — ماتریس فقط‌خواندنی است: پیش‌نویس/ویرایشگر حذف شد؛
+  // ثبت مقدار فقط در برگهٔ زمان‌سنجی (زیرردیف رابطه) انجام می‌شود.
   var _cycleByProject = {};
-  var drafts = {};      // relationId -> { status, overlapDuration }
-  var openCell = null;  // { relationId, rowId } — ویرایشگر بازشدهٔ جدول دسکتاپ
-  var openPair = null;  // relationId — کارت بازشدهٔ لیست موبایل
   var rootContainer = null;
   var rootProjectId = null;
 
-  function resetInteractionState() {
-    drafts = {};
-    openCell = null;
-    openPair = null;
-  }
+  function resetInteractionState() { }
 
   function rerender() {
     if (!rootContainer) return;
@@ -78,8 +72,6 @@
 
   /** مقدار مؤثر یک زوج = پیش‌نویس؟ نبود؟ مقدار ثبت‌شده چرخه؛ نبود؟ بررسی‌نشده */
   function effectiveCell(matrix, relationId) {
-    var d = drafts[relationId];
-    if (d) return { status: d.status, overlapDuration: d.overlapDuration, isDraft: true };
     var c = matrix.cells[relationId];
     if (c) return { status: c.status, overlapDuration: c.overlapDuration, isDraft: false };
     return { status: 'UNREVIEWED', overlapDuration: null, isDraft: false };
@@ -98,12 +90,6 @@
       U.h('span', { class: 'mx-unit', text: ' s' }));
     if (boxed) val.style.background = 'var(--brand-soft)';
     return val;
-  }
-
-  function setDraft(relationId, draft) {
-    if (draft === null) delete drafts[relationId];
-    else drafts[relationId] = draft;
-    rerender();
   }
 
   // ═══════════ نمای اصلی — T2VIEWS.matrix ═══════════
@@ -172,24 +158,6 @@
         resetInteractionState(); // مقدار پیش‌نویس به چرخهٔ دیگر تعلق ندارد
         rerender();
       }));
-    }
-
-    /* ── نوار ثبت‌نشده (draft) — §۴.۴ ── */
-    var draftKeys = Object.keys(drafts);
-    if (draftKeys.length > 0) {
-      content.appendChild(U.h('div', { class: 'matrix-draft-bar' },
-        U.h('p', { class: 'text-sm' },
-          U.formatInt(draftKeys.length) + ' تغییر ثبت‌نشده دارید. پس از «ثبت تغییرات»، هم‌پوشانی چندتایی و اعتبارسنجی مجدداً محاسبه می‌شود.'),
-        U.h('div', { class: 'flex items-center gap-2' },
-          U.h('button', {
-            class: 'btn btn-ghost btn-sm', type: 'button', text: 'انصراف',
-            onclick: function () { resetInteractionState(); rerender(); },
-          }),
-          U.h('button', {
-            class: 'btn btn-brand btn-sm', type: 'button', text: 'ثبت تغییرات',
-            disabled: !cycleId ? true : null,
-            onclick: function () { commitDrafts(matrix, cycleId); },
-          }))));
     }
 
     if (activeRelations.length === 0) {
@@ -335,128 +303,50 @@
         }
         var eff = effectiveCell(matrix, relationId);
         var failed = failedPairs[low + '|' + high];
-        // §۵ ممیزی جلسه ۲ — زوج غیرقابل‌مقایسه در چرخهٔ انتخاب‌شده قابل ویرایش نیست
+        // §۵ ممیزی جلسه ۲ — زوج غیرقابل‌مقایسه در چرخهٔ انتخاب‌شده
         var comparable = !cycleId || !matrix.comparability || !matrix.comparability[relationId] || matrix.comparability[relationId].isComparable !== false;
         var notComparableReason = (matrix.comparability && matrix.comparability[relationId] && matrix.comparability[relationId].notComparableReason) || null;
-        var cellEditable = !!cycleId && comparable;
+        // v1.5.0 §۱۱ — فقط‌خواندنی: هیچ دکمهٔ ویرایش/ورودی عددی وجود ندارد
         tr.appendChild(U.h('td', { class: failed ? 'mx-cell-failed' : null },
-          cellEditable
-            ? U.h('button', {
-                class: 'mx-cell-btn' + (eff.isDraft ? ' is-draft' : ''),
-                type: 'button',
-                'aria-label': 'ویرایش هم‌پوشانی ' + row.name + ' و ' + col.name,
-                title: 'ویرایش مقدار',
-                onclick: function () {
-                  var cur = openCell;
-                  openCell = (cur && cur.relationId === relationId && cur.rowId === row.elementId) ? null : { relationId: relationId, rowId: row.elementId };
-                  rerender();
-                },
-              }, statusChipEl(eff))
-            : U.h('span', {
-                class: 'mx-cell-static',
-                title: !cycleId
-                  ? 'برای ویرایش مقدار، ابتدا یک چرخه انتخاب کنید'
-                  : notComparableReason || 'در این چرخه قابل‌مقایسه نیست',
-                'aria-disabled': 'true',
-              }, comparable
-                ? statusChipEl(eff)
-                : U.h('span', { class: 'mx-chip not-comparable', text: 'در این چرخه قابل‌مقایسه نیست' }))));
+          U.h('span', {
+            class: 'mx-cell-static',
+            title: !cycleId
+              ? 'برای مشاهدهٔ مقدار، یک چرخه انتخاب کنید — ثبت مقدار در برگهٔ زمان‌سنجی انجام می‌شود'
+              : !comparable
+                ? notComparableReason || 'در این چرخه قابل‌مقایسه نیست'
+                : 'ثبت و ویرایش مقدار در برگهٔ زمان‌سنجی (زیرردیف رابطه) انجام می‌شود',
+            'aria-disabled': 'true',
+          }, !cycleId
+            ? U.h('span', { class: 'text-faint', text: '—' })
+            : comparable
+              ? statusChipEl(eff)
+              : U.h('span', { class: 'mx-chip not-comparable', text: 'غیرقابل‌مقایسه' }))));
       });
       tbody.appendChild(tr);
-      // ردیف ویرایشگر بازشده — درست زیر ردیفی که سلول آن باز شده است
-      if (openCell && openCell.rowId === row.elementId && relById[openCell.relationId] &&
-          (relById[openCell.relationId].elementLowId === row.elementId || relById[openCell.relationId].elementHighId === row.elementId)) {
-        tbody.appendChild(buildEditorRow(matrix, relById, members.length, openCell.relationId));
-      }
     });
     table.appendChild(tbody);
 
     return U.h('div', { class: 'matrix-table-wrap scroll-slim', dir: 'rtl' }, table);
   }
 
-  function buildEditorRow(matrix, relById, colCount, relationId) {
-    var rel = relById[relationId];
-    var nameOf = function (id) {
-      var m = matrix.members.find(function (x) { return x.elementId === id; });
-      return m ? m.name : '؟';
-    };
-    return U.h('tr', null,
-      U.h('td', { class: 'mx-editor-cell', colspan: colCount + 1 },
-        buildCellEditor(relationId, nameOf(rel.elementLowId), nameOf(rel.elementHighId), effectiveCell(matrix, relationId))));
-  }
-
-  /** ویرایشگر سلول — سه گزینه + مقدار + نگه‌داری/بازگردانی (§۴.۴) — مشترک دسکتاپ/موبایل */
-  function buildCellEditor(relationId, aName, bName, eff) {
-    var RADIO_OPTIONS = [
-      { value: 'UNREVIEWED', label: 'بررسی‌نشده', icon: 'circleHelp', color: 'var(--muted-foreground)' },
-      { value: 'NO_OVERLAP', label: 'بدون هم‌پوشانی', icon: 'ban', color: 'var(--green)' },
-      { value: 'OVERLAP', label: 'دارای هم‌پوشانی', icon: 'layers', color: 'var(--brand)' },
-    ];
-    var radios = U.h('div', { class: 'mx-editor-radios' },
-      U.h('p', { class: 'text-xs text-muted' }, aName + ' ↔ ' + bName));
-    RADIO_OPTIONS.forEach(function (o) {
-      var selected = eff.status === o.value;
-      var radio = U.h('label', { class: 'mx-radio' + (selected ? ' selected' : '') },
-        U.h('input', { type: 'radio', name: 'mx-radio-' + relationId, checked: selected, style: { accentColor: 'var(--brand)' } }),
-        U.h('span', { class: 'flex items-center gap-1.5' },
-          U.h('span', { style: { color: o.color, display: 'inline-flex' } }, U.icon(o.icon)),
-          o.label));
-      radio.querySelector('input').addEventListener('change', function () {
-        setDraft(relationId, {
-          status: o.value,
-          overlapDuration: o.value === 'OVERLAP' ? eff.overlapDuration : null,
-        });
-      });
-      radios.appendChild(radio);
-    });
-
-    var side = U.h('div', { class: 'mx-editor-side' });
-    if (eff.status === 'OVERLAP') {
-      var numInput = UI.persianNumberInput({
-        value: eff.overlapDuration,
-        min: 0.001,
-        ariaLabel: 'مدت هم‌پوشانی ' + aName + ' و ' + bName + ' (ثانیه)',
-        onChange: function (n) { setDraft(relationId, { status: 'OVERLAP', overlapDuration: n }); },
-      });
-      var realInput = numInput.tagName === 'INPUT' ? numInput : numInput.querySelector('input');
-      if (realInput) realInput.setAttribute('data-mx-focus', 'ov-' + relationId);
-      side.appendChild(UI.field('مدت هم‌پوشانی (ثانیه)', numInput));
-    }
-    side.appendChild(U.h('p', {
-      class: 'text-xs text-muted leading-relaxed',
-      text: 'مقدار فقط برای چرخهٔ انتخاب‌شده ثبت می‌شود. پس از «ثبت تغییرات» نوار بالا، اعتبارسنجی و هم‌پوشانی چندتایی مجدداً محاسبه می‌شود.',
-    }));
-    side.appendChild(U.h('div', { class: 'flex items-center justify-between gap-2' },
-      U.h('button', {
-        class: 'btn btn-ghost btn-sm', type: 'button', text: 'بازگردانی سلول',
-        disabled: !eff.isDraft ? true : null,
-        onclick: function () { setDraft(relationId, null); },
-      }),
-      U.h('button', {
-        class: 'btn btn-brand btn-sm', type: 'button',
-        disabled: !eff.isDraft ? true : null,
-        onclick: function () { openCell = null; openPair = null; rerender(); },
-      }, U.icon('pencil'), 'نگه‌داری تغییر')));
-
-    return U.h('div', { class: 'mx-editor' }, radios, side);
-  }
-
-  // ═══════════ لیست زوج‌ها (موبایل) — §۱۱ ═══════════
-
   function buildPairList(matrix, cycleId) {
     var nameOf = function (id) { return matrix.members.find(function (m) { return m.elementId === id; }); };
     var activeRelations = matrix.relations.filter(function (r) { return r.isActive; });
+    var openPairId = null;
     var ul = U.h('ul', { class: 'list-none flex flex-col gap-2' });
     activeRelations.forEach(function (r) {
       var a = nameOf(r.elementLowId);
       var b = nameOf(r.elementHighId);
       var eff = effectiveCell(matrix, r.id);
-      var isOpen = openPair === r.id;
       var card = U.h('li', { class: 'mx-pair-card' },
         U.h('button', {
           class: 'mx-pair-head', type: 'button',
-          'aria-expanded': isOpen ? 'true' : 'false',
-          onclick: function () { openPair = isOpen ? null : r.id; rerender(); },
+          'aria-expanded': 'false',
+          onclick: function () {
+            var expand = card.querySelector('.mx-pair-detail');
+            if (expand) { expand.parentNode.removeChild(expand); return; }
+            buildDetail();
+          },
         },
           U.h('span', { class: 'min-w-0 flex-1' },
             U.h('span', { class: 'block truncate text-sm font-bold' },
@@ -464,62 +354,30 @@
             U.h('span', { class: 'block truncate text-xs text-muted' },
               (a ? a.activityName : '؟') + ' / ' + (a ? a.stationName : '؟') + ' — ' +
               (b ? b.activityName : '؟') + ' / ' + (b ? b.stationName : '؟'))),
-          U.h('span', { class: 'shrink-0' }, statusChipEl(eff, true))));
-      if (isOpen) {
+          U.h('span', { class: 'shrink-0' }, !cycleId
+            ? U.h('span', { class: 'text-faint text-xs', text: '—' })
+            : statusChipEl(eff, true))));
+      function buildDetail() {
         var comparable = !cycleId || !matrix.comparability || !matrix.comparability[r.id] || matrix.comparability[r.id].isComparable !== false;
         var notComparableReason = (matrix.comparability && matrix.comparability[r.id] && matrix.comparability[r.id].notComparableReason) || null;
-        if (cycleId && comparable) {
-          card.appendChild(U.h('div', { class: 'mx-pair-expand' },
-            buildCellEditor(r.id, a ? a.name : '؟', b ? b.name : '؟', eff)));
+        var detail = U.h('div', { class: 'mx-pair-detail text-xs text-muted', style: { marginTop: '12px', paddingTop: '12px', borderTop: '1px solid var(--border)' } });
+        if (!cycleId) {
+          detail.appendChild(U.h('p', { text: 'برای مشاهدهٔ مقدار، ابتدا یک چرخه انتخاب کنید.' }));
+        } else if (!comparable) {
+          detail.appendChild(U.h('p', { text: notComparableReason || 'این زوج در این چرخه قابل‌مقایسه نیست.' }));
         } else {
-          card.appendChild(U.h('p', {
-            class: 'text-xs text-muted',
-            style: { marginTop: '12px', paddingTop: '12px', borderTop: '1px solid var(--border)' },
-            text: !cycleId
-              ? 'برای ویرایش مقدار، ابتدا یک چرخه انتخاب کنید.'
-              : notComparableReason || 'این زوج در این چرخه قابل‌مقایسه نیست.',
-          }));
+          detail.appendChild(U.h('p', null,
+            'مقدار این چرخه: ',
+            eff.status === 'OVERLAP'
+              ? U.h('b', { class: 'num' }, U.formatTimeValue(eff.overlapDuration) + ' ثانیه')
+              : eff.status === 'NO_OVERLAP' ? 'بدون هم‌پوشانی' : 'بررسی‌نشده'));
         }
+        detail.appendChild(U.h('p', { style: { marginTop: '4px' }, text: 'ثبت و ویرایش مقدار در برگهٔ زمان‌سنجی (زیرردیف رابطه) انجام می‌شود.' }));
+        card.appendChild(detail);
       }
       ul.appendChild(card);
     });
     return ul;
-  }
-
-  // ═══════════ ثبت پیش‌نویس‌ها — خط کامل اعتبارسنجی + پیام‌ها (§۱۰) ═══════════
-
-  function commitDrafts(matrix, cycleId) {
-    if (!cycleId) return;
-    var keys = Object.keys(drafts);
-    if (keys.length === 0) return;
-    var updates = keys.map(function (rid) {
-      var d = drafts[rid];
-      var cell = matrix.cells[rid];
-      return {
-        relationId: rid,
-        status: d.status,
-        overlapDuration: d.status === 'NO_OVERLAP' ? 0 : (d.status === 'UNREVIEWED' ? null : d.overlapDuration),
-        expectedVersion: cell ? cell.version : undefined,
-      };
-    });
-    // §۱۰ ممیزی جلسه ۲ — همان نسخهٔ آنلاین: کنترل هم‌زمانی در سطح مجموعهٔ مقادیر چرخه
-    var overlapRevision = matrix.selectedCycle ? matrix.selectedCycle.overlapRevision : undefined;
-    try {
-      var res = DB.setCycleOverlaps(cycleId, updates, { expectedOverlapRevision: overlapRevision });
-      resetInteractionState();
-      UI.toast('تغییرات هم‌پوشانی ثبت شد',
-        res.warnings.length > 0 ? {} : { description: 'فرم هر دو عنصر و ماتریس از همان منبع به‌روز شد.' });
-      res.warnings.forEach(function (w) {
-        UI.toast('هشدار — نتیجه موقتی است', { type: 'warning', description: w });
-      });
-      rerender();
-    } catch (err) {
-      // همهٔ دلایل قطعی نمایش داده می‌شود؛ پیش‌نویس‌ها حفظ می‌شوند (§۴.۴)
-      UI.toast('ثبت تغییرات ممکن نیست', {
-        type: 'error',
-        description: (err && err.message) ? err.message : 'ثبت تغییرات ناموفق بود',
-      });
-    }
   }
 
   // ═══════════ پنل اعتبارسنجی و محاسبات وابسته — §۶/§۷/§۸ ═══════════
@@ -659,18 +517,26 @@
       U.h('summary', null, 'روابط آرشیوشده (' + U.formatInt(archived.length) + ')'));
     var ul = U.h('ul', { class: 'list-none flex flex-col gap-1.5', style: { marginTop: '8px' } });
     archived.forEach(function (r) {
+      // v1.5.0 §۴.۳ — رابطهٔ بین‌فعالیت تا هم‌فعالیت‌شدن عناصر قابل بازگردانی نیست
+      var crossActivity = r.archiveReason === 'CROSS_ACTIVITY_NOT_SUPPORTED_BY_SESSION_SHEET';
       ul.appendChild(U.h('li', { class: 'mx-archived-row' },
-        U.h('span', { class: 'text-muted truncate', text: nameOf(r.elementLowId) + ' ↔ ' + nameOf(r.elementHighId) }),
-        U.h('button', {
-          class: 'btn btn-outline btn-sm', type: 'button', text: 'بازگردانی',
-          onclick: function () {
-            try {
-              DB.restoreOverlapRelation(r.id);
-              UI.toast('رابطه بازگردانی شد', { description: 'مقادیر تاریخی چرخه‌های قبلی همین رابطه حفظ شده و دوباره فعال شد.' });
-              rerender();
-            } catch (err) { UI.toastError(err); }
-          },
-        })));
+        U.h('span', { class: 'text-muted truncate', text: nameOf(r.elementLowId) + ' ↔ ' + nameOf(r.elementHighId) + (crossActivity ? ' — بین‌فعالیت' : '') }),
+        crossActivity
+          ? U.h('span', {
+              class: 'text-muted', style: { fontSize: '10px' },
+              title: 'رابطهٔ بین‌فعالیت تا زمانی که هر دو عنصر در یک فعالیت نباشند قابل بازگردانی نیست.',
+              text: 'بازگردانی ممنوع',
+            })
+          : U.h('button', {
+              class: 'btn btn-outline btn-sm', type: 'button', text: 'بازگردانی',
+              onclick: function () {
+                try {
+                  DB.restoreOverlapRelation(r.id);
+                  UI.toast('رابطه بازگردانی شد', { description: 'مقادیر تاریخی چرخه‌های قبلی همین رابطه حفظ شده و دوباره فعال شد.' });
+                  rerender();
+                } catch (err) { UI.toastError(err); }
+              },
+            })));
     });
     details.appendChild(ul);
     return details;
@@ -870,7 +736,7 @@
     var sessionScoped = !!opts.sessionId;
     var sectionEl = U.h('section', {
       class: 'mx-parallel-section flex flex-col gap-3',
-      'aria-label': 'عناصر موازی و اطلاعات هم‌پوشانی «' + elementName + '»',
+      'aria-label': 'عناصر موازی «' + elementName + '»',
     });
     container.appendChild(sectionEl);
 
@@ -888,12 +754,13 @@
       }
       U.clear(sectionEl);
       var rows = data.rows.filter(function (r) { return r.isActive; });
+      var archivedRows = data.rows.filter(function (r) { return !r.isActive; });
 
-      // سربرگ — مشاهده در ماتریس + افزودن عنصر موازی
+      // سربرگ — مشاهده در ماتریس + افزودن عنصر موازی (فقط هم‌فعالیت §۴.۳)
       sectionEl.appendChild(U.h('div', { class: 'flex flex-wrap items-center justify-between gap-2' },
         U.h('p', { class: 'flex items-center gap-1.5 text-sm font-bold' },
           U.h('span', { style: { color: 'var(--brand)', display: 'inline-flex' } }, U.icon('network')),
-          'عناصر موازی و اطلاعات هم‌پوشانی'),
+          'عناصر موازی'),
         U.h('div', { class: 'flex items-center gap-1.5' },
           U.h('button', {
             class: 'btn btn-outline btn-sm', type: 'button', text: 'مشاهده در ماتریس',
@@ -904,10 +771,16 @@
             onclick: function () { addOpen = !addOpen; draw(); },
           }, U.icon('plus'), 'عنصر موازی'))));
 
+      // v1.5.0 §۴.۱ — این فرم فقط تعریف‌کنندهٔ رابطه است؛ نه محل اندازه‌گیری
+      sectionEl.appendChild(U.h('p', {
+        class: 'text-xs text-muted leading-relaxed',
+        text: 'اینجا فقط رابطه‌های موازی تعریف یا حذف می‌شوند؛ ثبت مقدار هم‌پوشانی هر چرخه در برگهٔ زمان‌سنجی و در زیرردیف همین رابطه انجام می‌شود.',
+      }));
+
       if (rows.length === 0) {
         sectionEl.appendChild(U.h('p', {
           class: 'text-xs text-muted leading-relaxed',
-          text: 'برای «' + elementName + '» رابطهٔ موازی ثبت نشده است. اگر عنصر دیگری هم‌زمان با آن اجرا می‌شود، آن را اضافه کنید تا در ماتریس هم‌پوشانی و مقدار هر چرخه قابل ثبت شود.',
+          text: 'برای «' + elementName + '» رابطهٔ موازی ثبت نشده است. اگر عنصر دیگری هم‌زمان با آن اجرا می‌شود، آن را اضافه کنید تا زیرردیف آن در برگهٔ زمان‌سنجی نمایش داده شود.',
         }));
       } else {
         var ul = U.h('ul', { class: 'list-none flex flex-col gap-1.5' });
@@ -915,12 +788,57 @@
         sectionEl.appendChild(ul);
       }
 
+      /* روابط آرشیوشده — بازگردانی در صورت معتبر بودن (§۴.۱/§۴.۳) */
+      if (archivedRows.length > 0) {
+        var archBox = U.h('details', { class: 'rounded-lg', style: { border: '1px solid var(--border)', padding: '8px', background: 'var(--surface-2)' } });
+        archBox.appendChild(U.h('summary', {
+          class: 'text-xs font-bold', style: { cursor: 'pointer', color: 'var(--muted-foreground)' },
+          text: 'روابط آرشیوشده (' + U.formatInt(archivedRows.length) + ')',
+        }));
+        var archUl = U.h('ul', { class: 'list-none flex flex-col gap-1.5', style: { marginTop: '8px' } });
+        archivedRows.forEach(function (r) {
+          archUl.appendChild(U.h('li', {
+            class: 'flex flex-wrap items-center justify-between gap-2 rounded-lg',
+            style: { background: 'var(--muted)', padding: '8px' },
+          },
+            U.h('div', { class: 'min-w-0' },
+              U.h('p', {
+                class: 'truncate text-xs font-bold',
+                style: { color: 'var(--muted-foreground)', textDecoration: 'line-through' },
+                text: r.otherElementName,
+              }),
+              U.h('p', {
+                class: 'truncate',
+                style: { fontSize: '10px', color: 'var(--muted-foreground)' },
+                text: r.otherActivityName + ' / ' + r.otherStationName + (r.crossActivity ? ' — بین‌فعالیت' : ''),
+              })),
+            r.crossActivity
+              ? U.h('span', {
+                  class: 'text-xs', style: { fontSize: '10px', color: 'var(--muted-foreground)' },
+                  title: 'رابطهٔ بین‌فعالیت تا زمانی که هر دو عنصر در یک فعالیت نباشند قابل بازگردانی نیست.',
+                  text: 'بین‌فعالیت — بازگردانی ممنوع',
+                })
+              : U.h('button', {
+                  class: 'btn btn-ghost btn-sm', type: 'button',
+                  style: { color: 'var(--green)' },
+                  onclick: function () {
+                    try {
+                      DB.restoreOverlapRelation(r.relationId);
+                      UI.toast('رابطه بازگردانی شد', { description: 'زیرردیف‌ها و مقادیر تاریخی آن دوباره نمایش داده می‌شوند.' });
+                      draw();
+                    } catch (err) { UI.toastError(err); }
+                  },
+                }, U.icon('rotateCcw'), 'بازگردانی')));
+        });
+        archBox.appendChild(archUl);
+        sectionEl.appendChild(archBox);
+      }
+
       if (addOpen) sectionEl.appendChild(buildInlineAdd());
     }
 
-    /** ردیف یک رابطهٔ فعال — آخرین مقدار + ثبت مقدار + حذف رابطه */
+    /** ردیف یک رابطهٔ فعال — آخرین مقدار (فقط‌خواندنی) + حذف رابطه — §۴.۱ v1.5.0 */
     function buildRow(r) {
-      var editing = false;
       var confirmDel = false;
       var li = U.h('li', { class: 'mx-parallel-row' });
 
@@ -959,14 +877,14 @@
         li.appendChild(U.h('div', { class: 'flex flex-wrap gap-1.5', style: { marginTop: '8px' } },
           U.h('button', {
             class: 'btn btn-outline btn-sm', type: 'button',
-            onclick: function () { editing = !editing; confirmDel = false; drawRow(); },
-          }, U.icon('pencil'), 'ثبت مقدار'),
+            title: 'ثبت مقدار هم‌پوشانی فقط در برگهٔ زمان‌سنجی انجام می‌شود',
+            onclick: function () { appNavigate('/p/' + projectId + '/timing'); },
+          }, U.icon('timer'), 'ورود به برگهٔ زمان‌سنجی'),
           U.h('button', {
             class: 'btn btn-ghost btn-sm', type: 'button', style: { color: 'var(--red)' },
-            onclick: function () { confirmDel = !confirmDel; editing = false; drawRow(); },
+            onclick: function () { confirmDel = !confirmDel; drawRow(); },
           }, U.icon('trash'), 'حذف رابطه')));
 
-        if (editing) li.appendChild(buildQuickEditor(r));
         if (confirmDel) {
           var pairLabel = elementName + ' ↔ ' + r.otherElementName;
           li.appendChild(U.h('div', { class: 'mx-confirm-red flex flex-col gap-2', style: { marginTop: '8px' } },
@@ -992,197 +910,27 @@
       return li;
     }
 
-    /** ویرایش سریع مقدار یک رابطه برای یک چرخه — با تأیید اثرات (§۴.۴)
-     *  §۶ ممیزی جلسه ۲ — مقدار اولیه status از رکورد واقعی چرخهٔ انتخاب‌شده خوانده
-     *  می‌شود؛ مقدار قبلی با UNREVIEWED خالی جایگزین نمی‌شود. چرخهٔ پیش‌فرض فقط
-     *  از جلسهٔ جاری (در زمینهٔ زمان‌سنجی) انتخاب می‌شود. */
-    function buildQuickEditor(r) {
-      var box = U.h('div', { class: 'mx-quick-editor flex flex-col gap-2.5', style: { marginTop: '8px' } });
-      var cycles = [];
-      if (sessionScoped && opts.cycles) {
-        // چرخه‌های همان جلسهٔ جاری — بدون افتادن به چرخه‌های جلسات دیگر
-        cycles = opts.cycles.map(function (c) {
-          return { cycleId: c.cycleId, cycleNo: c.cycleNo, sessionId: opts.sessionId, operatorName: '', activityName: '', timingMethod: '', sessionStatus: '', activityId: '', createdAt: '' };
-        });
-      } else {
-        try {
-          cycles = DB.getOverlapMatrix(projectId, null).cycles;
-        } catch (e) { cycles = []; }
-      }
-      if (cycles.length === 0) {
-        box.appendChild(U.h('p', { class: 'text-xs text-muted', text: 'چرخه‌ای برای ثبت وجود ندارد؛ ابتدا در زمان‌سنجی داده ثبت کنید.' }));
-        return box;
-      }
-
-      // پیش‌فرض: آخرین چرخهٔ زمینهٔ جاری (زمان‌سنجی: همین جلسه؛ ساختار: کل پروژه)
-      var cycleId = cycles[cycles.length - 1].cycleId;
-      var status = 'UNREVIEWED';
-      var duration = null;
-      var confirming = false;
-
-      /** خواندن مقدار واقعی رابطه در چرخهٔ انتخاب‌شده — منبع واحد ماتریس (§۶ ممیزی) */
-      function loadCycleValue(cid) {
-        var m = null;
-        try { m = DB.getOverlapMatrix(projectId, cid); } catch (e) { return null; }
-        return m;
-      }
-      var cycleMatrix = loadCycleValue(cycleId);
-      function syncFromRecord() {
-        var cell = cycleMatrix && cycleMatrix.cells ? cycleMatrix.cells[r.relationId] : null;
-        status = cell ? cell.status : 'UNREVIEWED';
-        duration = cell && cell.overlapDuration != null ? cell.overlapDuration : null;
-      }
-      syncFromRecord();
-      function comparabilityOf(cid) {
-        var m = cid === cycleId ? cycleMatrix : loadCycleValue(cid);
-        if (!m || !m.comparability || !m.comparability[r.relationId]) return { isComparable: true, notComparableReason: null };
-        return m.comparability[r.relationId];
-      }
-
-      var sel = U.h('select', { class: 'select', 'aria-label': 'انتخاب چرخه' });
-      var sessionIds = [];
-      var bySession = {};
-      cycles.forEach(function (c) {
-        if (!bySession[c.sessionId]) {
-          bySession[c.sessionId] = { label: sessionScoped ? 'جلسهٔ جاری' : (c.activityName + ' — ' + c.operatorName), cycles: [] };
-          sessionIds.push(c.sessionId);
-        }
-        bySession[c.sessionId].cycles.push(c);
-      });
-      sessionIds.forEach(function (sid) {
-        var s = bySession[sid];
-        var og = U.h('optgroup', { label: s.label });
-        s.cycles.forEach(function (c) {
-          var label = sessionScoped
-            ? 'چرخهٔ ' + U.formatInt(c.cycleNo)
-            : 'چرخهٔ ' + U.formatInt(c.cycleNo) + ' — ' + c.operatorName + ' — ' + c.activityName;
-          var opt = U.h('option', { value: c.cycleId }, label);
-          if (cycleId === c.cycleId) opt.selected = true;
-          og.appendChild(opt);
-        });
-        sel.appendChild(og);
-      });
-      sel.addEventListener('change', function () {
-        cycleId = sel.value || null;
-        // §۶ ممیزی جلسه ۲ — با تغییر چرخه، مقدار از رکورد واقعی چرخهٔ جدید خوانده می‌شود
-        cycleMatrix = loadCycleValue(cycleId);
-        syncFromRecord();
-        confirming = false;
-        drawEditor();
-      });
-
-      var saveBtn = U.h('button', { class: 'btn btn-brand btn-sm', type: 'button', text: 'ثبت تغییر', onclick: function () { confirming = true; drawEditor(); } });
-      var confirmWrap = U.h('div');
-      var notComparableWrap = U.h('div');
-
-      var RADIO_OPTIONS = [
-        { value: 'UNREVIEWED', label: 'بررسی‌نشده' },
-        { value: 'NO_OVERLAP', label: 'بدون هم‌پوشانی (تأیید صفر)' },
-        { value: 'OVERLAP', label: 'دارای هم‌پوشانی' },
-      ];
-      var radiosWrap = U.h('div', { class: 'flex flex-col gap-1.5' });
-      var radioInputs = [];
-      RADIO_OPTIONS.forEach(function (o) {
-        var radio = U.h('label', { class: 'mx-radio' },
-          U.h('input', { type: 'radio', name: 'mxq-' + r.relationId, value: o.value, checked: status === o.value, style: { accentColor: 'var(--brand)' } }),
-          U.h('span', { text: o.label }));
-        var input = radio.querySelector('input');
-        radioInputs.push({ input: input, radio: radio, value: o.value });
-        input.addEventListener('change', function () {
-          status = o.value;
-          confirming = false;
-          sync();
-        });
-        radiosWrap.appendChild(radio);
-      });
-
-      var valueWrap = U.h('div');
-
-      function sync() {
-        drawValue();
-        // همگام‌سازی بصری گزینه‌ها با مقدار واقعی رکورد چرخه (prefill — §۶ ممیزی)
-        radioInputs.forEach(function (ri) {
-          ri.input.checked = ri.value === status;
-          ri.radio.classList.toggle('selected', ri.value === status);
-        });
-        var comp = comparabilityOf(cycleId);
-        // §۵ ممیزی جلسه ۲ — زوج غیرقابل‌مقایسه در چرخهٔ انتخاب‌شده قابل ثبت نیست
-        U.clear(notComparableWrap);
-        if (cycleId && comp.isComparable === false) {
-          notComparableWrap.appendChild(U.h('p', {
-            class: 'text-xs text-muted', style: { background: 'var(--muted)', borderRadius: '8px', padding: '8px' },
-            text: comp.notComparableReason || 'این زوج در این چرخه قابل‌مقایسه نیست.',
-          }));
-        }
-        saveBtn.disabled = !cycleId || comp.isComparable === false ||
-          (status === 'OVERLAP' && (duration === null || isNaN(duration) || duration <= 0));
-      }
-      function drawValue() {
-        U.clear(valueWrap);
-        if (status === 'OVERLAP') {
-          valueWrap.appendChild(UI.field('مدت (ثانیه)', UI.persianNumberInput({
-            value: duration,
-            min: 0.001,
-            ariaLabel: 'مدت هم‌پوشانی ' + elementName + ' و ' + r.otherElementName + ' (ثانیه)',
-            onChange: function (n) { duration = n; saveBtn.disabled = !cycleId || (status === 'OVERLAP' && (duration === null || isNaN(duration) || duration <= 0)); },
-          })));
-        }
-      }
-
-      function drawEditor() {
-        U.clear(box);
-        box.appendChild(U.h('div', { class: 'flex flex-col gap-1' },
-          U.h('label', { class: 'field-label', style: { marginBottom: 0 }, text: 'چرخه' }),
-          sel));
-        box.appendChild(notComparableWrap);
-        box.appendChild(radiosWrap);
-        box.appendChild(valueWrap);
-        box.appendChild(U.h('div', { class: 'flex justify-end gap-2' }, saveBtn));
-        if (confirming) {
-          U.clear(confirmWrap);
-          confirmWrap.appendChild(U.h('div', { class: 'mx-confirm-brand flex flex-col gap-2' },
-            U.h('p', { text: 'تغییر مدت هم‌پوشانی ' + elementName + ' ↔ ' + r.otherElementName + ' بر هم‌پوشانی چندتایی، اعتبارسنجی و نتایج محاسباتی اثر می‌گذارد. ثبت شود؟' }),
-            U.h('div', { class: 'flex justify-end gap-2' },
-              U.h('button', { class: 'btn btn-ghost btn-sm', type: 'button', text: 'بازگشت', onclick: function () { confirming = false; drawEditor(); } }),
-              U.h('button', {
-                class: 'btn btn-brand btn-sm', type: 'button', text: 'بله، ثبت کن',
-                onclick: function () {
-                  try {
-                    var cell = cycleMatrix && cycleMatrix.cells ? cycleMatrix.cells[r.relationId] : null;
-                    var res = DB.setCycleOverlaps(cycleId, [{
-                      relationId: r.relationId,
-                      status: status,
-                      overlapDuration: status === 'OVERLAP' ? duration : (status === 'NO_OVERLAP' ? 0 : null),
-                      expectedVersion: cell ? cell.version : undefined,
-                    }], {
-                      expectedOverlapRevision: cycleMatrix && cycleMatrix.selectedCycle ? cycleMatrix.selectedCycle.overlapRevision : undefined,
-                    });
-                    UI.toast('مقدار هم‌پوشانی ثبت شد', { description: 'فرم عنصر مقابل و ماتریس مرکزی هم‌زمان به‌روز شدند.' });
-                    res.warnings.forEach(function (w) {
-                      UI.toast('هشدار — نتیجه موقتی است', { type: 'warning', description: w });
-                    });
-                    draw();
-                  } catch (err) { UI.toastError(err); }
-                },
-              }))));
-          box.appendChild(confirmWrap);
-        }
-        sync();
-      }
-
-      drawEditor();
-      return box;
-    }
-
-    /** افزودن رابطهٔ موازی از فرم — خود عنصر جاری در فهرست نیست (§۴.۱) */
+    /** افزودن رابطهٔ موازی از فرم — فقط عناصر همین فعالیت، بدون خود و بدون رابطهٔ فعال تکراری (§۴.۱/§۴.۳) */
     function buildInlineAdd() {
       var box = U.h('div', { class: 'mx-quick-editor flex flex-col gap-2' });
       var selected = null;
       var confirming = false;
-      var catalog = [];
+      var catalogAll = [];
       try {
-        catalog = DB.getOverlapMatrix(projectId, null).elementsCatalog;
-      } catch (e) { catalog = []; }
+        catalogAll = DB.getOverlapMatrix(projectId, null).elementsCatalog;
+      } catch (e) { catalogAll = []; }
+      /* v1.5.0 §۴.۳ — فقط عناصر همین فعالیت؛ روابط فعال تکراری پیشنهاد نمی‌شوند */
+      var ownEntry = catalogAll.find(function (c) { return c.elementId === elementId; });
+      var ownActivityId = ownEntry ? ownEntry.activityId : null;
+      var relatedIds = {};
+      try {
+        DB.getElementRelations(elementId, { sessionId: opts.sessionId || null }).rows
+          .filter(function (r) { return r.isActive; })
+          .forEach(function (r) { relatedIds[r.otherElementId] = true; });
+      } catch (e) { /* بی‌اهمیت */ }
+      var catalog = catalogAll.filter(function (c) {
+        return c.elementId !== elementId && ownActivityId !== null && c.activityId === ownActivityId && !relatedIds[c.elementId];
+      });
 
       function nameOf(id) {
         var e = catalog.find(function (c) { return c.elementId === id; });
@@ -1191,7 +939,14 @@
 
       function drawAdd() {
         U.clear(box);
-        box.appendChild(U.h('p', { class: 'text-xs', text: 'عنصر موازی «' + elementName + '» را انتخاب کنید:' }));
+        if (catalog.length === 0) {
+          box.appendChild(U.h('p', {
+            class: 'text-xs text-muted leading-relaxed',
+            text: 'عنصر دیگری در همین فعالیت برای رابطهٔ موازی وجود ندارد (یا همهٔ روابط ممکن تعریف شده‌اند).',
+          }));
+          return box;
+        }
+        box.appendChild(U.h('p', { class: 'text-xs', text: 'عنصر موازی «' + elementName + '» را انتخاب کنید (فقط عناصر همین فعالیت):' }));
         box.appendChild(buildElementPicker({
           catalog: catalog,
           selectedId: function () { return selected; },
@@ -1207,7 +962,7 @@
           })));
         if (confirming) {
           box.appendChild(U.h('div', { class: 'mx-confirm-brand flex flex-col gap-2' },
-            U.h('p', { text: 'با افزودن رابطهٔ موازی «' + elementName + '» و «' + nameOf(selected) + '»، این رابطه در ماتریس مرکزی و فرم زمان‌سنجی هر دو عنصر نمایش داده می‌شود. ادامه می‌دهید؟' }),
+            U.h('p', { text: 'با افزودن رابطهٔ موازی «' + elementName + '» و «' + nameOf(selected) + '»، زیرردیف آن در برگهٔ زمان‌سنجی (برای همهٔ اپراتورهای همین فعالیت)، فرم هر دو عنصر و ماتریس مرکزی نمایش داده می‌شود. ادامه می‌دهید؟' }),
             U.h('div', { class: 'flex justify-end gap-2' },
               U.h('button', { class: 'btn btn-ghost btn-sm', type: 'button', text: 'بازگشت', onclick: function () { confirming = false; drawAdd(); } }),
               U.h('button', {
@@ -1216,7 +971,7 @@
                   try {
                     DB.createOverlapRelation(projectId, elementId, selected);
                     UI.toast('رابطهٔ موازی افزوده شد', {
-                      description: 'این رابطه در فرم هر دو عنصر و ماتریس مرکزی نمایش داده می‌شود.',
+                      description: 'زیرردیف این رابطه در برگهٔ زمان‌سنجی (برای همهٔ اپراتورهای فعالیت) و فرم هر دو عنصر نمایش داده می‌شود.',
                     });
                     addOpen = false;
                     draw();

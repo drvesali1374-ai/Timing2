@@ -112,6 +112,9 @@
         // ارتقای v۳ — جلسه دوم: snapshot تشخیصی SUSPECT + anchorهای یال (پیش‌فرض تهی، بدون دادهٔ ساختگی)
         (s.elementObservations || []).forEach(function (o) { if (o.outlierSnapshot === undefined) o.outlierSnapshot = null; });
         (s.chartEdges || []).forEach(function (e) { if (e.sourceAnchor === undefined) e.sourceAnchor = null; if (e.targetAnchor === undefined) e.targetAnchor = null; });
+        // ارتقای v1.5.0 — «نوع عنصر کاری» از UI حذف شد (§۳.۳):
+        // backfill پیش‌فرض‌های فنی مستقل + آرشیو نرم روابط بین‌فعالیت (§۴.۳)
+        migrateV150(s);
         return s;
       }
     } catch (e) { storageOk = false; }
@@ -121,6 +124,34 @@
   /** مهاجرت الونس‌های همه پروژه‌ها — v۱ → v۲ (قابل تکرار با مارکر) */
   function migrateAllowancesAll(s) {
     (s.projects || []).forEach(function (p) { migrateProjectAllowancesIfNeeded(p.id, s); });
+  }
+
+  /** مهاجرت v1.5.0 — idempotent:
+   *  ۱) elementType → defaultEntryMode / defaultLaneMode (MANUAL→SEQ/OPERATOR، MACHINE|OVERLAP→INT/MACHINE، WAITING→INT/OPERATOR)
+   *  ۲) آرشیو نرم روابط فعال بین عناصر دو Activity با دلیل CROSS_ACTIVITY_NOT_SUPPORTED_BY_SESSION_SHEET —
+   *     بدون حذف هیچ observationOverlap تاریخی */
+  function migrateV150(s) {
+    var CROSS = 'CROSS_ACTIVITY_NOT_SUPPORTED_BY_SESSION_SHEET';
+    (s.workElements || []).forEach(function (e) {
+      var entry = e.elementType === 'MANUAL' ? 'SEQ' : 'INT';
+      var lane = (e.elementType === 'MACHINE' || e.elementType === 'OVERLAP') ? 'MACHINE' : 'OPERATOR';
+      if (e.defaultEntryMode !== entry || e.defaultLaneType !== lane) {
+        e.defaultEntryMode = entry;
+        e.defaultLaneType = lane;
+      }
+    });
+    var activityOf = {};
+    (s.workElements || []).forEach(function (e) { activityOf[e.id] = e.activityId; });
+    (s.overlapRelations || []).forEach(function (r) {
+      if (!r.isActive) return;
+      var a1 = activityOf[r.elementLowId];
+      var a2 = activityOf[r.elementHighId];
+      if (a1 && a2 && a1 !== a2) {
+        r.isActive = false;
+        r.archiveReason = CROSS;
+        r.version = (r.version || 1) + 1;
+      }
+    });
   }
 
   function persist() {
@@ -536,15 +567,17 @@
     commit();
   }
   function createElement(activityId, input) {
+    // v1.5.0 §۳ — عنصر جدید بدون «نوع»: ورود ترتیبی و خط اپراتور پیش‌فرض
     var e = {
       id: U.uid(), activityId: activityId, name: input.name, description: input.description || null,
-      elementType: input.elementType || 'MANUAL',
+      elementType: 'MANUAL', // LEGACY — فقط برای حفظ رفتار تحلیل تاریخی؛ در UI عرضه نمی‌شود
+      defaultEntryMode: 'SEQ', defaultLaneType: 'OPERATOR',
       sortOrder: nextSortOrder('workElements', 'activityId', activityId),
       createdAt: U.nowISO(), updatedAt: U.nowISO(),
     };
     state.workElements.push(e);
     markProjectCalculationsStale(projectIdOfActivity(activityId));
-    recordAudit({ entityType: 'WorkElement', entityId: e.id, action: 'CREATE', entityName: e.name, after: { name: e.name, elementType: e.elementType }, projectId: projectIdOfActivity(activityId) });
+    recordAudit({ entityType: 'WorkElement', entityId: e.id, action: 'CREATE', entityName: e.name, after: { name: e.name }, projectId: projectIdOfActivity(activityId) });
     commit();
     return e;
   }
@@ -553,10 +586,7 @@
     if (!e) throw new Error('عنصر کاری یافت نشد.');
     if (patch.name !== undefined) e.name = patch.name;
     if (patch.description !== undefined) e.description = patch.description;
-    if (patch.elementType !== undefined && patch.elementType !== e.elementType) {
-      e.elementType = patch.elementType;
-      markProjectCalculationsStale(projectIdOfActivity(e.activityId));
-    }
+    // v1.5.0 §۳ — elementType دیگر پارامتر ویرایش نیست (ستون legacy دست‌نخورده می‌ماند)
     touch(e);
     recordAudit({ entityType: 'WorkElement', entityId: id, action: 'UPDATE', entityName: e.name, projectId: projectIdOfActivity(e.activityId) });
     commit();
@@ -1343,8 +1373,9 @@
     return filterBy('cycleObservations', 'sessionId', sessionId).sort(function (a, b) { return a.cycleNo - b.cycleNo; });
   }
 
-  function defaultEntryFor(elementType) { return elementType === 'MANUAL' ? 'SEQ' : 'INT'; }
-  function laneTypeForElement(elementType) { return elementType === 'MACHINE' || elementType === 'OVERLAP' ? 'MACHINE' : 'OPERATOR'; }
+  // v1.5.0 §۳.۲ — پیش‌فرض‌های فنی مستقل از نوع عنصر (elementType فقط legacy برای مهاجرت)
+  function defaultEntryFor(el) { return (el && el.defaultEntryMode === 'INT') ? 'INT' : 'SEQ'; }
+  function laneTypeForElement(el) { return (el && el.defaultLaneType === 'MACHINE') ? 'MACHINE' : 'OPERATOR'; }
   function getOrCreateLane(cycleId, laneType) {
     var existing = state.timelineLanes.find(function (l) { return l.cycleId === cycleId && l.laneType === laneType; });
     if (existing) return existing.id;
@@ -1488,7 +1519,7 @@
       var laneId = null;
       var noDataAtAll = merged.rawDuration === null && merged.cumulativeReading === null && merged.startOffset === null && merged.endOffset === null;
       if (!noDataAtAll) {
-        if (willHaveInterval) laneId = getOrCreateLane(cycle.id, laneTypeForElement(element.elementType));
+        if (willHaveInterval) laneId = getOrCreateLane(cycle.id, laneTypeForElement(element));
         else if (willHaveReading && session.timingMethod === 'CONTINUOUS') laneId = getOrCreateLane(cycle.id, 'OPERATOR');
       }
       if (!obs) {
@@ -1551,6 +1582,30 @@
     var elementIds = elements.map(function (e) { return e.id; });
     var cycles = cyclesOfSession(sessionId);
 
+    // v1.5.0 §۱۰ — روابط موازی فعال میان عناصر همین Activity (batch) + مقادیر چرخه‌ها
+    var projectId = station ? station.projectId : '';
+    var elIdSet = {};
+    elementIds.forEach(function (id) { elIdSet[id] = true; });
+    var parallelRelations = state.overlapRelations
+      .filter(function (r) { return r.isActive && r.projectId === projectId && elIdSet[r.elementLowId] && elIdSet[r.elementHighId]; })
+      .map(function (r) {
+        return {
+          relationId: r.id, elementLowId: r.elementLowId, elementHighId: r.elementHighId,
+          elementLowName: nameOfElement(r.elementLowId), elementHighName: nameOfElement(r.elementHighId),
+          version: r.version || 1,
+        };
+      });
+    var relIdSet = {};
+    parallelRelations.forEach(function (r) { relIdSet[r.relationId] = true; });
+    var cycleIdSet = {};
+    cycles.forEach(function (c) { cycleIdSet[c.id] = true; });
+    var overlapsByCycle = {};
+    state.observationOverlaps.forEach(function (ov) {
+      if (!cycleIdSet[ov.cycleId] || !relIdSet[ov.relationId]) return;
+      if (!overlapsByCycle[ov.cycleId]) overlapsByCycle[ov.cycleId] = {};
+      overlapsByCycle[ov.cycleId][ov.relationId] = { status: ov.status, overlapDuration: ov.overlapDuration, version: ov.version || 1 };
+    });
+
     var perElement = {};
     elements.forEach(function (e) { perElement[e.id] = { calcCount: 0, excludedCount: 0, totalCount: 0 }; });
     var sessionValidCycles = 0;
@@ -1578,6 +1633,8 @@
         createdAt: c.createdAt, updatedAt: c.updatedAt,
         elapsed: ind.elapsed, elapsedExcludesSequential: ind.elapsedExcludesSequential,
         hasExcluded: ind.hasExcluded, hasSuspect: ind.hasSuspect, hasIncompleteInterval: ind.hasIncompleteInterval,
+        overlapRevision: c.overlapRevision || 0,
+        overlaps: overlapsByCycle[c.id] || {},
         observations: obsDtos,
       };
     });
@@ -1599,7 +1656,8 @@
       },
       activity: { id: activity.id, name: activity.name, stationName: station ? station.name : '', targetSampleCount: activity.targetSampleCount, projectId: station ? station.projectId : '' },
       operator: operator ? { id: operator.id, displayName: operator.displayName, code: operator.code } : { id: '', displayName: 'اپراتور حذف‌شده', code: null },
-      elements: elements.map(function (e) { return { id: e.id, name: e.name, elementType: e.elementType, sortOrder: e.sortOrder, defaultEntry: defaultEntryFor(e.elementType) }; }),
+      elements: elements.map(function (e) { return { id: e.id, name: e.name, sortOrder: e.sortOrder, defaultEntry: defaultEntryFor(e), defaultLaneType: laneTypeForElement(e) }; }),
+      parallelRelations: parallelRelations,
       cycles: cycleDtos,
       stats: {
         perElement: perElement, sessionCycles: cycles.length, sessionValidCycles: sessionValidCycles,
@@ -1622,40 +1680,128 @@
     return { kind: 'NUMBER', value: n };
   }
 
-  function pastePreview(sessionId, anchorCycleNo, anchorElementId, text) {
+  /** §۵.۲ — مدل ردیف‌های شبکهٔ برگه: عنصر + زیرردیف روابط فعال همان Activity */
+  function sheetGridRows(sheet) {
+    var rows = [];
+    var indexOf = {};
+    sheet.elements.forEach(function (e, i) { indexOf[e.id] = i; });
+    sheet.elements.forEach(function (el) {
+      rows.push({ kind: 'ELEMENT', elementId: el.id, elementIndex: indexOf[el.id], elementName: el.name });
+      var rels = sheet.parallelRelations
+        .filter(function (r) { return r.elementLowId === el.id || r.elementHighId === el.id; })
+        .map(function (r) {
+          var otherId = r.elementLowId === el.id ? r.elementHighId : r.elementLowId;
+          var otherName = r.elementLowId === el.id ? r.elementHighName : r.elementLowName;
+          return { r: r, otherId: otherId, otherName: otherName, otherSort: indexOf[otherId] !== undefined ? indexOf[otherId] : 9999 };
+        })
+        .sort(function (a, b) { return a.otherSort - b.otherSort; });
+      rels.forEach(function (x) {
+        rows.push({ kind: 'RELATION', elementId: el.id, relationId: x.r.relationId, otherElementId: x.otherId, elementName: el.name, otherElementName: x.otherName });
+      });
+    });
+    return rows;
+  }
+
+  /** v1.5.0 §۸.۳ — Paste با محور جدید: ردیف داده = ردیف شبکه (عنصر/زیرردیف)، ستون داده = چرخه.
+   *  لنگر بر اساس شناسهٔ ردیف و شمارهٔ چرخه است. زیرردیف: خالی→بدون تغییر، ۰→NO_OVERLAP، مثبت→OVERLAP. */
+  function pastePreview(sessionId, anchor, text) {
     var sheet = getSheet(sessionId);
+    var gridRows = sheetGridRows(sheet);
+    var anchorIdx = -1;
+    for (var i = 0; i < gridRows.length; i++) {
+      var g = gridRows[i];
+      if (anchor.relationId) {
+        if (g.kind === 'RELATION' && g.relationId === anchor.relationId && g.elementId === anchor.elementId) { anchorIdx = i; break; }
+      } else if (g.kind === 'ELEMENT' && g.elementId === anchor.elementId) { anchorIdx = i; break; }
+    }
+    if (anchorIdx < 0) throw new Error('ردیف مبدأ Paste معتبر نیست؛ عنصر یا رابطهٔ انتخاب‌شده در این فعالیت یافت نشد.');
+    var startCycleNo = anchor.cycleNo;
     var lines = text.replace(/\r/g, '').split('\n').filter(function (l, i, arr) { return l.trim() !== '' || (i > 0 && i < arr.length - 1); });
-    var elementIdx = sheet.elements.findIndex(function (e) { return e.id === anchorElementId; });
-    var startCycleNo = anchorCycleNo;
-    var cells = [];
-    var errors = 0, warnings = 0, healthy = 0, noChange = 0, newCycles = 0;
     var maxCycle = sheet.cycles.length ? Math.max.apply(null, sheet.cycles.map(function (c) { return c.cycleNo; })) : 0;
+    if (startCycleNo > maxCycle + 1) throw new Error('ستون مبدأ (چرخهٔ ' + startCycleNo + ') معتبر نیست؛ Paste باید از یک چرخهٔ موجود یا بلافاصله بعد از آخرین چرخه (' + maxCycle + ') شروع شود.');
+    // شواهد هر چرخه برای مقایسه‌پذیری و بازهٔ واقعی زیرردیف‌ها
+    var obsByNo = {};
+    var cycleByNo = {};
+    sheet.cycles.forEach(function (c) { obsByNo[c.cycleNo] = c.observations; cycleByNo[c.cycleNo] = c; });
+    var relById = {};
+    sheet.parallelRelations.forEach(function (r) { relById[r.relationId] = r; });
+
+    var cells = [];
+    var errors = 0, warnings = 0, healthy = 0, noChange = 0;
     var newCycleNos = {};
     for (var r = 0; r < lines.length; r++) {
       var cols = lines[r].split('\t');
+      var grow = gridRows[anchorIdx + r] || null;
       for (var c = 0; c < cols.length; c++) {
-        var elIdx = elementIdx + c;
-        if (elIdx < 0 || elIdx >= sheet.elements.length) continue;
-        var el = sheet.elements[elIdx];
-        var cycNo = startCycleNo + r;
-        var parsed = parseCellInput(cols[c]);
-        var status = 'HEALTHY', message = null, value = null, interval = null;
-        if (cycNo > maxCycle) { if (!newCycleNos[cycNo]) { newCycleNos[cycNo] = true; newCycles++; } }
-        if (parsed.kind === 'ERROR') { status = 'ERROR'; message = parsed.message; errors++; }
-        else if (parsed.kind === 'EMPTY') { status = 'NO_CHANGE'; noChange++; }
-        else if (parsed.kind === 'INTERVAL') {
-          if (parsed.start < 0) { status = 'ERROR'; message = 'شروع بازه نمی‌تواند منفی باشد'; errors++; }
-          else if (parsed.end <= parsed.start) { status = 'ERROR'; message = 'پایان بازه باید بزرگ‌تر از شروع آن باشد'; errors++; }
-          else { interval = { start: parsed.start, end: parsed.end }; healthy++; }
-        } else {
-          if (parsed.value < 0) { status = 'ERROR'; message = 'زمان منفی مجاز نیست'; errors++; }
-          else { value = parsed.value; healthy++; }
+        var cycNo = startCycleNo + c;
+        if (cycNo > maxCycle) { if (!newCycleNos[cycNo]) { newCycleNos[cycNo] = true; } }
+        var base = { row: r, colIndex: c, cycleNo: cycNo, isNew: cycNo > maxCycle, raw: cols[c], status: 'NO_CHANGE', message: null, value: null, interval: null, overlapStatus: null, overlapDuration: null, elementId: null, relationId: null, otherElementId: null };
+        if (!grow) {
+          base.status = 'ERROR'; base.message = 'ردیفی برای این داده وجود ندارد؛ تعداد ردیف‌های شبکه (عناصر و زیرردیف‌ها) کمتر است.'; errors++;
+          cells.push(base); continue;
         }
-        if (status === 'HEALTHY' && interval === null && value === null) status = 'NO_CHANGE';
-        cells.push({ cycleNo: cycNo, elementId: el.id, elementIndex: elIdx, status: status, message: message, value: value, interval: interval, raw: cols[c] });
+        if (grow.kind === 'RELATION') {
+          base.relationId = grow.relationId; base.elementId = grow.elementId; base.otherElementId = grow.otherElementId;
+          var rel = relById[grow.relationId];
+          var parsed = parseCellInput(cols[c]);
+          if (parsed.kind === 'EMPTY') { base.status = 'NO_CHANGE'; base.message = 'خالی — بدون تغییر'; noChange++; }
+          else if (parsed.kind === 'INTERVAL') { base.status = 'ERROR'; base.message = 'زیرردیف هم‌پوشانی فقط یک عدد می‌پذیرد: خالی، صفر یا مقدار مثبت.'; errors++; }
+          else if (parsed.kind === 'ERROR') { base.status = 'ERROR'; base.message = parsed.message; errors++; }
+          else if (parsed.value < 0) { base.status = 'ERROR'; base.message = 'مقدار هم‌پوشانی منفی مجاز نیست.'; errors++; }
+          else if (cycNo > maxCycle) { base.status = 'ERROR'; base.message = 'چرخهٔ جدید هنوز مشاهده‌ای ندارد؛ ابتدا زمان عناصر را ثبت کنید.'; errors++; }
+          else {
+            var obsList = obsByNo[cycNo] || [];
+            var byEl = {};
+            obsList.forEach(function (o) { byEl[o.workElementId] = o; });
+            var oLow = byEl[rel.elementLowId], oHigh = byEl[rel.elementHighId];
+            var reasons = [];
+            var nameLow = rel.elementLowName, nameHigh = rel.elementHighName;
+            if (!oLow) reasons.push('«' + nameLow + '» در این چرخه مشاهده‌ای ندارد');
+            else if (!((oLow.startOffset !== null && oLow.endOffset !== null) || (oLow.derivedDuration !== null || oLow.rawDuration !== null))) reasons.push('«' + nameLow + '» در این چرخه مدت یا بازهٔ قابل‌مقایسه ندارد');
+            if (!oHigh) reasons.push('«' + nameHigh + '» در این چرخه مشاهده‌ای ندارد');
+            else if (!((oHigh.startOffset !== null && oHigh.endOffset !== null) || (oHigh.derivedDuration !== null || oHigh.rawDuration !== null))) reasons.push('«' + nameHigh + '» در این چرخه مدت یا بازهٔ قابل‌مقایسه ندارد');
+            if (reasons.length > 0) { base.status = 'ERROR'; base.message = 'در این چرخه قابل‌مقایسه نیست: ' + reasons.join('؛ '); errors++; }
+            else {
+              var computed = null;
+              if (oLow && oHigh && oLow.startOffset !== null && oLow.endOffset !== null && oHigh.startOffset !== null && oHigh.endOffset !== null) {
+                computed = Math.max(0, Math.min(oLow.endOffset, oHigh.endOffset) - Math.max(oLow.startOffset, oHigh.startOffset));
+              }
+              if (parsed.value === 0 && computed !== null && computed > 1e-9) {
+                base.status = 'ERROR'; base.message = 'بازهٔ واقعی این چرخه هم‌پوشانی ' + computed + ' دارد؛ ثبت «بدون هم‌پوشانی» با بازهٔ واقعی نمی‌خواند.'; errors++;
+              } else if (parsed.value > 0 && computed !== null && Math.abs(parsed.value - computed) > 1e-6) {
+                base.status = 'ERROR'; base.message = 'مقدار واردشده (' + parsed.value + ') با هم‌پوشانی بازهٔ واقعی (' + computed + ') نمی‌خواند.'; errors++;
+              } else {
+                base.computedOverlap = computed;
+                if (parsed.value === 0) { base.overlapStatus = 'NO_OVERLAP'; base.overlapDuration = 0; }
+                else { base.overlapStatus = 'OVERLAP'; base.overlapDuration = parsed.value; }
+                base.status = 'HEALTHY'; healthy++;
+              }
+            }
+          }
+          cells.push(base); continue;
+        }
+        // ردیف اصلی عنصر
+        base.elementId = grow.elementId;
+        var parsed2 = parseCellInput(cols[c]);
+        if (parsed2.kind === 'ERROR') { base.status = 'ERROR'; base.message = parsed2.message; errors++; }
+        else if (parsed2.kind === 'EMPTY') { base.status = 'NO_CHANGE'; base.message = 'خالی — بدون تغییر'; noChange++; }
+        else if (parsed2.kind === 'INTERVAL') {
+          if (parsed2.start < 0) { base.status = 'ERROR'; base.message = 'شروع بازه نمی‌تواند منفی باشد'; errors++; }
+          else if (parsed2.end <= parsed2.start) { base.status = 'ERROR'; base.message = 'پایان بازه باید بزرگ‌تر از شروع آن باشد'; errors++; }
+          else { base.interval = { start: parsed2.start, end: parsed2.end }; base.status = 'HEALTHY'; healthy++; }
+        } else {
+          if (parsed2.value < 0) { base.status = 'ERROR'; base.message = 'زمان منفی مجاز نیست'; errors++; }
+          else { base.value = parsed2.value; base.status = 'HEALTHY'; healthy++; }
+        }
+        cells.push(base);
       }
     }
-    return { anchorCycleNo: startCycleNo, anchorElementId: anchorElementId, anchorElementIndex: elementIdx, elements: sheet.elements, cells: cells, counts: { healthy: healthy, warnings: warnings, errors: errors, noChange: noChange, newCycles: newCycles } };
+    return {
+      anchorCycleNo: startCycleNo, anchor: { elementId: anchor.elementId, relationId: anchor.relationId || null },
+      gridRows: gridRows.slice(anchorIdx, anchorIdx + lines.length),
+      elements: sheet.elements, cells: cells,
+      counts: { healthy: healthy, warnings: warnings, errors: errors, noChange: noChange, newCycles: Object.keys(newCycleNos).length },
+    };
   }
 
   function pasteCommit(sessionId, preview, mode) {
@@ -1670,18 +1816,34 @@
     if (needed > maxCycle) addCycles(sessionId, needed - maxCycle);
     var applied = 0, skipped = 0;
     var cellsToApply = [];
+    // v1.5.0 §۸.۳ — مقادیر هم‌پوشانی زیرردیف‌ها بر اساس چرخه گروه‌بندی و از مسیر مرکزی ثبت می‌شوند
+    var overlapUpdatesByCycleNo = {};
     preview.cells.forEach(function (cell) {
       if (cell.status === 'ERROR') { skipped++; return; }
-      if (cell.status === 'NO_CHANGE' && cell.interval === null && cell.value === null) { skipped++; return; }
-      if (cell.interval !== null) {
+      if (cell.status === 'NO_CHANGE') { skipped++; return; }
+      if (cell.relationId && cell.overlapStatus) {
+        if (!overlapUpdatesByCycleNo[cell.cycleNo]) overlapUpdatesByCycleNo[cell.cycleNo] = [];
+        overlapUpdatesByCycleNo[cell.cycleNo].push({ relationId: cell.relationId, status: cell.overlapStatus, overlapDuration: cell.overlapStatus === 'OVERLAP' ? cell.overlapDuration : cell.overlapStatus === 'NO_OVERLAP' ? 0 : null });
+        applied++;
+        return;
+      }
+      if (cell.interval !== null && cell.interval !== undefined) {
         cellsToApply.push({ cycleNo: cell.cycleNo, workElementId: cell.elementId, startOffset: cell.interval.start, endOffset: cell.interval.end });
-      } else if (cell.value !== null) {
+      } else if (cell.value !== null && cell.value !== undefined) {
         if (session.timingMethod === 'CONTINUOUS') cellsToApply.push({ cycleNo: cell.cycleNo, workElementId: cell.elementId, cumulativeReading: cell.value });
         else cellsToApply.push({ cycleNo: cell.cycleNo, workElementId: cell.elementId, rawDuration: cell.value });
       }
       applied++;
     });
+
     if (cellsToApply.length > 0) putCells(sessionId, cellsToApply);
+    // ثبت مقادیر هم‌پوشانی پس از عناصر — از همان مسیر مرکزی (§۵.۵)
+    var cycleNoIds = {};
+    cyclesOfSession(sessionId).forEach(function (c) { cycleNoIds[c.cycleNo] = c.id; });
+    Object.keys(overlapUpdatesByCycleNo).forEach(function (no) {
+      var cycleId = cycleNoIds[no];
+      if (cycleId) setCycleOverlaps(cycleId, overlapUpdatesByCycleNo[no]);
+    });
     return { applied: applied, skipped: skipped, newCycles: Math.max(0, needed - maxCycle) };
   }
 
@@ -1880,7 +2042,7 @@
         .filter(function (o) { return o.derivedDuration !== null && o.validityStatus !== 'INVALID'; })
         .map(function (o) { return { cycleNo: o.ctx.cycle.cycleNo, operatorId: o.ctx.session.operatorId, value: o.derivedDuration, status: o.validityStatus }; });
       return {
-        id: el.id, name: el.name, elementType: el.elementType,
+        id: el.id, name: el.name,
         counts: {
           total: rows.length, calcBasis: calcRows.length,
           valid: rows.filter(function (r) { return r.validityStatus === 'VALID'; }).length,
@@ -1919,17 +2081,16 @@
         : 'چرخه‌های ترتیبی: زمان سپری‌شده = جمع مدت عناصر درون محاسبات.',
     };
 
-    function sumOt(type) {
-      var list = elementDtos.filter(function (e) { return e.elementType === type && e.ot !== null; });
-      if (list.length === 0) return null;
-      return F.round12(list.reduce(function (s, e) { return s + e.ot; }, 0));
-    }
-    var elementTypeTotals = { manual: sumOt('MANUAL'), machine: sumOt('MACHINE'), waiting: sumOt('WAITING'), overlapSum: sumOt('OVERLAP') };
-
-    var hasOverlapElements = elements.some(function (e) { return e.elementType === 'OVERLAP'; });
+    // v1.5.0 §۳ — elementTypeTotals (شاخص‌های نوع عنصر) حذف شد؛
+    // قاعدهٔ NEEDS_AGGREGATION_RULE حفظ شد: legacy + رابطهٔ فعال + بازهٔ واقعی (§۱۰)
+    var hasOverlapLegacy = elements.some(function (e) { return e.elementType === 'OVERLAP'; });
+    var hasActiveOverlapRelations = state.overlapRelations.some(function (r) {
+      if (!r.isActive) return false;
+      return elementIds.indexOf(r.elementLowId) >= 0 && elementIds.indexOf(r.elementHighId) >= 0;
+    });
     var hasAnyInterval = cycles.some(function (c) { return obsOfCycle(c.id).some(function (o) { return o.startOffset !== null; }); });
     var activityTotal;
-    if (hasOverlapElements || hasAnyInterval) {
+    if (hasOverlapLegacy || hasActiveOverlapRelations || hasAnyInterval) {
       activityTotal = {
         st: null, status: 'NEEDS_AGGREGATION_RULE',
         reason: 'این فعالیت دارای کار هم‌زمان/هم‌پوشان است؛ جمع سادهٔ زمان استاندارد عناصر، زمان استاندارد کل چرخه را به دست نمی‌دهد. تا تعریف و تأیید قاعدهٔ تجمیع مهندسی، زمان استاندارد عناصر و زمان سپری‌شدهٔ مشاهده‌شدهٔ چرخه را ملاک قرار دهید.',
@@ -2039,7 +2200,7 @@
         })(),
       },
       sampleProgress: sampleProgress, elements: elementDtos,
-      cycleStats: cycleStats, elementTypeTotals: elementTypeTotals, activityTotal: activityTotal,
+      cycleStats: cycleStats, activityTotal: activityTotal,
       suspects: suspects, generatedAt: U.nowISO(),
     };
   }
@@ -2073,7 +2234,7 @@
       activityTotal: { st: a.activityTotal.st, status: a.activityTotal.status },
       elements: a.elements.map(function (e) {
         return {
-          id: e.id, name: e.name, elementType: e.elementType,
+          id: e.id, name: e.name,
           counts: { calcBasis: e.counts.calcBasis, suspect: e.counts.suspect, excluded: e.counts.excluded },
           ot: e.ot, nt: e.nt, st: e.st, stError: e.stError, ratingFactor: e.rating ? e.rating.totalFactor : null,
           allowanceP: e.allowances.totalPercent, allowanceT: e.allowances.perExecutionSeconds,
@@ -2523,7 +2684,7 @@
     var elementCv = [];
     analyses.forEach(function (an) {
       an.elements.forEach(function (el) {
-        elementCv.push({ elementName: el.name, activityName: an.activity.name, elementType: el.elementType, cvPercent: el.stats.cvPercent, count: el.counts.calcBasis, ot: el.ot });
+        elementCv.push({ elementName: el.name, activityName: an.activity.name, cvPercent: el.stats.cvPercent, count: el.counts.calcBasis, ot: el.ot });
       });
     });
     elementCv.sort(function (a, b) { return (b.cvPercent === null ? -1 : b.cvPercent) - (a.cvPercent === null ? -1 : a.cvPercent); });
@@ -3059,11 +3220,14 @@
     var act2 = createActivity(st1.id, { name: 'پرس اتوماتیک روتور', description: 'پرس کوبی روتور روی شفت', processType: 'OPERATION' });
     var act3 = createActivity(st2.id, { name: 'کنترل کیفیت نهایی', description: 'بازرسی عملکرد و آب‌بندی', processType: 'INSPECTION' });
 
-    var e1 = createElement(act1.id, { name: 'برداشتن قطعه از گراناق', elementType: 'MANUAL' });
-    var e2 = createElement(act1.id, { name: 'بستن چهار پیچ', elementType: 'MANUAL' });
-    var e3 = createElement(act1.id, { name: 'پرس اتوماتیک', elementType: 'MACHINE' });
-    var e4 = createElement(act2.id, { name: 'پرس کوبی روتور', elementType: 'OVERLAP' });
-    var e5 = createElement(act3.id, { name: 'بازرسی آب‌بندی', elementType: 'MANUAL' });
+    var e1 = createElement(act1.id, { name: 'برداشتن قطعه از گراناق' });
+    var e2 = createElement(act1.id, { name: 'بستن چهار پیچ' });
+    var e3 = createElement(act1.id, { name: 'پرس اتوماتیک' });
+    var e4 = createElement(act2.id, { name: 'پرس کوبی روتور' });
+    var e5 = createElement(act3.id, { name: 'بازرسی آب‌بندی' });
+    // v1.5.0 §۳.۲ — پیش‌فرض‌های فنی seed برابر نگاشت قدیمی نوع عنصر (برای دادهٔ نمونه)
+    e3.defaultEntryMode = 'INT'; e3.defaultLaneType = 'MACHINE';
+    e4.defaultEntryMode = 'INT'; e4.defaultLaneType = 'MACHINE';
 
     var op1 = createOperator(projectId, { displayName: 'رضا محمدی', code: 'P-1042', notes: 'سابقه ۵ سال روی این ایستگاه' });
     var op2 = createOperator(projectId, { displayName: 'سمیه کریمی', code: 'P-1077' });
@@ -3119,13 +3283,9 @@
     putCells(s4.id, cells4);
 
     // ── جلسه دوم: روابط موازی نمونه با مقادیر چرخه‌ای (دموی ماتریس هم‌پوشانی) ──
+    // v1.5.0 §۴.۳ — رابطهٔ موازی فقط بین عناصر «یک فعالیت» تعریف می‌شود؛
+    // رابطهٔ بین‌فعالیت نمونه حذف شد (پس از مهاجرت v1.5.0 مجاز نیست).
     var relPE = createOverlapRelation(projectId, e3.id, e2.id); // «پرس اتوماتیک» ↔ «بستن چهار پیچ» (هم‌زمان مونتاژ — همان فعالیت)
-    // رابطهٔ بین‌فعالیتتی: «پرس کوبی روتور» (فعالیت پرس) ↔ «برداشتن قطعه از گراناق» (فعالیت مونتاژ)
-    // §۵ ممیزی جلسه ۲ — تعریف رابطه در سطح پروژه بین عناصر دو Activity مجاز است؛
-    // اما چون هر چرخه به یک جلسه/فعالیت تعلق دارد، عنصر فعالیت دیگر هرگز در همین
-    // چرخه مشاهده ندارد → این زوج در هیچ چرخه‌ای قابل‌مقایسه نیست و مقدار چرخه‌ای
-    // ثبت نمی‌شود (نمایش «در این چرخه قابل‌مقایسه نیست» — بدون مقدار ساختگی).
-    var relPR = createOverlapRelation(projectId, e4.id, e1.id);
     var s1cycles = filterBy('cycleObservations', 'sessionId', s1.id).sort(function (a, b) { return a.cycleNo - b.cycleNo; });
     if (s1cycles.length >= 2) {
       setCycleOverlaps(s1cycles[0].id, [{ relationId: relPE.id, status: 'OVERLAP', overlapDuration: 2.5 }]);
@@ -3180,10 +3340,16 @@
 
   function createOverlapRelation(projectId, elementAId, elementBId) {
     if (elementAId === elementBId) throw new Error('عنصر نمی‌تواند با خودش رابطهٔ موازی داشته باشد.');
+    var elA = byId('workElements', elementAId);
+    var elB = byId('workElements', elementBId);
+    if (!elA || !elB) throw new Error('عنصر کاری یافت نشد.');
     var projA = projectIdOfElement(elementAId);
     var projB = projectIdOfElement(elementBId);
-    if (!projA || !projB) throw new Error('عنصر کاری یافت نشد.');
     if (projA !== projectId || projB !== projectId) throw new Error('هر دو عنصر باید متعلق به همین پروژه باشند.');
+    // v1.5.0 §۴.۳ — دامنهٔ رابطه‌ها: هر دو عنصر باید متعلق به یک Activity باشند
+    if (elA.activityId !== elB.activityId) {
+      throw new Error('رابطهٔ موازی فقط بین عناصر یک فعالیت ممکن است؛ زیرردیف‌های برگهٔ زمان‌سنجی باید قابل‌مقایسه باشند.');
+    }
     var low = elementAId < elementBId ? elementAId : elementBId;
     var high = elementAId < elementBId ? elementBId : elementAId;
     var existing = state.overlapRelations.find(function (r) { return r.projectId === projectId && r.elementLowId === low && r.elementHighId === high; });
@@ -3192,10 +3358,11 @@
     if (existing) {
       existing.isActive = true;
       existing.version = (existing.version || 1) + 1;
+      existing.archiveReason = null;
       touch(existing);
       relation = existing;
     } else {
-      relation = { id: U.uid(), projectId: projectId, elementLowId: low, elementHighId: high, isActive: true, version: 1, createdAt: U.nowISO(), updatedAt: U.nowISO() };
+      relation = { id: U.uid(), projectId: projectId, elementLowId: low, elementHighId: high, isActive: true, archiveReason: null, version: 1, createdAt: U.nowISO(), updatedAt: U.nowISO() };
       state.overlapRelations.push(relation);
     }
     markProjectCalculationsStale(projectId);
@@ -3221,8 +3388,15 @@
     var r = byId('overlapRelations', relationId);
     if (!r) throw new Error('رابطه یافت نشد.');
     if (r.isActive) return r;
+    // v1.5.0 §۴.۳ — بازگردانی رابطهٔ بین‌فعالیت ممنوع است تا وقتی هر دو عنصر در یک Activity نباشند
+    var elLow = byId('workElements', r.elementLowId);
+    var elHigh = byId('workElements', r.elementHighId);
+    if (elLow && elHigh && elLow.activityId !== elHigh.activityId) {
+      throw new Error('این رابطه بین عناصر دو فعالیت مختلف است و تا زمانی که هر دو عنصر در یک فعالیت نباشند قابل بازگردانی نیست.');
+    }
     r.isActive = true;
     r.version = (r.version || 1) + 1;
+    r.archiveReason = null;
     touch(r);
     markProjectCalculationsStale(r.projectId);
     recordAudit({ entityType: 'OverlapRelation', entityId: relationId, action: 'RESTORE', projectId: r.projectId });
@@ -3543,6 +3717,9 @@
         otherActivityName: otherActivity ? otherActivity.name : '؟',
         otherStationName: otherStation ? otherStation.name : '؟',
         isActive: r.isActive,
+        // v1.5.0 §۴.۳ — پرچم بین‌فعالیت برای جلوگیری از بازگردانی نامعتبر
+        crossActivity: !!other && other.activityId !== element.activityId,
+        archiveReason: r.archiveReason || null,
         latest: latest,
       };
     });

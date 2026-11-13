@@ -115,8 +115,10 @@ close(e1.ot, e1ot, 'e1 OT');
 close(e1.nt, F.round12(e1ot * 1.09), 'e1 NT = OT x 1.09');
 close(an1.allowances.summary.totalPercent, 0.08, 'P (totalPercent) = 8%');
 close(e1.st, F.round12(e1.nt * 1.08), 'e1 ST m1');
-ok(an1.activityTotal.status === 'OK', 'act1 sequential -> OK');
-ok(an1.activityTotal.st !== null, 'act1 total ST computed');
+// v1.5.0 §۱۰ — قاعدهٔ NEEDS_AGGREGATION_RULE علاوه بر legacy/بازه، با «رابطهٔ موازی فعال»
+// نیز فعال می‌شود؛ act1 رابطهٔ فعال e2↔e3 با مقدار ثبت‌شده دارد → جمع ساده ممنوع است.
+ok(an1.activityTotal.status === 'NEEDS_AGGREGATION_RULE', 'act1 has active parallel relation -> NEEDS_AGGREGATION_RULE');
+ok(an1.activityTotal.st === null, 'act1 total ST blocked (aggregation rule needed)');
 
 // هم‌پوشانی
 const an2 = DB.getActivityAnalysis(act2.id);
@@ -135,9 +137,11 @@ const run = DB.runProjectCalculation(projectId);
 ok(run.status === 'DONE' && run.result.activities.length === 3, 'calc run created');
 const latest1 = DB.getLatestCalculation(projectId);
 ok(latest1.run.status === 'DONE' && latest1.needsRecalc === false, 'latest DONE');
-DB.updateElement(an1.elements[0].id, { elementType: 'WAITING' });
+// v1.5.0 §۳ — elementType دیگر پارامتر ویرایش نیست (ستون legacy)؛
+// STALE با تغییر دادهٔ خام زمان‌سنجی بررسی می‌شود (همان قصد اصلی تست).
+DB.putCells(sessions1[0].id, [{ cycleNo: 1, workElementId: an1.elements[0].id, rawDuration: 8.9 }]);
 const latest2 = DB.getLatestCalculation(projectId);
-ok(latest2.run.status === 'STALE' && latest2.needsRecalc === true, 'elementType change -> STALE');
+ok(latest2.run.status === 'STALE' && latest2.needsRecalc === true, 'raw timing data change -> STALE');
 ok(latest2.run.result !== null, 'STALE snapshot preserved');
 DB.runProjectCalculation(projectId);
 DB.updateElement(an1.elements[1].id, { name: 'بستن چهار پیچ (ویرایش نام)' });

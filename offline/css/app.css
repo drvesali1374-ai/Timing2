@@ -621,6 +621,37 @@ tr.row-suspect > td { background: color-mix(in srgb, var(--amber-soft) 50%, tran
 tr.row-excluded > td { background: color-mix(in srgb, var(--red-soft) 35%, transparent); }
 .tfoot-bar { position: sticky; bottom: 0; background: color-mix(in srgb, var(--surface-2) 97%, transparent); backdrop-filter: blur(8px); border-top: 1px solid var(--border); z-index: 3; }
 
+/* ── v1.5.0 — برگهٔ معکوس‌شده: ردیف=عنصر+زیرردیف، ستون=چرخه (§۵/§۹) ── */
+/* گوشهٔ جدول: هم چسبان بالا هم راست */
+.sheet-grid th.t2t-corner { z-index: 6; min-width: 150px; text-align: center; }
+/* سربرگ ردیف عنصر/زیرردیف — چسبان راست */
+.sheet-grid th.t2t-row-head { text-align: start; min-width: 150px; max-width: 220px; vertical-align: top; padding: 5px 8px; }
+.sheet-grid th.t2t-row-head.t2t-subrow-head { background: color-mix(in srgb, var(--surface-2) 65%, var(--card)); padding: 4px 8px; }
+/* گروه بصری عنصر — مرز مشخص بین گروه‌ها (§۹.۱) */
+.sheet-grid tr.t2t-el-row > td, .sheet-grid tr.t2t-el-row > th { border-top: 2px solid color-mix(in srgb, var(--line-strong) 45%, transparent); }
+.sheet-grid tbody tr:first-child > td, .sheet-grid tbody tr:first-child > th { border-top: none; }
+/* زیرردیف رابطه — پس‌زمینهٔ ملایم متفاوت */
+.sheet-grid tr.t2-subrow > td, .sheet-grid tr.t2-subrow > th { background: color-mix(in srgb, var(--surface-2) 40%, var(--card)); }
+.sheet-grid tr.t2-subrow > th.sticky-col { background: color-mix(in srgb, var(--surface-2) 55%, var(--card)); }
+.sheet-grid tr.t2-subrow > td { height: 34px; }
+/* اتصال بصری ظریف زیرردیف به عنصر والد (§۹.۱) */
+.t2t-subrow-tie { display: inline-block; width: 9px; height: 15px; border-bottom: 2px solid color-mix(in srgb, var(--brand) 35%, transparent); border-inline-start: 2px solid color-mix(in srgb, var(--brand) 35%, transparent); border-end-start-radius: 6px; flex-shrink: 0; }
+/* سربرگ ستون چرخه — دکمهٔ جزئیات */
+.t2t-cycle-head { border: none; background: transparent; cursor: pointer; font-family: inherit; color: inherit; display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 3px 5px; border-radius: 8px; width: 100%; transition: background .12s ease; }
+.t2t-cycle-head:hover { background: color-mix(in srgb, var(--brand-soft) 60%, transparent); }
+/* نشانهٔ بسیار ظریف بررسی‌نشده (§۵.۴) — خالی ≠ صفر */
+.t2t-ov-unreviewed { display: inline-block; border: 1px dashed color-mix(in srgb, var(--amber) 55%, transparent); color: color-mix(in srgb, var(--amber) 75%, transparent); font-size: 9px; line-height: 1.5; padding: 0 5px; border-radius: 5px; }
+/* پیشنهاد مقدار محاسبه‌شده از بازهٔ واقعی (§۵.۵) */
+.t2t-ov-suggest { border: none; background: transparent; cursor: pointer; font-family: inherit; font-size: 8.5px; line-height: 1.4; color: color-mix(in srgb, var(--brand) 80%, transparent); padding: 0 2px; display: block; margin: 0 auto; }
+.t2t-ov-suggest:hover { color: var(--brand); text-decoration: underline; }
+/* موبایل — ارتفاع لمسی (§۹.۳) */
+@media (max-width: 767.98px) {
+  .sheet-grid td { height: 44px; }
+  .sheet-grid tr.t2-subrow > td { height: 42px; }
+  .sheet-grid th.t2t-row-head { min-width: 120px; max-width: 150px; }
+  .sheet-cell { font-size: 13px; }
+}
+
 /* ── بوم نمودار فرایند ── */
 .chart-canvas-wrap { position: relative; border: 1.5px dashed var(--border); border-radius: calc(var(--radius) + 5px); background:
   radial-gradient(circle at 1px 1px, color-mix(in srgb, var(--line-strong) 55%, transparent) 1px, transparent 0) 0 0 / 22px 22px, var(--card);

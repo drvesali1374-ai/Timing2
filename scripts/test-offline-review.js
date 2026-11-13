@@ -65,8 +65,12 @@ DB.putCells(s2.id, [
 
 const relAB = DB.createOverlapRelation(projectId, A.id, B.id);
 const relAC = DB.createOverlapRelation(projectId, A.id, C.id);
-const relCross = DB.createOverlapRelation(projectId, A.id, Z.id);
-ok(true, 'رابطهٔ بین‌فعالیتتی (A ↔ Z) در سطح پروژه مجاز است');
+// v1.5.0 §۴.۳ — ایجاد رابطهٔ بین‌فعالیت در سرور رد می‌شود (دامنه: یک Activity).
+// برای سناریوی آرشیو/بازگردانیِ بین‌فعالیت (مهاجرت v1.5.0)، رابطه به‌صورت مستقیم
+// در state ساخته و آرشیو می‌شود تا مسیر «دادهٔ قدیمی» شبیه‌سازی شود.
+let relCross = { id: 'rel-cross-legacy-' + A.id.slice(0, 4), projectId: projectId, elementLowId: A.id < Z.id ? A.id : Z.id, elementHighId: A.id < Z.id ? Z.id : A.id, isActive: true, archiveReason: null, version: 1, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+DB.getState().overlapRelations.push(relCross);
+throwsWith(() => DB.createOverlapRelation(projectId, A.id, Z.id), 'یک فعالیت', 'ایجاد رابطهٔ بین‌فعالیت → خطا (v1.5.0 §۴.۳)');
 
 // ═══ §۱۲ UNREVIEWED ═══
 console.log('── UNREVIEWED: تفکیک سه حالت');
@@ -110,6 +114,11 @@ console.log('── مقایسه‌پذیری چرخه');
   ok(m2.cells[relAC.id] == null, 'هیچ رکورد جعلی ساخته نشد');
   ok(m.comparability[relAB.id].isComparable === true, 'A-B با مشاهدهٔ هر دو → قابل‌مقایسه');
   ok(m.comparability[relCross.id].isComparable === false, 'رابطهٔ بین‌فعالیتتی در چرخهٔ فعالیت دیگر → غیرقابل‌مقایسه');
+  // v1.5.0 §۴.۳ — بازگردانی رابطهٔ بین‌فعالیت (هر دو عنصر موجود ولی در فعالیت‌های متفاوت) ممنوع است
+  DB.archiveOverlapRelation(relCross.id);
+  throwsWith(() => DB.restoreOverlapRelation(relCross.id), 'دو فعالیت', 'بازگردانی رابطهٔ بین‌فعالیت → خطا (§۴.۳)');
+  const crossRelState = DB.getState().overlapRelations.find(r => r.id === relCross.id);
+  ok(crossRelState && crossRelState.isActive === false, 'رابطهٔ بین‌فعالیت آرشیو ماند');
 }
 
 // ═══ §۱۲ چند Session/Operator مستقل + Undo/Redo ═══

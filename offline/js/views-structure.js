@@ -62,13 +62,6 @@
     example: '«برداشتن قطعه از گراناق» یا «بستن چهار پیچ»',
     note: 'عناصر با کشیدن‌ورها کردن مرتب می‌شوند؛ ترتیب همان ترتیب اجرای کار در چرخه است.',
   };
-  var ELEMENT_TYPE_HELP = {
-    what: 'نوع عنصر تعیین می‌کند زمان آن چگونه در محاسبات رفتار می‌کند: دستی، خودکار ماشین، انتظار، یا هم‌زمان/دارای هم‌پوشانی.',
-    input: 'ماهیت غالب عنصر را انتخاب کنید؛ پیش‌فرض «دستی» است.',
-    example: '«پرس اتوماتیک» → خودکار ماشین؛ «انتظار برای خشک‌شدن رنگ» → انتظار.',
-    note: 'عنصر هم‌زمان/دارای هم‌پوشانی برای کار هم‌زمان اپراتور و ماشین است؛ با بازه شروع/پایان ثبت می‌شود (فاز ۳) و زمان سپری‌شده چرخه از گستره بازه‌ها محاسبه می‌شود نه جمع مدت‌ها.',
-  };
-
   var TREE_HELP = {
     what: 'درخت ساختار تولید با چهار سطح: خط تولید (ریشه پروژه) ← ایستگاه ← فعالیت ← عنصر کاری.',
     input: 'کلیک روی نام هر گره آن را انتخاب می‌کند (فعالیت → صفحه اختصاصی؛ عنصر → دیالوگ ویرایش). باز/بسته کردن زیرشاخه فقط با فلش کنار گره انجام می‌شود.',
@@ -818,7 +811,6 @@
   // hasSearch → قفل مرتب‌سازی (بازبینی تکمیلی ج۱ §۴)
   function elementTreeRow(e, els, activity, ctx, hasSearch) {
     var rating = DB.getElementRating(e.id);
-    var typeVariant = ELEMENT_TYPE_BADGE[e.elementType] || 'muted';
     var row = U.h('div', { class: 't2-element-row t2-sort group' + (hasSearch ? ' t2-sort-locked' : '') },
       dragHandleEl(hasSearch),
       U.h('button', {
@@ -826,7 +818,7 @@
         class: 'flex min-w-0 flex-1 items-center gap-1.5 px-1 py-0.5',
         style: { border: 'none', background: 'transparent', cursor: 'pointer', color: 'inherit', fontFamily: 'inherit', textAlign: 'start', borderRadius: '6px' },
         'aria-label': 'ویرایش عنصر کاری ' + e.name,
-        title: e.name + ' — ' + (DB.CONST.ELEMENT_TYPE_LABELS[e.elementType] || '') + (rating ? ' · R = ' + rating.assessment.totalFactor : ' · ارزیابی نشده'),
+        title: e.name + (rating ? ' · R = ' + rating.assessment.totalFactor : ' · ارزیابی نشده'),
         onclick: function (ev) { ev.stopPropagation(); openTreeElementDialog(ctx, activity, e); },
       },
         U.h('span', { class: 'shrink-0', style: { color: 'var(--brand)', display: 'inline-flex' } }, U.icon('circle')),
@@ -868,10 +860,7 @@
     var isEdit = !!element;
     var nameInput = U.h('input', { class: 'input', value: isEdit ? element.name : '', placeholder: 'مثلاً: برداشتن قطعه از گراناق' });
     var descInput = U.h('textarea', { class: 'textarea', value: isEdit ? (element.description || '') : '', placeholder: 'مثلاً: برداشت با دو دست و قراردادن روی میز کار' });
-    var elementType = isEdit ? element.elementType : 'MANUAL';
-    var typeSelect = UI.selectEl(DB.CONST.ELEMENT_TYPES.map(function (et) {
-      return { value: et, label: DB.CONST.ELEMENT_TYPE_LABELS[et] };
-    }), elementType, function (v) { elementType = v; }, 'نوع عنصر کاری');
+    // v1.5.0 §۳ — «نوع عنصر کاری» از فرم حذف شد؛ فیلدها: نام، شرح، الونس‌ها، عناصر موازی
 
     var dlg = UI.dialog({
       title: isEdit ? 'ویرایش عنصر کاری' : 'عنصر کاری جدید',
@@ -883,8 +872,6 @@
         body.appendChild(U.h('div', { class: 'space-y-4' },
           UI.field('نام عنصر کاری', nameInput, ELEMENT_NAME_HELP),
           UI.field('شرح عنصر (اختیاری)', descInput),
-          UI.field('نوع عنصر کاری', typeSelect, ELEMENT_TYPE_HELP,
-            isEdit ? 'تغییر نوع عنصر بر مدل محاسباتی اثر دارد و وضعیت محاسبات را «نیازمند محاسبه مجدد» می‌کند.' : null),
           isEdit ? U.h('div', { id: 'tree-element-allowances' }) : null,
           isEdit ? U.h('div', { id: 'tree-element-parallel' }) : null));
         if (isEdit && g.T2VIEWS._allowanceSection) {
@@ -908,10 +895,10 @@
               if (!name) { UI.toast('نام عنصر کاری الزامی است', { type: 'error' }); return; }
               try {
                 if (isEdit) {
-                  DB.updateElement(element.id, { name: name, description: descInput.value.trim() || null, elementType: elementType });
+                  DB.updateElement(element.id, { name: name, description: descInput.value.trim() || null });
                   UI.toast('عنصر کاری به‌روزرسانی شد');
                 } else {
-                  DB.createElement(activity.id, { name: name, description: descInput.value.trim() || null, elementType: elementType });
+                  DB.createElement(activity.id, { name: name, description: descInput.value.trim() || null });
                   UI.toast('عنصر کاری ثبت شد');
                 }
                 close();
@@ -1369,7 +1356,6 @@
   }
 
   // ── زبانه ۲: عناصر کاری ──
-  var ELEMENT_TYPE_BADGE = { MANUAL: 'brand', MACHINE: 'cyan', WAITING: 'amber', OVERLAP: 'green' };
 
   function elementsTab(activity, ctx) {
     var elements = DB.sortElements(activity.id);
@@ -1388,7 +1374,7 @@
       section.appendChild(UI.emptyState({
         icon: 'listTree',
         title: 'هنوز عنصر کاری ثبت نشده است',
-        desc: 'هر چرخه فعالیت از عناصر کاری تشکیل می‌شود؛ برای زمان‌سنجی (فاز ۳) حداقل به یک عنصر نیاز دارید. نوع عنصر (دستی، خودکار ماشین، انتظار، هم‌زمان) را می‌توانید بعداً نیز تغییر دهید.',
+        desc: 'هر چرخه فعالیت از عناصر کاری تشکیل می‌شود؛ برای زمان‌سنجی (فاز ۳) حداقل به یک عنصر نیاز دارید.',
         actionLabel: 'ثبت اولین عنصر کاری',
         onAction: function () { openElementDialog(activity.id, null); },
       }));
@@ -1402,8 +1388,6 @@
   }
 
   function elementRow(e, index, elements, activityId, ctx) {
-    var typeLabel = DB.CONST.ELEMENT_TYPE_LABELS[e.elementType] || e.elementType;
-    var typeVariant = ELEMENT_TYPE_BADGE[e.elementType] || 'muted';
     var rating = DB.getElementRating(e.id);
 
     function move(delta) {
@@ -1420,7 +1404,6 @@
       U.h('div', { class: 'flex-1 min-w-0' },
         U.h('p', { class: 'font-semibold text-sm truncate', text: e.name }),
         e.description ? U.h('p', { class: 'text-xs text-muted truncate', title: e.description, text: e.description }) : null),
-      U.h('span', { class: 'badge ' + typeVariant + ' shrink-0', text: typeLabel }),
       rating
         ? U.h('span', {
             class: 'badge green num shrink-0', dir: 'ltr',
@@ -1454,10 +1437,7 @@
     var isEdit = !!element;
     var nameInput = U.h('input', { class: 'input', value: isEdit ? element.name : '', placeholder: 'مثلاً: برداشتن قطعه از گراناق' });
     var descInput = U.h('textarea', { class: 'textarea', value: isEdit ? (element.description || '') : '', placeholder: 'مثلاً: برداشت با دو دست و قراردادن روی میز کار' });
-    var elementType = isEdit ? element.elementType : 'MANUAL';
-    var typeSelect = UI.selectEl(DB.CONST.ELEMENT_TYPES.map(function (et) {
-      return { value: et, label: DB.CONST.ELEMENT_TYPE_LABELS[et] };
-    }), elementType, function (v) { elementType = v; }, 'نوع عنصر کاری');
+    // v1.5.0 §۳ — «نوع عنصر کاری» از فرم حذف شد؛ فیلدها: نام، شرح، الونس‌ها، عناصر موازی
 
     UI.dialog({
       title: isEdit ? 'ویرایش عنصر کاری' : 'عنصر کاری جدید',
@@ -1467,8 +1447,6 @@
         body.appendChild(U.h('div', { class: 'space-y-4' },
           UI.field('نام عنصر کاری', nameInput, ELEMENT_NAME_HELP),
           UI.field('شرح عنصر (اختیاری)', descInput),
-          UI.field('نوع عنصر کاری', typeSelect, ELEMENT_TYPE_HELP,
-            isEdit ? 'تغییر نوع عنصر بر مدل محاسباتی اثر دارد و وضعیت محاسبات را «نیازمند محاسبه مجدد» می‌کند.' : null),
           isEdit && ctx && g.T2VIEWS._allowanceSection ? U.h('div', { id: 'tab-element-allowances' }) : null,
           isEdit && ctx && g.T2VIEWS._parallelRelationsSection ? U.h('div', { id: 'tab-element-parallel' }) : null));
         if (isEdit && ctx && g.T2VIEWS._allowanceSection) {
@@ -1492,10 +1470,10 @@
               if (!name) { UI.toast('نام عنصر کاری الزامی است', { type: 'error' }); return; }
               try {
                 if (isEdit) {
-                  DB.updateElement(element.id, { name: name, description: descInput.value.trim() || null, elementType: elementType });
+                  DB.updateElement(element.id, { name: name, description: descInput.value.trim() || null });
                   UI.toast('عنصر کاری به‌روزرسانی شد');
                 } else {
-                  DB.createElement(activityId, { name: name, description: descInput.value.trim() || null, elementType: elementType });
+                  DB.createElement(activityId, { name: name, description: descInput.value.trim() || null });
                   UI.toast('عنصر کاری ثبت شد');
                 }
                 close();

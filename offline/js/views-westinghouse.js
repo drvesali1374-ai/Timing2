@@ -70,7 +70,6 @@
   };
 
   // رنگ Badge نوع عنصر — MANUAL برند، MACHINE فیروزه‌ای، WAITING کهربایی، OVERLAP سبز
-  var TYPE_BADGE_VARIANT = { MANUAL: 'brand', MACHINE: 'cyan', WAITING: 'amber', OVERLAP: 'green' };
 
   /** نمایش مقدار درجه با علامت ± و دو رقم اعشار */
   function signed2(v) {
@@ -171,7 +170,7 @@
       var sec = U.h('div', { class: 'mb-3' },
         U.h('div', { class: 'flex flex-wrap items-center gap-2 mb-2' },
           U.h('h4', { class: 'text-sm font-bold' }, (sym ? sym + ' ' : '') + a.name)));
-      sec.appendChild(UI.table(['عنصر کاری', 'نوع', 'وضعیت ارزیابی', ''], function (tbody) {
+      sec.appendChild(UI.table(['عنصر کاری', 'وضعیت ارزیابی', ''], function (tbody) {
         x.rows.forEach(function (r) {
           var el = r.element;
           var ratingCell;
@@ -184,9 +183,6 @@
           }
           tbody.appendChild(U.h('tr', null,
             U.h('td', { class: 'font-medium' }, el.name),
-            U.h('td', null, UI.badge(
-              DB.CONST.ELEMENT_TYPE_LABELS[el.elementType] || el.elementType,
-              TYPE_BADGE_VARIANT[el.elementType] || 'muted')),
             U.h('td', null, ratingCell),
             U.h('td', null, U.h('div', { class: 'flex', style: { justifyContent: 'flex-end' } },
               r.rated

@@ -429,7 +429,6 @@
         analyses.forEach(function (an) {
           an.elements.forEach(function (el) {
             eRows.push([an.activity.stationName, an.activity.name, el.name,
-              DB.CONST.ELEMENT_TYPE_LABELS[el.elementType] || el.elementType,
               el.counts.calcBasis, el.counts.suspect, el.counts.excluded,
               num(el.ot), num(el.rating ? el.rating.totalFactor : null), num(el.nt), num(el.st), num(el.stats.cvPercent)]);
             var r = DB.getElementRating(el.id);
@@ -449,7 +448,7 @@
         });
         sheets.push({
           name: 'خلاصهٔ عناصر',
-          headers: ['ایستگاه', 'فعالیت', 'عنصر', 'نوع', 'در محاسبات', 'مشکوک', 'خارج‌شده', 'OT', 'R', 'NT', 'ST', 'CV٪'],
+          headers: ['ایستگاه', 'فعالیت', 'عنصر', 'در محاسبات', 'مشکوک', 'خارج‌شده', 'OT', 'R', 'NT', 'ST', 'CV٪'],
           rows: eRows,
         });
         sheets.push({
@@ -701,7 +700,6 @@
           }
           return [
             { cls: 'pr-note', text: el.name },
-            DB.CONST.ELEMENT_TYPE_LABELS[el.elementType] || el.elementType,
             U.formatInt(n),
             isNull(mean) ? '—' : U.formatTimeValue(mean),
             isNull(sd) ? '—' : U.formatTimeValue(sd),
