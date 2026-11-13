@@ -73,7 +73,6 @@ export interface DashboardOperatorRow {
 export interface DashboardElementCvRow {
   elementName: string
   activityName: string
-  elementType: string
   cvPercent: number | null
   count: number
   ot: number | null
@@ -348,7 +347,6 @@ export async function getProjectDashboard(projectId: string): Promise<ProjectDas
       an.elements.map((el) => ({
         elementName: el.name,
         activityName: an.activity.name,
-        elementType: el.elementType,
         cvPercent: el.stats.cvPercent,
         count: el.counts.calcBasis,
         ot: el.ot,

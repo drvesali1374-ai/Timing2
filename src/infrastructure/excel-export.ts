@@ -200,7 +200,7 @@ function buildSummarySheet(wb: ExcelJS.Workbook, report: StudyReportDto, prefs: 
 
   const headerRow = ws.rowCount + 2
   const headers = [
-    'ایستگاه', 'فعالیت', 'عنصر کاری', 'نوع', 'n',
+    'ایستگاه', 'فعالیت', 'عنصر کاری', 'n',
     'میانگین (ثانیه)', 'میانه', 'انحراف معیار', 'CV٪', 'OT (ثانیه)',
     'ضریب R', 'NT (ثانیه)', 'ST (ثانیه)', 'A کل', 'وضعیت / علت',
   ]
@@ -213,18 +213,17 @@ function buildSummarySheet(wb: ExcelJS.Workbook, report: StudyReportDto, prefs: 
       ws.getCell(r, 1).value = sec.activity.stationName
       ws.getCell(r, 2).value = sec.activity.name
       ws.getCell(r, 3).value = el.name
-      ws.getCell(r, 4).value = el.elementTypeLabel
-      ws.getCell(r, 5).value = el.stats.count
-      if (el.stats.mean !== null) ws.getCell(r, 6).value = Number(el.stats.mean.toFixed(6))
-      if (el.stats.median !== null) ws.getCell(r, 7).value = Number(el.stats.median.toFixed(6))
-      if (el.stats.sampleSD !== null) ws.getCell(r, 8).value = Number(el.stats.sampleSD.toFixed(6))
-      if (el.stats.cvPercent !== null) ws.getCell(r, 9).value = Number(el.stats.cvPercent.toFixed(4))
-      if (el.ot !== null) ws.getCell(r, 10).value = Number(el.ot.toFixed(6))
-      if (el.rating) ws.getCell(r, 11).value = Number(el.rating.totalFactor.toFixed(4))
-      if (el.nt !== null) ws.getCell(r, 12).value = Number(el.nt.toFixed(6))
-      if (el.st !== null) ws.getCell(r, 13).value = Number(el.st.toFixed(6))
-      ws.getCell(r, 14).value = Number(el.allowanceP.toFixed(6))
-      ws.getCell(r, 15).value =
+      ws.getCell(r, 4).value = el.stats.count
+      if (el.stats.mean !== null) ws.getCell(r, 5).value = Number(el.stats.mean.toFixed(6))
+      if (el.stats.median !== null) ws.getCell(r, 6).value = Number(el.stats.median.toFixed(6))
+      if (el.stats.sampleSD !== null) ws.getCell(r, 7).value = Number(el.stats.sampleSD.toFixed(6))
+      if (el.stats.cvPercent !== null) ws.getCell(r, 8).value = Number(el.stats.cvPercent.toFixed(4))
+      if (el.ot !== null) ws.getCell(r, 9).value = Number(el.ot.toFixed(6))
+      if (el.rating) ws.getCell(r, 10).value = Number(el.rating.totalFactor.toFixed(4))
+      if (el.nt !== null) ws.getCell(r, 11).value = Number(el.nt.toFixed(6))
+      if (el.st !== null) ws.getCell(r, 12).value = Number(el.st.toFixed(6))
+      ws.getCell(r, 13).value = Number(el.allowanceP.toFixed(6))
+      ws.getCell(r, 14).value =
         el.stError ??
         (el.st !== null
           ? el.rating
@@ -233,7 +232,7 @@ function buildSummarySheet(wb: ExcelJS.Workbook, report: StudyReportDto, prefs: 
           : el.ot === null
             ? 'دادهٔ معتبر کافی نیست'
             : 'غیرقابل محاسبه')
-      for (let c = 1; c <= 15; c++) ws.getCell(r, c).alignment = { horizontal: 'center', readingOrder: 'rtl' }
+      for (let c = 1; c <= 14; c++) ws.getCell(r, c).alignment = { horizontal: 'center', readingOrder: 'rtl' }
       r++
     }
   }

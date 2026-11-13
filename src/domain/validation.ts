@@ -8,7 +8,6 @@ import { z } from 'zod'
 import { parseNumber } from '@/lib/persian'
 import {
   PROCESS_TYPES,
-  ELEMENT_TYPES,
   PROJECT_STATUSES,
   ALLOWANCE_METHODS,
   AGGREGATION_METHODS,
@@ -109,7 +108,8 @@ export const activityUpdateSchema = activityCreateSchema.partial().extend({
 export const elementCreateSchema = z.object({
   name: trimmed(300),
   description: z.string().trim().max(3000).nullable().optional(),
-  elementType: z.enum(ELEMENT_TYPES).default('MANUAL'),
+  // v1.5.0 §۳ — «نوع عنصر کاری» از ایجاد/ویرایش حذف شد؛
+  // elementType دیگر پارامتر کاربری نیست (ستون DB به‌صورت legacy حفظ می‌شود).
 })
 
 export const elementUpdateSchema = elementCreateSchema.partial().extend({
@@ -382,16 +382,20 @@ export const cellsPutSchema = z.object({
   expectedUpdatedAt: z.string().datetime().optional(),
 })
 
-// ── Paste چندسلولی — FR-07 ──
+// ── Paste چندسلولی — FR-07 — v1.5.0 محور جدید (§۸.۳) ──
+// ردیف‌های داده = ردیف‌های شبکه (عنصر اصلی + زیرردیف رابطهٔ موازی)
+// ستون‌های داده = چرخه‌ها به ترتیب شماره
 export const pasteModeSchema = z.enum(['ALL_OR_NOTHING', 'SKIP_INVALID'])
 
 export const pasteSchema = z.object({
-  /** شماره چرخهٔ سلول مبدأ (۱-مبنا) */
+  /** شماره چرخهٔ سلول مبدأ (۱-مبنا) — ستون مبدأ */
   startCycleNo: numberFromString({ min: 1, max: 100000 }),
-  /** اندیس ستون عنصر سلول مبدأ (۰-مبنا؛ ترتیب عناصر فعالیت) */
-  startColIndex: numberFromString({ min: 0, max: 499 }),
-  /** داده خام Paste — سطر×ستون — اعداد فارسی/لاتین پذیرفته می‌شود */
-  data: z.array(z.array(z.string().max(100)).max(500)).min(1).max(200),
+  /** شناسهٔ عنصر ردیف مبدأ — ردیف اصلی عنصر */
+  startElementId: z.string().uuid('عنصر مبدأ Paste معتبر نیست'),
+  /** اگر مبدأ زیرردیف رابطه است — شناسهٔ رابطه (§۸.۳: لنگر بر اساس شناسه، نه اندیس) */
+  startRelationId: z.string().uuid('رابطهٔ مبدأ Paste معتبر نیست').nullable().optional(),
+  /** داده خام Paste — ردیف×ستون — اعداد فارسی/لاتین پذیرفته می‌شود */
+  data: z.array(z.array(z.string().max(100)).max(200)).min(1).max(500),
   mode: pasteModeSchema.default('ALL_OR_NOTHING'),
 })
 

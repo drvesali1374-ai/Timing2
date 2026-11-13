@@ -30,10 +30,15 @@ export const MATERIAL_INPUT_SYMBOL = '⬡'
 /** نماد انبار برای OPC توسعه‌یافته — مثلث وارونه (همان ▽ انبارش) */
 export const STORAGE_SYMBOL = '▽'
 
-// ── نوع عنصر کاری — FR-02 ──
+// ── نوع عنصر کاری — FR-02 — v1.5.0: LEGACY ──
+// §۳ دستورالعمل v1.5.0: «نوع عنصر کاری» از تمام UIها حذف شد.
+// مقادیر قدیمی فقط برای مهاجرت (defaultEntryMode/defaultLaneType) و
+// حفظ رفتار تحلیل تاریخی به‌صورت داخلی خوانده می‌شوند؛
+// در هیچ فرم، DTO یا رابط کاربری به‌عنوان ویژگی فعال ظاهر نمی‌شوند.
 export const ELEMENT_TYPES = ['MANUAL', 'MACHINE', 'WAITING', 'OVERLAP'] as const
 export type ElementType = (typeof ELEMENT_TYPES)[number]
 
+/** LEGACY — فقط برای مهاجرت و عناوین داخلی؛ در UI استفاده نشود */
 export const ELEMENT_TYPE_LABELS: Record<ElementType, string> = {
   MANUAL: 'دستی',
   MACHINE: 'خودکار ماشین',

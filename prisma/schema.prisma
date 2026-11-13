@@ -98,7 +98,14 @@ model WorkElement {
   activityId  String   @map("activity_id")
   name        String
   description String?
-  elementType String   @default("MANUAL") @map("element_type") // MANUAL|MACHINE|WAITING|OVERLAP
+  // ── v1.5.0: «نوع عنصر کاری» از UI حذف شد (§۳ دستورالعمل) ──
+  // ستون به‌صورت legacy حفظ می‌شود تا داده/تحلیل تاریخی دست‌نخورده بماند؛
+  // در هیچ فرم، DTO یا UI به‌عنوان ویژگی فعال ظاهر نمی‌شود.
+  elementType String   @default("MANUAL") @map("element_type") // LEGACY: MANUAL|MACHINE|WAITING|OVERLAP
+  // حالت ورود پیش‌فرض مستقل از نوع عنصر — MANUAL→SEQ / سایر→INT مهاجرت شد (§۳.۲)
+  defaultEntryMode String @default("SEQ") @map("default_entry_mode") // SEQ | INT
+  // خط زمانی پیش‌فرض مستقل از نوع عنصر — MACHINE/OVERLAP→MACHINE / سایر→OPERATOR (§۳.۲)
+  defaultLaneType  String @default("OPERATOR") @map("default_lane_type") // OPERATOR | MACHINE
   sortOrder   Int      @default(0) @map("sort_order")
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
@@ -337,6 +344,8 @@ model OverlapRelation {
   elementLowId String   @map("element_low_id")
   elementHighId String  @map("element_high_id")
   isActive     Boolean  @default(true) @map("is_active") // آرشیو نرم
+  // v1.5.0 — دلیل آرشیو (مثلاً CROSS_ACTIVITY_NOT_SUPPORTED_BY_SESSION_SHEET §۴.۳)
+  archiveReason String? @map("archive_reason")
   version      Int      @default(1) // optimistic concurrency
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")

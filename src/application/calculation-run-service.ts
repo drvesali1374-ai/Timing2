@@ -73,7 +73,6 @@ function compactActivity(a: ActivityAnalysisDto) {
     elements: a.elements.map((e) => ({
       id: e.id,
       name: e.name,
-      elementType: e.elementType,
       counts: { calcBasis: e.counts.calcBasis, suspect: e.counts.suspect, excluded: e.counts.excluded },
       ot: e.ot,
       nt: e.nt,

@@ -334,7 +334,6 @@ export async function getRatingMatrix(projectId: string) {
         elements: a.workElements.map((e) => ({
           id: e.id,
           name: e.name,
-          elementType: e.elementType,
           rating: e.rating
             ? {
                 totalFactor: e.rating.totalFactor,

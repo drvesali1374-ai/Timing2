@@ -29,7 +29,6 @@ function zodToAppError(e: ZodError): AppError {
     targetSampleCount: 'تعداد نمونه هدف',
     groupId: 'گروه',
     processType: 'نوع فرایندی',
-    elementType: 'نوع عنصر',
   }
   const fieldLabel = first ? friendly[first.path.split('.')[0]] ?? first.path : ''
   return new AppError(

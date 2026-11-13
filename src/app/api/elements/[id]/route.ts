@@ -15,7 +15,6 @@ export function GET(req: NextRequest, ctx: Ctx) {
         id: element.id,
         name: element.name,
         description: element.description,
-        elementType: element.elementType,
         activityId: element.activityId,
         updatedAt: element.updatedAt.toISOString(),
       },

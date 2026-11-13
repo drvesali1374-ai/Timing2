@@ -22,12 +22,10 @@ import { db } from '@/lib/db'
 import {
   AppError,
   PROCESS_TYPE_LABELS,
-  ELEMENT_TYPE_LABELS,
   TIMING_METHOD_LABELS,
   PROJECT_STATUS_LABELS,
   RATING_FACTOR_LABELS,
   type ProcessType,
-  type ElementType,
   type TimingMethod,
   type ProjectStatus,
 } from '@/domain/types'
@@ -56,7 +54,6 @@ export interface ElementReportRating {
 
 export interface ElementReportRow {
   name: string
-  elementTypeLabel: string
   counts: { calcBasis: number; suspect: number; excluded: number }
   stats: Pick<DescriptiveStats, 'count' | 'mean' | 'median' | 'sampleSD' | 'cvPercent' | 'ci95'>
   ot: number | null
@@ -311,7 +308,6 @@ export async function getStudyReport(
 
       return {
         name: el.name,
-        elementTypeLabel: ELEMENT_TYPE_LABELS[el.elementType as ElementType] ?? el.elementType,
         counts,
         stats,
         ot,

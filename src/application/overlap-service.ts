@@ -12,6 +12,7 @@ import { db } from '@/lib/db'
 import { AppError } from '@/domain/types'
 import { recordAudit } from '@/infrastructure/audit'
 import { markProjectCalculationsStale } from './calc-stale'
+import type { Prisma } from '@prisma/client'
 import {
   runFullValidation,
   computeVerdicts,
@@ -42,6 +43,8 @@ export interface RelationDto {
   elementLowId: string
   elementHighId: string
   isActive: boolean
+  /** v1.5.0 — دلیل آرشیو (مثلاً CROSS_ACTIVITY_NOT_SUPPORTED_BY_SESSION_SHEET §۴.۳) */
+  archiveReason: string | null
   version: number
   createdAt: string
   updatedAt: string
@@ -295,17 +298,35 @@ export async function listRelations(projectId: string) {
   return relations
 }
 
+/** v1.5.0 §۴.۳ — دلیل آرشیو رابطهٔ بین‌فعالیت */
+export const CROSS_ACTIVITY_ARCHIVE_REASON = 'CROSS_ACTIVITY_NOT_SUPPORTED_BY_SESSION_SHEET'
+
 export async function createRelation(projectId: string, elementAId: string, elementBId: string): Promise<RelationDto> {
   if (elementAId === elementBId) {
     throw new AppError('SELF_RELATION', 'عنصر نمی‌تواند با خودش رابطهٔ موازی داشته باشد.', 422)
   }
   const [elA, elB] = await Promise.all([
-    db.workElement.findUnique({ where: { id: elementAId }, select: { id: true, name: true, activity: { select: { station: { select: { projectId: true } } } } } }),
-    db.workElement.findUnique({ where: { id: elementBId }, select: { id: true, name: true, activity: { select: { station: { select: { projectId: true } } } } } }),
+    db.workElement.findUnique({
+      where: { id: elementAId },
+      select: { id: true, name: true, activityId: true, activity: { select: { station: { select: { projectId: true } } } } },
+    }),
+    db.workElement.findUnique({
+      where: { id: elementBId },
+      select: { id: true, name: true, activityId: true, activity: { select: { station: { select: { projectId: true } } } } },
+    }),
   ])
   if (!elA || !elB) throw new AppError('ELEMENT_NOT_FOUND', 'عنصر کاری یافت نشد.', 404)
   if (elA.activity.station.projectId !== projectId || elB.activity.station.projectId !== projectId) {
     throw new AppError('WRONG_PROJECT', 'هر دو عنصر باید متعلق به همین پروژه باشند.', 422)
+  }
+  // v1.5.0 §۴.۳ — دامنهٔ رابطه‌ها: هر دو عنصر باید متعلق به یک Activity باشند؛
+  // برگهٔ زمان‌سنجی (Activity × Operator × Method) فقط عناصر همان Activity را دارد.
+  if (elA.activityId !== elB.activityId) {
+    throw new AppError(
+      'CROSS_ACTIVITY_NOT_SUPPORTED',
+      'رابطهٔ موازی فقط بین عناصر یک فعالیت ممکن است؛ زیرردیف‌های برگهٔ زمان‌سنجی باید قابل‌مقایسه باشند.',
+      422,
+    )
   }
   const low = elementAId < elementBId ? elementAId : elementBId
   const high = elementAId < elementBId ? elementBId : elementAId
@@ -318,7 +339,7 @@ export async function createRelation(projectId: string, elementAId: string, elem
   const relation = existing
     ? await db.overlapRelation.update({
         where: { id: existing.id },
-        data: { isActive: true, version: { increment: 1 } },
+        data: { isActive: true, version: { increment: 1 }, archiveReason: null },
       })
     : await db.overlapRelation.create({
         data: { projectId, elementLowId: low, elementHighId: high },
@@ -363,9 +384,22 @@ export async function restoreRelation(relationId: string): Promise<RelationDto> 
   const relation = await db.overlapRelation.findUnique({ where: { id: relationId } })
   if (!relation) throw new AppError('RELATION_NOT_FOUND', 'رابطه یافت نشد.', 404)
   if (relation.isActive) return serializeRelation(relation)
+  // v1.5.0 §۴.۳ — بازگردانی رابطهٔ بین‌فعالیت ممنوع است تا وقتی هر دو عنصر
+  // در یک Activity نباشند (دادهٔ تاریخی حفظ می‌شود؛ رابطه آرشیو می‌ماند).
+  const [elLow, elHigh] = await Promise.all([
+    db.workElement.findUnique({ where: { id: relation.elementLowId }, select: { activityId: true } }),
+    db.workElement.findUnique({ where: { id: relation.elementHighId }, select: { activityId: true } }),
+  ])
+  if (elLow && elHigh && elLow.activityId !== elHigh.activityId) {
+    throw new AppError(
+      'CROSS_ACTIVITY_NOT_SUPPORTED',
+      'این رابطه بین عناصر دو فعالیت مختلف است و تا زمانی که هر دو عنصر در یک فعالیت نباشند قابل بازگردانی نیست.',
+      422,
+    )
+  }
   const updated = await db.overlapRelation.update({
     where: { id: relationId },
-    data: { isActive: true, version: { increment: 1 } },
+    data: { isActive: true, version: { increment: 1 }, archiveReason: null },
   })
   await markProjectCalculationsStale(relation.projectId)
   await recordAudit({
@@ -404,6 +438,7 @@ function serializeRelation(r: {
   elementLowId: string
   elementHighId: string
   isActive: boolean
+  archiveReason?: string | null
   version: number
   createdAt: Date
   updatedAt: Date
@@ -413,6 +448,7 @@ function serializeRelation(r: {
     elementLowId: r.elementLowId,
     elementHighId: r.elementHighId,
     isActive: r.isActive,
+    archiveReason: r.archiveReason ?? null,
     version: r.version,
     createdAt: r.createdAt.toISOString(),
     updatedAt: r.updatedAt.toISOString(),
@@ -556,6 +592,145 @@ export interface SetOverlapsResult {
   warnings: string[]
 }
 
+/**
+ * v1.5.0 — اعمال اتمی به‌روزرسانی مقادیر هم‌پوشانی «درون تراکنش».
+ * همان جریان کنترل‌شدهٔ setCycleOverlaps (§۱۰) اما روی tx داده‌شده، تا
+ * Paste چندسلولی (§۸.۳) بتواند مقادیر عنصر و هم‌پوشانی را در یک تراکنش
+ * واحد اعمال کند. خواندن‌ها همگی از tx (snapshot قفل‌شده) انجام می‌شوند.
+ */
+export async function applyOverlapUpdatesInTx(
+  tx: Prisma.TransactionClient,
+  opts: {
+    cycleId: string
+    projectId: string
+    updates: RelationUpdateInput[]
+    expectedOverlapRevision?: number
+    nameOf: (id: string) => string
+  },
+): Promise<{ cells: Record<string, CellValueDto>; pendingAudits: Array<Parameters<typeof recordAudit>[0]> }> {
+  const { cycleId, projectId, updates, nameOf } = opts
+  const cycle = await tx.cycleObservation.findUnique({
+    where: { id: cycleId },
+    select: { id: true, cycleNo: true },
+  })
+  if (!cycle) throw new AppError('CYCLE_NOT_FOUND', 'چرخه یافت نشد.', 404)
+
+  // مشاهدات همین چرخه از tx — مبنای مقایسه‌پذیری و بازهٔ واقعی
+  const observations = await tx.elementObservation.findMany({
+    where: { cycleId },
+    select: { workElementId: true, derivedDuration: true, rawDuration: true, startOffset: true, endOffset: true },
+  })
+  const durations: Record<string, number | null> = {}
+  const intervals: Record<string, { startOffset: number; endOffset: number } | null> = {}
+  for (const obs of observations) {
+    durations[obs.workElementId] = obs.derivedDuration ?? obs.rawDuration ?? null
+    intervals[obs.workElementId] =
+      obs.startOffset != null && obs.endOffset != null
+        ? { startOffset: obs.startOffset, endOffset: obs.endOffset }
+        : null
+  }
+
+  const relationIds = updates.map((u) => u.relationId)
+  const relations = await tx.overlapRelation.findMany({ where: { id: { in: relationIds } } })
+  const relationById = new Map(relations.map((r) => [r.id, r]))
+  for (const u of updates) {
+    const rel = relationById.get(u.relationId)
+    if (!rel) throw new AppError('RELATION_NOT_FOUND', `رابطه یافت نشد.`, 404)
+    if (rel.projectId !== projectId) {
+      throw new AppError('WRONG_PROJECT', 'رابطه به پروژهٔ این چرخه تعلق ندارد.', 422)
+    }
+    if (!rel.isActive) {
+      throw new AppError('RELATION_ARCHIVED', 'رابطهٔ آرشیوشده قابل ویرایش نیست؛ ابتدا آن را بازگردانی کنید.', 422)
+    }
+    assertStatus(u.status)
+  }
+
+  // §۵ — دروازهٔ مقایسه‌پذیری زوج در چرخهٔ جاری
+  for (const u of updates) {
+    const rel = relationById.get(u.relationId)!
+    if (u.status === 'UNREVIEWED') continue
+    for (const eid of [rel.elementLowId, rel.elementHighId]) {
+      if (!isObservedInCycle(eid, durations)) {
+        throw new AppError(
+          'NOT_COMPARABLE_IN_CYCLE',
+          `ثبت مقدار ممکن نیست — «${nameOf(eid)}» در چرخهٔ ${cycle.cycleNo} مشاهده‌ای ندارد؛ این زوج در این چرخه قابل‌مقایسه نیست.`,
+          422,
+          { elementId: eid, notComparableReason: `«${nameOf(eid)}» در این چرخه مشاهده‌ای ندارد` },
+        )
+      }
+      if (!hasComparableEvidence(eid, durations, intervals)) {
+        throw new AppError(
+          'NOT_COMPARABLE_IN_CYCLE',
+          `ثبت مقدار ممکن نیست — «${nameOf(eid)}» در چرخهٔ ${cycle.cycleNo} مدت یا بازهٔ قابل‌مقایسه ندارد؛ این زوج در این چرخه قابل‌مقایسه نیست.`,
+          422,
+          { elementId: eid, notComparableReason: `«${nameOf(eid)}» در این چرخه مدت یا بازهٔ قابل‌مقایسه ندارد` },
+        )
+      }
+    }
+  }
+
+  const cells: Record<string, CellValueDto> = {}
+  const pendingAudits: Array<Parameters<typeof recordAudit>[0]> = []
+
+  // ۱) قفل نوشتن + کنترل نسخهٔ مجموعهٔ مقادیر چرخه
+  const bumped = await tx.cycleObservation.update({
+    where: { id: cycleId },
+    data: { overlapRevision: { increment: 1 } },
+    select: { overlapRevision: true },
+  })
+  if (opts.expectedOverlapRevision != null && bumped.overlapRevision - 1 !== opts.expectedOverlapRevision) {
+    throw new AppError(
+      'OVERLAP_REVISION_CONFLICT',
+      'مجموعهٔ مقادیر هم‌پوشانی این چرخه از محل دیگری هم‌زمان تغییر کرده است؛ صفحه را نوسازی کنید.',
+      409,
+    )
+  }
+  // ۲) خواندن تازهٔ کل وضعیت مؤثر (روی snapshot قفل‌شده)
+  const allRelationsTx = await tx.overlapRelation.findMany({ where: { projectId, isActive: true } })
+  const existingValuesTx = await tx.observationOverlap.findMany({ where: { cycleId } })
+  // ۳) اعتبارسنجی نهایی روی snapshot معتبر
+  const out = validateOverlapSet(allRelationsTx, existingValuesTx, updates, cycleId, durations, intervals, nameOf)
+  assertNoDefiniteFailure(out, nameOf)
+  // ۴) ثبت
+  for (const u of updates) {
+    assertStatus(u.status)
+    const normalizedDuration = u.status === 'NO_OVERLAP' ? 0 : u.status === 'UNREVIEWED' ? null : u.overlapDuration
+    const existing = await tx.observationOverlap.findUnique({
+      where: { relationId_cycleId: { relationId: u.relationId, cycleId } },
+    })
+    if (existing) {
+      if (u.expectedVersion != null && existing.version !== u.expectedVersion) {
+        throw new AppError(
+          'VERSION_CONFLICT',
+          'مقدار این زوج هم‌پوشانی از محل دیگری هم‌زمان تغییر کرده است؛ صفحه را نوسازی کنید.',
+          409,
+        )
+      }
+      const updated = await tx.observationOverlap.update({
+        where: { id: existing.id },
+        data: { status: u.status, overlapDuration: normalizedDuration, version: { increment: 1 } },
+      })
+      cells[updated.relationId] = serializeCell(updated)
+    } else {
+      const created = await tx.observationOverlap.create({
+        data: { relationId: u.relationId, cycleId, status: u.status, overlapDuration: normalizedDuration },
+      })
+      cells[created.relationId] = serializeCell(created)
+    }
+    const rel = relationById.get(u.relationId)!
+    pendingAudits.push({
+      entityType: 'ObservationOverlap',
+      entityId: `${u.relationId}:${cycleId}`,
+      action: 'UPDATE',
+      entityName: `${nameOf(rel.elementLowId)} ↔ ${nameOf(rel.elementHighId)} — چرخهٔ ${cycle.cycleNo}`,
+      before: existing ? { status: existing.status, overlapDuration: existing.overlapDuration } : null,
+      after: { status: u.status, overlapDuration: normalizedDuration },
+      projectId,
+    })
+  }
+  return { cells, pendingAudits }
+}
+
 export async function setCycleOverlaps(
   cycleId: string,
   updates: RelationUpdateInput[],
@@ -624,66 +799,9 @@ export async function setCycleOverlaps(
   const preOut = validateOverlapSet(allRelationsPre, preValues, updates, cycleId, durations, intervals, nameOf)
   assertNoDefiniteFailure(preOut, nameOf)
 
-  const cells: Record<string, CellValueDto> = {}
-  const pendingAudits: Array<Parameters<typeof recordAudit>[0]> = []
-  await db.$transaction(async (tx) => {
-    // ۱) قفل نوشتن + کنترل نسخهٔ مجموعهٔ مقادیر چرخه
-    const bumped = await tx.cycleObservation.update({
-      where: { id: cycleId },
-      data: { overlapRevision: { increment: 1 } },
-      select: { overlapRevision: true },
-    })
-    if (opts?.expectedOverlapRevision != null && bumped.overlapRevision - 1 !== opts.expectedOverlapRevision) {
-      throw new AppError(
-        'OVERLAP_REVISION_CONFLICT',
-        'مجموعهٔ مقادیر هم‌پوشانی این چرخه از محل دیگری هم‌زمان تغییر کرده است؛ صفحه را نوسازی کنید.',
-        409,
-      )
-    }
-    // ۲) خواندن تازهٔ کل وضعیت مؤثر (روی snapshot قفل‌شده)
-    const allRelationsTx = await tx.overlapRelation.findMany({ where: { projectId, isActive: true } })
-    const existingValuesTx = await tx.observationOverlap.findMany({ where: { cycleId } })
-    // ۳) اعتبارسنجی نهایی روی snapshot معتبر
-    const out = validateOverlapSet(allRelationsTx, existingValuesTx, updates, cycleId, durations, intervals, nameOf)
-    assertNoDefiniteFailure(out, nameOf)
-    // ۴) ثبت
-    for (const u of updates) {
-      assertStatus(u.status)
-      const normalizedDuration = u.status === 'NO_OVERLAP' ? 0 : u.status === 'UNREVIEWED' ? null : u.overlapDuration
-      const existing = await tx.observationOverlap.findUnique({
-        where: { relationId_cycleId: { relationId: u.relationId, cycleId } },
-      })
-      if (existing) {
-        if (u.expectedVersion != null && existing.version !== u.expectedVersion) {
-          throw new AppError(
-            'VERSION_CONFLICT',
-            'مقدار این زوج هم‌پوشانی از محل دیگری هم‌زمان تغییر کرده است؛ صفحه را نوسازی کنید.',
-            409,
-          )
-        }
-        const updated = await tx.observationOverlap.update({
-          where: { id: existing.id },
-          data: { status: u.status, overlapDuration: normalizedDuration, version: { increment: 1 } },
-        })
-        cells[updated.relationId] = serializeCell(updated)
-      } else {
-        const created = await tx.observationOverlap.create({
-          data: { relationId: u.relationId, cycleId, status: u.status, overlapDuration: normalizedDuration },
-        })
-        cells[created.relationId] = serializeCell(created)
-      }
-      const rel = relationById.get(u.relationId)!
-      pendingAudits.push({
-        entityType: 'ObservationOverlap',
-        entityId: `${u.relationId}:${cycleId}`,
-        action: 'UPDATE',
-        entityName: `${nameOf(rel.elementLowId)} ↔ ${nameOf(rel.elementHighId)} — چرخهٔ ${cycle.cycleNo}`,
-        before: existing ? { status: existing.status, overlapDuration: existing.overlapDuration } : null,
-        after: { status: u.status, overlapDuration: normalizedDuration },
-        projectId,
-      })
-    }
-  })
+  const { cells, pendingAudits } = await db.$transaction((tx) =>
+    applyOverlapUpdatesInTx(tx, { cycleId, projectId, updates, expectedOverlapRevision: opts?.expectedOverlapRevision, nameOf }),
+  )
 
   // رویدادهای تاریخچه پس از commit (خارج از تراکنش — جلوگیری از بن‌بست SQLite)
   for (const entry of pendingAudits) {
@@ -809,6 +927,10 @@ export interface ElementRelationRow {
   otherActivityName: string
   otherStationName: string
   isActive: boolean
+  /** v1.5.0 §۴.۳ — رابطهٔ بین‌فعالیت (آرشیو شده؛ بازگردانی ممنوع تا هم‌فعالیت نشود) */
+  crossActivity: boolean
+  /** v1.5.0 — دلیل آرشیو در صورت وجود */
+  archiveReason: string | null
   /** مقدار چرخهٔ آخر ثبت‌شده این رابطه — در حالت Session-محدود فقط چرخه‌های همان جلسه (§۶ ممیزی جلسه ۲) */
   latest: { cycleNo: number; operatorName: string; activityName: string; status: OverlapStatus; overlapDuration: number | null; cycleId: string } | null
 }
@@ -819,7 +941,7 @@ export async function getElementRelations(
 ): Promise<{ elementId: string; elementName: string; rows: ElementRelationRow[]; scope: 'PROJECT' | 'SESSION' }> {
   const element = await db.workElement.findUnique({
     where: { id: elementId },
-    select: { id: true, name: true, activity: { select: { station: { select: { projectId: true } } } } },
+    select: { id: true, name: true, activityId: true, activity: { select: { station: { select: { projectId: true } } } } },
   })
   if (!element) throw new AppError('ELEMENT_NOT_FOUND', 'عنصر کاری یافت نشد.', 404)
   const projectId = element.activity.station.projectId
@@ -833,6 +955,7 @@ export async function getElementRelations(
     select: {
       id: true,
       name: true,
+      activityId: true,
       activity: { select: { name: true, station: { select: { name: true } } } },
     },
   })
@@ -879,6 +1002,9 @@ export async function getElementRelations(
       otherActivityName: other?.activity.name ?? '؟',
       otherStationName: other?.activity.station.name ?? '؟',
       isActive: r.isActive,
+      // v1.5.0 §۴.۳ — پرچم بین‌فعالیت برای جلوگیری از بازگردانی نامعتبر
+      crossActivity: other != null && other.activityId !== element.activityId,
+      archiveReason: r.archiveReason ?? null,
       latest,
     })
   }

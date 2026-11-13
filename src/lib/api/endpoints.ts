@@ -97,7 +97,6 @@ export interface ElementDto {
   activityId: string
   name: string
   description: string | null
-  elementType: string
   sortOrder: number
   createdAt: string
   updatedAt: string
@@ -287,7 +286,6 @@ export interface RatingMatrixDto {
       elements: {
         id: string
         name: string
-        elementType: string
         rating: { totalFactor: number; ratingTableId: string; ratingTableName: string; ratingTableVersion: number } | null
       }[]
     }[]
@@ -364,6 +362,20 @@ export interface CycleRowDto {
   hasSuspect: boolean
   hasIncompleteInterval: boolean
   observations: ObservationCellDto[]
+  /** v1.5.0 — نسخهٔ مجموعهٔ مقادیر هم‌پوشانی (کنترل هم‌زمانی زیرردیف‌ها) */
+  overlapRevision: number
+  /** v1.5.0 — مقادیر هم‌پوشانی بر اساس relationId؛ نبود کلید = UNREVIEWED */
+  overlaps: Record<string, { status: string; overlapDuration: number | null; version: number }>
+}
+
+/** v1.5.0 — رابطهٔ موازی فعال میان دو عنصرِ همین Activity (زیرردیف برگه §۵) */
+export interface SessionRelationDto {
+  relationId: string
+  elementLowId: string
+  elementHighId: string
+  elementLowName: string
+  elementHighName: string
+  version: number
 }
 
 export interface SessionSheetDto {
@@ -389,10 +401,12 @@ export interface SessionSheetDto {
   elements: {
     id: string
     name: string
-    elementType: string
     sortOrder: number
     defaultEntry: 'SEQ' | 'INT'
+    defaultLaneType: 'OPERATOR' | 'MACHINE'
   }[]
+  /** v1.5.0 — روابط موازی فعال همین Activity؛ زیرردیف‌های برگه (§۵) */
+  parallelRelations: SessionRelationDto[]
   cycles: CycleRowDto[]
   stats: {
     perElement: Record<string, { calcCount: number; excludedCount: number; totalCount: number }>
@@ -407,11 +421,18 @@ export interface PasteCellResultDto {
   colIndex: number
   row: number
   cycleNo: number
+  isNew: boolean
   elementId: string | null
+  relationId: string | null
+  parentElementId: string | null
+  otherElementId: string | null
   rawDuration?: number | null
   cumulativeReading?: number | null
   startOffset?: number | null
   endOffset?: number | null
+  overlapStatus?: 'UNREVIEWED' | 'NO_OVERLAP' | 'OVERLAP'
+  overlapDuration?: number | null
+  computedOverlap?: number | null
   previewDerived?: number | null
   status: 'OK' | 'WARN' | 'ERROR' | 'SKIP'
   message?: string
@@ -419,8 +440,16 @@ export interface PasteCellResultDto {
 
 export interface PastePreviewDto {
   startCycleNo: number
-  startColIndex: number
-  rows: { cycleNo: number; isNew: boolean; cells: PasteCellResultDto[] }[]
+  anchor: { elementId: string; relationId: string | null }
+  rows: {
+    row: number
+    kind: 'ELEMENT' | 'RELATION'
+    elementId: string | null
+    elementName: string | null
+    relationId: string | null
+    otherElementName: string | null
+    cells: PasteCellResultDto[]
+  }[]
   errorCount: number
   warnCount: number
   okCount: number
@@ -487,13 +516,14 @@ export const timingApi = {
 
   pastePreview: (
     sessionId: string,
-    body: { startCycleNo: number; startColIndex: number; data: string[][] }
+    body: { startCycleNo: number; startElementId: string; startRelationId?: string | null; data: string[][] }
   ) => api.post<{ preview: PastePreviewDto }>(`/api/sessions/${sessionId}/paste-preview`, body),
   pasteCommit: (
     sessionId: string,
     body: {
       startCycleNo: number
-      startColIndex: number
+      startElementId: string
+      startRelationId?: string | null
       data: string[][]
       mode: 'ALL_OR_NOTHING' | 'SKIP_INVALID'
     }
@@ -681,7 +711,6 @@ export interface OperatorComparisonRowDto {
 export interface ElementAnalysisItemDto {
   id: string
   name: string
-  elementType: string
   counts: { total: number; calcBasis: number; valid: number; suspect: number; excluded: number; invalid: number }
   stats: StatsDto
   ot: number | null
@@ -751,7 +780,6 @@ export interface ActivityAnalysisDto {
   }
   elements: ElementAnalysisItemDto[]
   cycleStats: { count: number; stats: StatsDto; methodNote: string }
-  elementTypeTotals: { manual: number | null; machine: number | null; waiting: number | null; overlapSum: number | null }
   activityTotal: { st: number | null; status: 'OK' | 'NEEDS_AGGREGATION_RULE' | 'INCOMPLETE'; reason: string }
   suspects: SuspectItem[]
   generatedAt: string
@@ -912,6 +940,8 @@ export interface OverlapRelationDto {
   elementLowId: string
   elementHighId: string
   isActive: boolean
+  /** v1.5.0 §۴.۳ — دلیل آرشیو (مثلاً CROSS_ACTIVITY_NOT_SUPPORTED_BY_SESSION_SHEET) */
+  archiveReason: string | null
   version: number
   createdAt: string
   updatedAt: string
@@ -997,6 +1027,10 @@ export interface ElementRelationRowDto {
   otherActivityName: string
   otherStationName: string
   isActive: boolean
+  /** v1.5.0 §۴.۳ — رابطهٔ بین‌فعالیت (آرشیو؛ بازگردانی ممنوع تا هم‌فعالیت شود) */
+  crossActivity: boolean
+  /** v1.5.0 — دلیل آرشیو در صورت وجود */
+  archiveReason: string | null
   latest: {
     cycleNo: number
     operatorName: string
@@ -1086,7 +1120,6 @@ export interface DashboardOperatorRowDto {
 export interface DashboardElementCvRowDto {
   elementName: string
   activityName: string
-  elementType: string
   cvPercent: number | null
   count: number
   ot: number | null
@@ -1149,7 +1182,6 @@ export interface ReportRatingFactorDto {
 
 export interface ReportElementRowDto {
   name: string
-  elementTypeLabel: string
   counts: { calcBasis: number; suspect: number; excluded: number }
   stats: {
     count: number

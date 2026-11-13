@@ -73,7 +73,6 @@ export interface HistogramBin {
 export interface ElementAnalysisDto {
   id: string
   name: string
-  elementType: string
   counts: { total: number; calcBasis: number; valid: number; suspect: number; excluded: number; invalid: number }
   stats: DescriptiveStats
   /** OT تجمیعی طبق روش انتخابی پروژه — FR-14/۱۰.۱ */
@@ -171,14 +170,9 @@ export interface ActivityAnalysisDto {
     stats: DescriptiveStats
     methodNote: string
   }
-  /** شاخص‌های مجزای زمان دستی/ماشین/انتظار — FR-10 */
-  elementTypeTotals: {
-    manual: number | null
-    machine: number | null
-    waiting: number | null
-    /** جمع مدت عناصر هم‌پوشان — فقط شاخص؛ زمان سپری‌شده نیست */
-    overlapSum: number | null
-  }
+  // v1.5.0 §۳ — elementTypeTotals (شاخص‌های نوع عنصر) حذف شد؛
+  // مفهوم «نوع عنصر کاری» دیگر وجود ندارد و قاعدهٔ NEEDS_AGGREGATION_RULE
+  // از روابط موازی فعال + بازه‌های واقعی + دادهٔ legacy تشخیص داده می‌شود.
   activityTotal: {
     st: number | null
     status: 'OK' | 'NEEDS_AGGREGATION_RULE' | 'INCOMPLETE'
@@ -413,7 +407,6 @@ export async function getActivityAnalysis(activityId: string): Promise<ActivityA
     elementDtos.push({
       id: el.id,
       name: el.name,
-      elementType: el.elementType,
       counts: {
         total: rows.length,
         calcBasis: calcRows.length,
@@ -461,18 +454,7 @@ export async function getActivityAnalysis(activityId: string): Promise<ActivityA
       : 'چرخه‌های ترتیبی: زمان سپری‌شده = جمع مدت عناصر درون محاسبات.',
   }
 
-  // ── شاخص‌های مجزای نوع عنصر — FR-10 ──
-  const sumOt = (type: string): number | null => {
-    const list = elementDtos.filter((e) => e.elementType === type && e.ot !== null)
-    if (list.length === 0) return null
-    return round12(list.reduce((s, e) => s + (e.ot as number), 0))
-  }
-  const elementTypeTotals = {
-    manual: sumOt('MANUAL'),
-    machine: sumOt('MACHINE'),
-    waiting: sumOt('WAITING'),
-    overlapSum: sumOt('OVERLAP'),
-  }
+  // v1.5.0 §۳ — شاخص‌های نوع عنصر حذف شد (elementTypeTotals)
 
   // ── استاندارد کل فعالیت — FR-16/۱۰.۳ + الونس per-cycle (§۳.۲) ──
   // الونس‌های زمانی «هر چرخه» دقیقاً یک‌بار در سطح چرخه اعمال می‌شوند:
@@ -500,10 +482,22 @@ export async function getActivityAnalysis(activityId: string): Promise<ActivityA
     ...[...allowanceResolution.elements.values()].flatMap((res) => res.rows.filter((r) => r.needsAggregationRule)),
   ].map((r) => ({ title: r.title, sourceScopeLabel: r.sourceScopeLabel, timeValueSeconds: r.timeValueSeconds ?? 0 }))
 
-  const hasOverlapElements = activity.workElements.some((e) => e.elementType === 'OVERLAP')
+  // ── قاعدهٔ NEEDS_AGGREGATION_RULE — حفظ منطق (§۱۰ دستورالعمل v1.5.0) ──
+  // v1.5.0: علاوه بر دادهٔ legacy (عنصر نوع OVERLAP) و بازه‌های واقعی،
+  // رابطهٔ موازی فعال میان عناصر فعالیت نیز کار هم‌زمان را نشان می‌دهد.
+  const gateElementIds = activity.workElements.map((e) => e.id)
+  const hasOverlapLegacy = activity.workElements.some((e) => e.elementType === 'OVERLAP')
+  const hasActiveOverlapRelations =
+    gateElementIds.length > 0 &&
+    (await db.overlapRelation.count({
+      where: {
+        isActive: true,
+        AND: [{ elementLowId: { in: gateElementIds } }, { elementHighId: { in: gateElementIds } }],
+      },
+    })) > 0
   const hasAnyInterval = cycles.some((c) => c.observations.some((o) => o.startOffset !== null))
   let activityTotal: ActivityAnalysisDto['activityTotal']
-  if (hasOverlapElements || hasAnyInterval) {
+  if (hasOverlapLegacy || hasActiveOverlapRelations || hasAnyInterval) {
     activityTotal = {
       st: null,
       status: 'NEEDS_AGGREGATION_RULE',
@@ -593,7 +587,6 @@ export async function getActivityAnalysis(activityId: string): Promise<ActivityA
     sampleProgress,
     elements: elementDtos,
     cycleStats,
-    elementTypeTotals,
     activityTotal,
     suspects,
     generatedAt: new Date().toISOString(),

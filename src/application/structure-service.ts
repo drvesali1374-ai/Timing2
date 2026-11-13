@@ -310,13 +310,13 @@ export async function createElement(activityId: string, input: ElementCreateInpu
       activityId,
       name: input.name,
       description: input.description ?? null,
-      elementType: input.elementType,
+      // v1.5.0 §۳ — عنصر جدید بدون «نوع»: ورود ترتیبی و خط اپراتور پیش‌فرض
       sortOrder: (maxOrder._max.sortOrder ?? -1) + 1,
     },
   })
   await recordAudit({
     entityType: 'WorkElement', entityId: element.id, action: 'CREATE', entityName: element.name,
-    after: { name: element.name, elementType: element.elementType }, projectId: activity.station.projectId,
+    after: { name: element.name }, projectId: activity.station.projectId,
   })
   // عنصر جدید بدون داده = فعالیت ناقص در نتایج — FR-27
   await markProjectCalculationsStale(activity.station.projectId)
@@ -334,16 +334,12 @@ export async function updateElement(elementId: string, input: ElementUpdateInput
   const data: Record<string, unknown> = {}
   if (input.name !== undefined) data.name = input.name
   if (input.description !== undefined) data.description = input.description
-  if (input.elementType !== undefined) data.elementType = input.elementType
+  // v1.5.0 §۳ — elementType دیگر پارامتر ویرایش نیست (ستون legacy دست‌نخورده می‌ماند)
   const updated = await db.workElement.update({ where: { id: elementId }, data })
-  // نوع عنصر بر مدل محاسباتی اثر دارد — FR-27
-  if (input.elementType !== undefined) {
-    await markProjectCalculationsStale(existing.activity.station.projectId)
-  }
   await recordAudit({
     entityType: 'WorkElement', entityId: elementId, action: 'UPDATE', entityName: updated.name,
-    before: { name: existing.name, elementType: existing.elementType },
-    after: { name: updated.name, elementType: updated.elementType },
+    before: { name: existing.name, description: existing.description },
+    after: { name: updated.name, description: updated.description },
     projectId: existing.activity.station.projectId,
   })
   return updated
