@@ -86,6 +86,11 @@ export interface ParallelRowModel {
   relationId: string
   otherElementId: string
   otherName: string
+  /** v1.5.1 §۷ — فعالیت/ایستگاه عنصر مقابل (برای برچسب روابط بین‌فعالیت) */
+  otherActivityName: string | null
+  otherStationName: string | null
+  /** v1.5.1 §۷ — آیا عنصر مقابل خارج از Activity این برگه است؟ */
+  crossActivity: boolean
   /** کلید نمایشی §۵.۲: parallel:{relationId}:under:{parentElementId} */
   displayKey: string
 }
@@ -93,7 +98,9 @@ export interface ParallelRowModel {
 export type GridRow = ElementRowModel | ParallelRowModel
 
 /** ساخت ردیف‌های شبکه: عناصر به ترتیب sortOrder + زیرردیف روابط فعال
- *  هر عنصر زیر آن (به ترتیب عنصر مقصد) — §۵.۱/§۹.۱ */
+ *  زیر endpoint حاضر در این Activity (به ترتیب عنصر مقصد) — §۵.۱/§۹.۱.
+ *  v1.5.1 §۷ — روابط بین‌فعالیت فقط زیر endpoint حاضر ساخته می‌شوند؛
+ *  در برگهٔ Activity مقابل، همان relationId زیر endpoint دیگر ظاهر می‌شود. */
 export function buildRows(sheet: SessionSheetDto, columns: ElementColumn[]): GridRow[] {
   const rows: GridRow[] = []
   const byId = new Map(columns.map((c) => [c.id, c]))
@@ -102,21 +109,38 @@ export function buildRows(sheet: SessionSheetDto, columns: ElementColumn[]): Gri
     const rels = sheet.parallelRelations
       .filter((r) => r.elementLowId === col.id || r.elementHighId === col.id)
       .map((r) => {
-        const otherId = r.elementLowId === col.id ? r.elementHighId : r.elementLowId
-        const otherName = r.elementLowId === col.id ? r.elementHighName : r.elementLowName
-        return { r, otherId, otherName, otherSort: byId.get(otherId)?.index ?? 9999 }
+        const isLow = r.elementLowId === col.id
+        const otherId = isLow ? r.elementHighId : r.elementLowId
+        const otherName = isLow ? r.elementHighName : r.elementLowName
+        const otherActivityId = isLow ? r.elementHighActivityId : r.elementLowActivityId
+        const otherActivityName = isLow ? r.elementHighActivityName : r.elementLowActivityName
+        const otherStationName = isLow ? r.elementHighStationName : r.elementLowStationName
+        // روابط بین‌فعالیت (عنصر مقصد خارج از این Activity) پس از روابط داخلی
+        return {
+          r,
+          otherId,
+          otherName,
+          otherActivityId,
+          otherActivityName,
+          otherStationName,
+          crossActivity: otherActivityId !== null && otherActivityId !== sheet.activity.id,
+          otherSort: byId.has(otherId) ? (byId.get(otherId)!.index as number) : 10000,
+        }
       })
       .sort((a, b) => a.otherSort - b.otherSort)
-    for (const { r, otherId, otherName } of rels) {
+    for (const rel of rels) {
       rows.push({
         kind: 'PARALLEL',
         parentElementId: col.id,
         parentElementIndex: col.index,
         parentName: col.name,
-        relationId: r.relationId,
-        otherElementId: otherId,
-        otherName,
-        displayKey: `parallel:${r.relationId}:under:${col.id}`,
+        relationId: rel.r.relationId,
+        otherElementId: rel.otherId,
+        otherName: rel.otherName,
+        otherActivityName: rel.otherActivityName,
+        otherStationName: rel.otherStationName,
+        crossActivity: rel.crossActivity,
+        displayKey: `parallel:${rel.r.relationId}:under:${col.id}`,
       })
     }
   }

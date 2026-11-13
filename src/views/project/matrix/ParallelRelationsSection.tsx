@@ -1,10 +1,12 @@
 'use client'
 
 // ═══════════════════════════════════════════════════════════
-// بخش «عناصر موازی» در فرم ویرایش عنصر کاری — v1.5.0 §۴
+// بخش «عناصر موازی» در فرم ویرایش عنصر کاری — v1.5.0 §۴ / v1.5.1 §۲
 // این فرم فقط تعریف‌کنندهٔ رابطه است؛ نه محل اندازه‌گیری.
 // ثبت/ویرایش مقدار هم‌پوشانی فقط در برگهٔ زمان‌سنجی (زیرردیف‌ها)
 // انجام می‌شود — QuickValueEditor و هرگونه ورودی مقدار حذف شد.
+// v1.5.1 — نامزدها: تمام عناصر «همان پروژه» (هر Activity/Station)؛
+// هویت فقط با شناسه‌های واقعی (elementId/activityId/stationId) تعیین می‌شود.
 // ═══════════════════════════════════════════════════════════
 import { useQuery } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
@@ -56,14 +58,14 @@ export default function ParallelRelationsSection({
   // §۶ ممیزی جلسه ۲ — برچسب صریح دامنهٔ «آخرین ثبت»
   const latestScopeLabel = sessionId ? 'آخرین ثبت در این جلسه' : 'آخرین ثبت در کل پروژه'
 
-  // §۴.۳ — نامزدها: فقط عناصر همین فعالیت، بدون خود عنصر و بدون رابطهٔ فعال تکراری
-  const ownActivityName = catalogQ.data?.elementsCatalog.find((c) => c.elementId === elementId)?.activityName
+  // v1.5.1 §۲ — نامزدها: تمام عناصر «همان پروژه» (هر Activity و هر Station)؛
+  // بدون خود عنصر و بدون رابطهٔ فعال تکراری. هویت فقط بر اساس شناسهٔ واقعی —
+  // مقایسهٔ نام فعالیت هرگز مبنای فیلتر نیست (فعالیت‌های هم‌نام اشتباه نمی‌شوند).
+  const ownEntry = catalogQ.data?.elementsCatalog.find((c) => c.elementId === elementId)
+  const ownActivityId = ownEntry?.activityId ?? null
   const activeOtherIds = new Set(rows.map((r) => r.otherElementId))
   const candidates = (catalogQ.data?.elementsCatalog ?? []).filter(
-    (c) =>
-      c.elementId !== elementId &&
-      c.activityName === ownActivityName &&
-      !activeOtherIds.has(c.elementId)
+    (c) => c.elementId !== elementId && !activeOtherIds.has(c.elementId)
   )
 
   return (
@@ -81,10 +83,13 @@ export default function ParallelRelationsSection({
             projectId={projectId}
             elementId={elementId}
             elementName={elementName}
+            currentActivityId={ownActivityId}
             candidates={candidates.map((c) => ({
               elementId: c.elementId,
               name: c.name,
+              activityId: c.activityId,
               activityName: c.activityName,
+              stationId: c.stationId,
               stationName: c.stationName,
             }))}
           />
@@ -109,7 +114,17 @@ export default function ParallelRelationsSection({
             <li key={r.relationId} className="rounded-lg bg-card p-2.5">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-bold">{r.otherElementName}</p>
+                  <p className="flex items-center gap-1.5 truncate text-sm font-bold">
+                    {r.otherElementName}
+                    {r.crossActivity && (
+                      <span
+                        className="shrink-0 rounded-md border border-amber/70 bg-amber-soft/40 px-1 py-px text-[9px] font-bold"
+                        title="رابطهٔ بین‌فعالیت — عنصر مقابل در فعالیت دیگری از همین پروژه است"
+                      >
+                        بین‌فعالیت
+                      </span>
+                    )}
+                  </p>
                   <p className="truncate text-[11px] text-muted-foreground">
                     {r.otherActivityName} / {r.otherStationName}
                   </p>

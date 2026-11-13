@@ -40,6 +40,8 @@ interface MobileSheetProps {
   columns: ElementColumn[]
   prefs: Prefs
   editable: boolean
+  /** v1.5.1 §۴ — کاتالوگ کامل عناصر پروژه؛ همان منبع دسکتاپ (نه منطق انتخاب مستقل) */
+  projectCatalog: Array<{ elementId: string; name: string; activityId: string; activityName: string; stationId: string; stationName: string }>
   commitCell: (cycle: CycleRowDto, column: ElementColumn, payload: CellPayload) => void
   commitOverlap: (relationId: string, cycle: CycleRowDto, state: OverlapCellState) => void
   onCellError: (key: string, message: string) => void
@@ -55,6 +57,7 @@ export function MobileSheet({
   columns,
   prefs,
   editable,
+  projectCatalog,
   commitCell,
   commitOverlap,
   onCellError,
@@ -75,7 +78,15 @@ export function MobileSheet({
     () => new Map(sheet.parallelRelations.map((r) => [r.relationId, r])),
     [sheet.parallelRelations]
   )
-  const nameOf = (id: string) => sheet.elements.find((e) => e.id === id)?.name ?? '؟'
+  // v1.5.1 §۷ — نام عناصر خارج از Activity جاری نیز از روابط برگه حل می‌شود
+  const nameOf = (id: string) =>
+    sheet.elements.find((e) => e.id === id)?.name ??
+    sheet.parallelRelations.reduce<string>((acc, r) => {
+      if (acc !== '؟') return acc
+      if (r.elementLowId === id) return r.elementLowName
+      if (r.elementHighId === id) return r.elementHighName
+      return acc
+    }, '؟')
 
   return (
     <div className="space-y-3">
@@ -145,6 +156,7 @@ export function MobileSheet({
                     prefs={prefs}
                     editable={editable}
                     method={method}
+                    projectCatalog={projectCatalog}
                     commitCell={commitCell}
                     onCellError={onCellError}
                     onOpenDiag={(cycle, obs) => setDiagTarget({ cycle, obs, elementName: row.name })}
@@ -247,6 +259,7 @@ function MobileElementRow({
   prefs,
   editable,
   method,
+  projectCatalog,
   commitCell,
   onCellError,
   onOpenDiag,
@@ -258,31 +271,36 @@ function MobileElementRow({
   prefs: Prefs
   editable: boolean
   method: 'SNAPBACK' | 'CONTINUOUS'
+  projectCatalog: Array<{ elementId: string; name: string; activityId: string; activityName: string; stationId: string; stationName: string }>
   commitCell: (cycle: CycleRowDto, column: ElementColumn, payload: CellPayload) => void
   onCellError: (key: string, message: string) => void
   onOpenDiag: (cycle: CycleRowDto, obs: ObservationCellDto) => void
 }) {
+  // v1.5.1 §۴ — همان فهرست کامل عناصر پروژه که دسکتاپ استفاده می‌کند؛
+  // بدون عنصر جاری و بدون رابطهٔ فعال تکراری (منطق انتخاب مستقل ندارد).
   const candidates = useMemo(
     () =>
       column
-        ? sheet.elements
+        ? projectCatalog
             .filter(
-              (e) =>
-                e.id !== column.id &&
+              (c) =>
+                c.elementId !== column.id &&
                 !sheet.parallelRelations.some(
                   (r) =>
-                    (r.elementLowId === column.id && r.elementHighId === e.id) ||
-                    (r.elementHighId === column.id && r.elementLowId === e.id)
+                    (r.elementLowId === column.id && r.elementHighId === c.elementId) ||
+                    (r.elementHighId === column.id && r.elementLowId === c.elementId)
                 )
             )
-            .map((e) => ({
-              elementId: e.id,
-              name: e.name,
-              activityName: sheet.activity.name,
-              stationName: sheet.activity.stationName,
+            .map((c) => ({
+              elementId: c.elementId,
+              name: c.name,
+              activityId: c.activityId,
+              activityName: c.activityName,
+              stationId: c.stationId,
+              stationName: c.stationName,
             }))
         : [],
-    [column, sheet]
+    [column, projectCatalog, sheet.parallelRelations]
   )
 
   if (!column) return null
@@ -307,12 +325,13 @@ function MobileElementRow({
               projectId={sheet.activity.projectId}
               elementId={row.elementId}
               elementName={row.name}
+              currentActivityId={sheet.activity.id}
               candidates={candidates}
               trigger={
                 <button
                   type="button"
                   aria-label={`افزودن عنصر موازی برای ${row.name}`}
-                  title="افزودن رابطهٔ موازی — فقط عناصر همین فعالیت"
+                  title="افزودن رابطهٔ موازی — عناصر همهٔ فعالیت‌های پروژه"
                   className="flex size-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors active:bg-brand-soft active:text-brand"
                 >
                   <CornerDownRight className="size-4 rotate-90" aria-hidden />
@@ -502,8 +521,19 @@ function MobileParallelRow({
         <div className="flex items-center justify-between gap-1">
           <div className="flex min-w-0 items-center gap-1">
             <span className="h-4 w-2 shrink-0 rounded-e border-b-2 border-l-2 border-brand/30" aria-hidden />
-            <p className="truncate text-[10px] font-bold text-muted-foreground" title={`هم‌پوشانی با ${row.otherName}`}>
-              ↳ {row.otherName}
+            <p
+              className="flex min-w-0 items-center gap-1 truncate text-[10px] font-bold text-muted-foreground"
+              title={`هم‌پوشانی با ${row.otherName}${row.crossActivity ? ` (فعالیت ${row.otherActivityName ?? '؟'} / ایستگاه ${row.otherStationName ?? '؟'})` : ''}`}
+            >
+              <span className="truncate">↳ {row.otherName}</span>
+              {row.crossActivity && (
+                <span
+                  className="shrink-0 rounded-md border border-amber/70 bg-amber-soft/40 px-1 py-px text-[8px] font-bold"
+                  title={`رابطهٔ بین‌فعالیت — «${row.otherActivityName ?? '؟'}» / «${row.otherStationName ?? '؟'}»`}
+                >
+                  بین‌فعالیت
+                </span>
+              )}
             </p>
           </div>
           {editable && (

@@ -316,14 +316,229 @@ async function main() {
       const sh2f = (await req('GET', `/api/sessions/${session2}`)).data.sheet
       check('برگهٔ اپراتور ۱ رابطهٔ جدید را می‌بیند', sh1f.parallelRelations.some((r: any) => r.relationId === relCL.data.relation.id))
       check('برگهٔ اپراتور ۲ نیز همان رابطه را می‌بیند (§۷)', sh2f.parallelRelations.some((r: any) => r.relationId === relCL.data.relation.id))
-      // رابطهٔ تکراری رد می‌شود؛ خود-رابطه رد می‌شود؛ بین‌فعالیت رد می‌شود
+      // رابطهٔ تکراری رد می‌شود؛ خود-رابطه رد می‌شود؛ بین‌فعالیت مجاز است (v1.5.1)
       const dup = await req('POST', `/api/projects/${projectId}/overlap/relations`, { elementAId: cId, elementBId: legacyEl.id })
       check('رابطهٔ تکراری رد شد', dup.status === 422)
       const self = await req('POST', `/api/projects/${projectId}/overlap/relations`, { elementAId: cId, elementBId: cId })
       check('خود-رابطه رد شد', self.status === 422)
-      const zEl = (await req('POST', `/api/activities/${activity2Id}/elements`, { name: 'عنصر Z فعالیت ۲' })).data.element
-      const cross = await req('POST', `/api/projects/${projectId}/overlap/relations`, { elementAId: cId, elementBId: zEl.id })
-      check('رابطهٔ بین‌فعالیت رد شد (§۴.۳)', cross.status === 422, `status=${cross.status}`)
+    }
+
+    // ── §۱۳.۱۰ v1.5.1 — روابط موازی بین‌فعالیت (Cross-Activity) ──
+    console.log('── §۱۳.۱۰ روابط بین‌فعالیت — fixture سه‌فعالیتی')
+    {
+      // Fixture: ۳ Activity (A و B در ایستگاه ۱؛ C در ایستگاه ۲) —
+      // A: A1(=aId),A2(=legacy) / B: B1,B2 / C: C1 + دو اپراتور + چند چرخه برای هر Session
+      const st2 = await req('POST', `/api/projects/${projectId}/stations`, { name: 'ایستگاه ۲' })
+      const station2Id = st2.data.station.id
+      const actA = activityId // «فعالیت مونتاژ» موجود
+      const actB = activity2Id // «فعالیت دیگر» موجود
+      const actC = (await req('POST', `/api/stations/${station2Id}/activities`, { name: 'فعالیت مونتاژ', processType: 'OPERATION' })).data.activity.id
+      // فعالیتی هم‌نام با actB برای اثبات فیلتر شناسه‌محور (نه نام‌محور)
+      const actB2 = (await req('POST', `/api/stations/${st.data.station.id}/activities`, { name: 'فعالیت دیگر', processType: 'OPERATION' })).data.activity.id
+
+      const actAElList = (await req('GET', `/api/activities/${actA}/elements`)).data.elements
+      const A1 = aId, A2 = actAElList.find((e: any) => e.name === 'عنصر legacy').id // هر دو در Activity A — زوج هم‌فعالیتِ جدید
+      const B1 = (await req('POST', `/api/activities/${actB}/elements`, { name: 'عنصر B1' })).data.element.id
+      const B2 = (await req('POST', `/api/activities/${actB}/elements`, { name: 'عنصر B2' })).data.element.id
+      const C1 = (await req('POST', `/api/activities/${actC}/elements`, { name: 'عنصر C1' })).data.element.id
+      const NB1 = (await req('POST', `/api/activities/${actB2}/elements`, { name: 'عنصر B1' })).data.element.id // هم‌نام با B1
+
+      const ops = (await req('GET', `/api/projects/${projectId}/operators`)).data.items
+      const opId1 = ops[0].id
+      const opId2 = ops[1].id
+      const mkSession = async (actId: string, operatorId: string) =>
+        (await req('POST', `/api/activities/${actId}/sessions`, { operatorId, timingMethod: 'SNAPBACK' })).data.session.id
+      const sA1 = await mkSession(actA, opId1)
+      const sA2 = await mkSession(actA, opId2) // همهٔ اپراتورهای فعالیت A
+      const sB1 = await mkSession(actB, opId1)
+      const sB2 = await mkSession(actB, opId2)
+      const sC1 = await mkSession(actC, opId1)
+      for (const s of [sA1, sA2, sB1, sB2, sC1]) await req('POST', `/api/sessions/${s}/cycles`, { count: 2 })
+
+      // ── انتخاب‌گرها (سطح DTO — همان داده‌ای که UI می‌خواند) ──
+      console.log('── §۱۳.۱۰-۱ انتخاب‌گرها')
+      {
+        const m = (await req('GET', `/api/projects/${projectId}/overlap/matrix`)).data
+        const catalog = m.elementsCatalog as Array<{ elementId: string; activityId: string; activityName: string; stationId: string }>
+        // فرم A1 (ParallelRelationsSection) و جدول زمان‌سنجی و موبایل و MatrixView —
+        // همه از همین کاتالوگ کامل پروژه می‌خوانند (v1.5.1 §۲–§۵):
+        const selectableForA1 = catalog.filter((c) => c.elementId !== A1)
+        check('فرم/جدول A1: عناصر فعالیت B قابل انتخاب‌اند', selectableForA1.some((c) => c.elementId === B1 && c.activityId === actB))
+        check('فرم/جدول A1: عناصر فعالیت C (ایستگاه دیگر) قابل انتخاب‌اند', selectableForA1.some((c) => c.elementId === C1 && c.activityId === actC))
+        check('فرم/جدول A1: عنصر خود A1 در نامزدها نیست', !selectableForA1.some((c) => c.elementId === A1))
+        const sameNamed = catalog.filter((c) => c.activityName === 'فعالیت دیگر')
+        check('فعالیت‌های هم‌نام با شناسهٔ متفاوت تفکیک می‌شوند', sameNamed.length === 3 && new Set(sameNamed.map((c) => c.activityId)).size === 2)
+        check('کاتالوگ ماتریس شامل همهٔ ایستگاه‌هاست', new Set(catalog.map((c) => c.stationId)).size === 2)
+        check('عنصر هم‌نام NB1 با شناسهٔ مستقل در کاتالوگ است', catalog.some((c) => c.elementId === NB1) && NB1 !== B1)
+      }
+
+      // ── API و سرویس ──
+      console.log('── §۱۳.۱۰-۲ API و سرویس')
+      {
+        const relA1A2 = await req('POST', `/api/projects/${projectId}/overlap/relations`, { elementAId: A1, elementBId: A2 })
+        check('رابطهٔ هم‌فعالیت A1-A2 موفق', relA1A2.status === 201, `status=${relA1A2.status}`)
+        const relA1B1 = await req('POST', `/api/projects/${projectId}/overlap/relations`, { elementAId: A1, elementBId: B1 })
+        check('ایجاد رابطهٔ بین‌فعالیت A1-B1 موفق (v1.5.1 §۶)', relA1B1.status === 201, `status=${relA1B1.status}`)
+        const relB1C1 = await req('POST', `/api/projects/${projectId}/overlap/relations`, { elementAId: B1, elementBId: C1 })
+        check('ایجاد رابطه با دو Station متفاوت (B1-C1) موفق', relB1C1.status === 201, `status=${relB1C1.status}`)
+        const selfX = await req('POST', `/api/projects/${projectId}/overlap/relations`, { elementAId: B1, elementBId: B1 })
+        check('خود-رابطه رد شد', selfX.status === 422)
+        // عنصر پروژهٔ دیگر → رد
+        const proj2 = await req('POST', '/api/projects', { name: 'پروژهٔ دیگر v1.5.1', lineName: 'خط', productName: 'محصول', studyDate: '2026-01-01' })
+        const projectId2 = proj2.data.project.id
+        const stP2 = (await req('POST', `/api/projects/${projectId2}/stations`, { name: 'ایستگاه پ۲' })).data.station.id
+        const actP2 = (await req('POST', `/api/stations/${stP2}/activities`, { name: 'فعالیت پ۲', processType: 'OPERATION' })).data.activity.id
+        const elP2 = (await req('POST', `/api/activities/${actP2}/elements`, { name: 'عنصر پروژهٔ دیگر' })).data.element.id
+        const wrongProj = await req('POST', `/api/projects/${projectId}/overlap/relations`, { elementAId: A1, elementBId: elP2 })
+        check('رابطه با عنصر پروژهٔ دیگر رد شد', wrongProj.status === 422, `status=${wrongProj.status}`)
+        const dupX = await req('POST', `/api/projects/${projectId}/overlap/relations`, { elementAId: B1, elementBId: A1 })
+        check('رابطهٔ تکراری (معکوس) رد شد', dupX.status === 422)
+        // canonical — یک رکورد، low/high مرتب
+        check('رابطهٔ A1-B1 canonical است (low < high)', relA1B1.data.relation.elementLowId < relA1B1.data.relation.elementHighId)
+
+        // آرشیو و بازگردانی رابطهٔ بین‌فعالیت
+        const arch = await req('PATCH', `/api/overlap-relations/${relB1C1.data.relation.id}`, { action: 'archive' })
+        check('آرشیو رابطهٔ بین‌فعالیت (B1-C1) موفق', arch.status === 200 && arch.data.relation.isActive === false)
+        const rest = await req('PATCH', `/api/overlap-relations/${relB1C1.data.relation.id}`, { action: 'restore' })
+        check('بازگردانی رابطهٔ بین‌فعالیت موفق (v1.5.1 §۶)', rest.status === 200 && rest.data.relation.isActive === true, `status=${rest.status}`)
+
+        // روابط تاریخی آرشیوشده با دلیل CROSS_ACTIVITY نیز قابل بازگردانی‌اند
+        // (معادل دادهٔ قدیمی پس از مهاجرت v1.5.0 — B2 و C1 دو فعالیتِ همین پروژه)
+        const { db } = await import('@prisma/client').then((m) => ({ db: new m.PrismaClient() }))
+        const legacyLow = B2 < C1 ? B2 : C1
+        const legacyHigh = B2 < C1 ? C1 : B2
+        const legacyRow = await db.overlapRelation.create({
+          data: { projectId, elementLowId: legacyLow, elementHighId: legacyHigh, isActive: false, archiveReason: 'CROSS_ACTIVITY_NOT_SUPPORTED_BY_SESSION_SHEET' },
+        })
+        const restLegacy = await req('PATCH', `/api/overlap-relations/${legacyRow.id}`, { action: 'restore' })
+        check('بازگردانی رابطهٔ آرشیوشدهٔ قدیمی (دلیل CROSS_ACTIVITY) موفق', restLegacy.status === 200 && restLegacy.data.relation.isActive === true, `status=${restLegacy.status}`)
+        await db.overlapRelation.delete({ where: { id: legacyRow.id } })
+        await db.$disconnect()
+
+        // ── نمایش دوطرفه ──
+        console.log('── §۱۳.۱۰-۳ نمایش دوطرفه')
+        const relIdA1B1 = relA1B1.data.relation.id
+        const formA1 = (await req('GET', `/api/elements/${A1}/relations`)).data
+        const formB1 = (await req('GET', `/api/elements/${B1}/relations`)).data
+        check('رابطهٔ A1-B1 در فرم A1 دیده می‌شود', formA1.rows.some((r: any) => r.relationId === relIdA1B1))
+        check('همان رابطه در فرم B1 دیده می‌شود', formB1.rows.some((r: any) => r.relationId === relIdA1B1))
+        check('relationId واحد در هر دو فرم (دیگر side = عنصر مقابل)', formA1.rows.find((r: any) => r.relationId === relIdA1B1)?.otherElementId === B1 && formB1.rows.find((r: any) => r.relationId === relIdA1B1)?.otherElementId === A1)
+        check('فرم A1 برچسب بین‌فعالیت دارد (crossActivity)', formA1.rows.find((r: any) => r.relationId === relIdA1B1)?.crossActivity === true)
+
+        const shA1 = (await req('GET', `/api/sessions/${sA1}`)).data.sheet
+        const shA2 = (await req('GET', `/api/sessions/${sA2}`)).data.sheet
+        const shB1 = (await req('GET', `/api/sessions/${sB1}`)).data.sheet
+        const shB2 = (await req('GET', `/api/sessions/${sB2}`)).data.sheet
+        const shC1 = (await req('GET', `/api/sessions/${sC1}`)).data.sheet
+        const relIn = (sh: any) => sh.parallelRelations.find((r: any) => r.relationId === relIdA1B1)
+        check('برگهٔ Activity A (اپراتور ۱) زیرردیف A1-B1 دارد', !!relIn(shA1))
+        check('برگهٔ Activity A (اپراتور ۲) نیز همان رابطه را دارد', !!relIn(shA2))
+        check('برگهٔ Activity B (اپراتور ۱) همان relationId را دارد', relIn(shB1)?.relationId === relIdA1B1)
+        check('برگهٔ Activity B (اپراتور ۲) نیز همان relationId را دارد', relIn(shB2)?.relationId === relIdA1B1)
+        check('برگهٔ Activity C رابطهٔ A1-B1 را نمی‌بیند (هیچ endpoint ندارد)', !relIn(shC1))
+        // DTO هر دو endpoint را با نام/فعالیت/ایستگاه کامل دارد (§۷)
+        const relDto = relIn(shB1)
+        check('DTO روابط: نام هر دو endpoint (بدون «؟»)', relDto && relDto.elementLowName && relDto.elementHighName && ![relDto.elementLowName, relDto.elementHighName].includes('؟'))
+        check('DTO روابط: فعالیت/ایستگاه هر دو endpoint', relDto && relDto.elementLowActivityName && relDto.elementHighActivityName && relDto.elementLowStationName && relDto.elementHighStationName)
+        check('DTO روابط: شناسهٔ فعالیت‌ها موجود است', relDto && relDto.elementLowActivityId && relDto.elementHighActivityId)
+        // زیرردیف فقط زیر endpoint حاضر است — عنصر خارجی ستون/WorkElement نیست
+        check('عناصر برگهٔ A همان فعالیت A است (B1 ستون نیست)', !shA1.elements.some((e: any) => e.id === B1))
+        check('عناصر برگهٔ B همان فعالیت B است (A1 ستون نیست)', !shB1.elements.some((e: any) => e.id === A1))
+        // هیچ WorkElement جدید ساخته نشد
+        const workCountA = (await req('GET', `/api/activities/${actA}/elements`)).data.elements.length
+        const workCountB = (await req('GET', `/api/activities/${actB}/elements`)).data.elements.length
+        check('WorkElement جدید ساخته نشد (فعالیت A: ۴ عنصر)', workCountA === 4, `count=${workCountA}`)
+        check('WorkElement جدید ساخته نشد (فعالیت B: ۲ عنصر)', workCountB === 2, `count=${workCountB}`)
+        // هیچ رکورد معکوس — دقیقاً یک رکورد فعال برای زوج A1-B1
+        const relsAll = (await req('GET', `/api/projects/${projectId}/overlap/relations`)).data.relations
+        check('هیچ رکورد رابطهٔ معکوس ساخته نشد', relsAll.filter((r: any) => r.isActive && ((r.elementLowId === A1 && r.elementHighId === B1) || (r.elementLowId === B1 && r.elementHighId === A1))).length === 1)
+
+        // ── مقایسه‌پذیری ──
+        console.log('── §۱۳.۱۰-۴ مقایسه‌پذیری چرخه‌ای')
+        {
+          // در چرخهٔ ۱ جلسهٔ sA1 فقط A1 مشاهده دارد — B1 هرگز در این چرخه نیست
+          const cycA = shA1.cycles[0]
+          await req('PUT', `/api/cycles/${cycA.id}/cells`, { cells: [{ cycleId: cycA.id, workElementId: A1, rawDuration: 10 }] })
+          const tryDef = await req('PUT', `/api/cycles/${cycA.id}/overlaps`, {
+            updates: [{ relationId: relIdA1B1, status: 'OVERLAP', overlapDuration: 3 }],
+          })
+          check('ثبت مقدار قطعی برای زوج بین‌فعالیت بدون مشاهدهٔ B1 → 422', tryDef.status === 422 && String(tryDef.data?.error?.message ?? '').includes('قابل‌مقایسه'), `status=${tryDef.status}`)
+          const tryNo = await req('PUT', `/api/cycles/${cycA.id}/overlaps`, {
+            updates: [{ relationId: relIdA1B1, status: 'NO_OVERLAP' }],
+          })
+          check('ثبت NO_OVERLAP جعلی نیز رد شد (نه صفر، نه مقدار ساختگی)', tryNo.status === 422, `status=${tryNo.status}`)
+          // ماتریس: comparability دلیل فارسی دقیق دارد
+          const mCmp = (await req('GET', `/api/projects/${projectId}/overlap/matrix?cycleId=${cycA.id}`)).data
+          const cmp = mCmp.comparability[relIdA1B1]
+          check('ماتریس: زوج بین‌فعالیت غیرقابل‌مقایسه با دلیل فارسی', cmp && cmp.isComparable === false && /قابل‌مقایسه نیست/.test(cmp.notComparableReason ?? ''), JSON.stringify(cmp).slice(0, 120))
+
+          // حالت قابل‌مقایسه واقعی: هر دو endpoint در «یک چرخه» — با زوج هم‌فعالیت
+          // A1-A2 همان قواعد قبلی Solver/بازهٔ واقعی را دنبال می‌کند:
+          const cycA2 = shA1.cycles[1]
+          await req('PUT', `/api/cycles/${cycA2.id}/cells`, {
+            cells: [
+              { cycleId: cycA2.id, workElementId: A1, startOffset: 0, endOffset: 10 },
+              { cycleId: cycA2.id, workElementId: A2, startOffset: 4, endOffset: 10 },
+            ],
+          })
+          const badVal = await req('PUT', `/api/cycles/${cycA2.id}/overlaps`, {
+            updates: [{ relationId: relA1A2.data.relation.id, status: 'OVERLAP', overlapDuration: 3 }],
+          })
+          check('رابطهٔ هم‌فعالیت: تعارض با بازهٔ واقعی (۶) → 422 (قواعد قبلی)', badVal.status === 422, `status=${badVal.status}`)
+          const okVal = await req('PUT', `/api/cycles/${cycA2.id}/overlaps`, {
+            updates: [{ relationId: relA1A2.data.relation.id, status: 'OVERLAP', overlapDuration: 6 }],
+          })
+          check('رابطهٔ هم‌فعالیت: مقدار مطابق بازهٔ واقعی پذیرفته شد', okVal.status === 200)
+        }
+
+        // ── حفظ داده: آرشیو/بازگردانی رابطهٔ بین‌فعالیت + Import بسته ──
+        console.log('── §۱۳.۱۰-۵ حفظ دادهٔ تاریخی')
+        {
+          const valsBefore = await req('GET', `/api/projects/${projectId}/overlap/matrix?cycleId=${shA1.cycles[1].id}`)
+          const archA1B1 = await req('PATCH', `/api/overlap-relations/${relIdA1B1}`, { action: 'archive' })
+          check('آرشیو A1-B1 موفق', archA1B1.status === 200 && archA1B1.data.relation.isActive === false)
+          const shA1Arch = (await req('GET', `/api/sessions/${sA1}`)).data.sheet
+          check('پس از آرشیو، زیرردیف A1-B1 از برگهٔ A حذف شد', !shA1Arch.parallelRelations.some((r: any) => r.relationId === relIdA1B1))
+          const shB1Arch = (await req('GET', `/api/sessions/${sB1}`)).data.sheet
+          check('پس از آرشیو، زیرردیف از برگهٔ B نیز حذف شد (هر دو سمت)', !shB1Arch.parallelRelations.some((r: any) => r.relationId === relIdA1B1))
+          const restA1B1 = await req('PATCH', `/api/overlap-relations/${relIdA1B1}`, { action: 'restore' })
+          check('بازگردانی A1-B1 موفق', restA1B1.status === 200 && restA1B1.data.relation.isActive === true)
+          const valsAfter = await req('GET', `/api/projects/${projectId}/overlap/matrix?cycleId=${shA1.cycles[1].id}`)
+          const beforeKeys = Object.keys((valsBefore.data as any).cells).sort()
+          const afterKeys = Object.keys((valsAfter.data as any).cells).sort()
+          check('مقادیر تاریخی چرخه‌ها پس از آرشیو/بازگردانی تغییر نکرد', JSON.stringify(beforeKeys) === JSON.stringify(afterKeys) && beforeKeys.length > 0)
+
+          // Import بستهٔ حاوی رابطه‌های بین‌فعالیت فعال → روابط فعال می‌مانند
+          const exp = await req('GET', `/api/projects/${projectId}/export`)
+          const imp = await req('POST', '/api/projects/import', exp.data)
+          check('Import بستهٔ دارای رابطهٔ بین‌فعالیت موفق', imp.status === 201 || imp.status === 200, `status=${imp.status}`)
+          if (imp.status === 201 || imp.status === 200) {
+            const newPid = imp.data.projectId ?? imp.data.project?.id
+            const mNew = (await req('GET', `/api/projects/${newPid}/overlap/matrix`)).data
+            const actOfNew = new Map<string, string>(mNew.elementsCatalog.map((c: any) => [c.elementId, c.activityId]))
+            const activeRels = mNew.relations.filter((r: any) => r.isActive)
+            const activeCross = activeRels.filter((r: any) => actOfNew.get(r.elementLowId) !== actOfNew.get(r.elementHighId))
+            // ۶ رابطهٔ فعال: A-B، A-C، C-legacy، A1-A2، A1-B1، B1-C1
+            check('Import بستهٔ قدیمی: تعداد روابط فعال حفظ شد (۶)', activeRels.length === 6, `count=${activeRels.length}`)
+            check('Import بستهٔ قدیمی: روابط بین‌فعالیت فعال باقی ماندند (۲)', activeCross.length === 2, `cross=${activeCross.length}`)
+            await req('DELETE', `/api/projects/${newPid}`)
+          }
+
+          // Import مکرر (مهاجرت دوباره): رابطه‌ها همچنان فعال، مقدارها دست‌نخورده
+          const imp2 = await req('POST', '/api/projects/import', exp.data)
+          if (imp2.status === 201 || imp2.status === 200) {
+            const pid2b = imp2.data.projectId ?? imp2.data.project?.id
+            const m2b = (await req('GET', `/api/projects/${pid2b}/overlap/matrix`)).data
+            const actOf2b = new Map<string, string>(m2b.elementsCatalog.map((c: any) => [c.elementId, c.activityId]))
+            const active2b = m2b.relations.filter((r: any) => r.isActive)
+            const cross2b = active2b.filter((r: any) => actOf2b.get(r.elementLowId) !== actOf2b.get(r.elementHighId))
+            check('مهاجرت/Import مکرر: رابطه‌های بین‌فعالیت فعال ماندند', cross2b.length === 2, `cross=${cross2b.length}`)
+            await req('DELETE', `/api/projects/${pid2b}`)
+          }
+          // پاک‌سازی پروژهٔ دوم
+          await req('DELETE', `/api/projects/${projectId2}`)
+        }
+      }
     }
   }
 

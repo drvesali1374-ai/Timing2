@@ -104,6 +104,20 @@ export function SheetPanel({
   })
   const sheet = data?.sheet
 
+  // v1.5.1 §۳/§۴ — کاتالوگ کامل عناصر پروژه (batch، سبک — بدون چرخه)؛
+  // منبع واحد نامزدهای «+ موازی» در دسکتاپ و موبایل و برای هر دو طرف رابطه.
+  // با هر تغییر رابطه (useRelationInvalidation) این کش هم باطل می‌شود.
+  const projectId = sheet?.activity.projectId ?? null
+  const catalogQ = useQuery({
+    queryKey: projectId ? qk.overlapMatrix(projectId, null) : ['overlap-matrix', 'none'],
+    queryFn: () => overlapApi.matrix(projectId as string, null),
+    enabled: !!projectId,
+  })
+  const projectCatalog = useMemo(
+    () => catalogQ.data?.elementsCatalog ?? [],
+    [catalogQ.data]
+  )
+
   // ── به‌روزرسانی برگه از پاسخ‌های API ──
   const onSheet = useCallback(
     (s: SessionSheetDto) => {
@@ -666,6 +680,7 @@ export function SheetPanel({
           columns={columns}
           prefs={prefs}
           editable={editable}
+          projectCatalog={projectCatalog}
           commitCell={commitCell}
           commitOverlap={commitOverlap}
           onCellError={onCellError}
@@ -681,6 +696,7 @@ export function SheetPanel({
           columns={columns}
           prefs={prefs}
           editable={editable}
+          projectCatalog={projectCatalog}
           onToggleEntryMode={(elementId) =>
             setEntryOverrides((s) => ({
               ...s,

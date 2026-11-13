@@ -517,26 +517,29 @@
       U.h('summary', null, 'روابط آرشیوشده (' + U.formatInt(archived.length) + ')'));
     var ul = U.h('ul', { class: 'list-none flex flex-col gap-1.5', style: { marginTop: '8px' } });
     archived.forEach(function (r) {
-      // v1.5.0 §۴.۳ — رابطهٔ بین‌فعالیت تا هم‌فعالیت‌شدن عناصر قابل بازگردانی نیست
+      // v1.5.1 §۶ — دلیل آرشیو CROSS_ACTIVITY فقط برچسب اطلاعاتی است؛
+      // بازگردانی رابطهٔ بین‌فعالیت مجاز است و دیگر مسدود نمی‌شود.
       var crossActivity = r.archiveReason === 'CROSS_ACTIVITY_NOT_SUPPORTED_BY_SESSION_SHEET';
       ul.appendChild(U.h('li', { class: 'mx-archived-row' },
         U.h('span', { class: 'text-muted truncate', text: nameOf(r.elementLowId) + ' ↔ ' + nameOf(r.elementHighId) + (crossActivity ? ' — بین‌فعالیت' : '') }),
-        crossActivity
-          ? U.h('span', {
-              class: 'text-muted', style: { fontSize: '10px' },
-              title: 'رابطهٔ بین‌فعالیت تا زمانی که هر دو عنصر در یک فعالیت نباشند قابل بازگردانی نیست.',
-              text: 'بازگردانی ممنوع',
-            })
-          : U.h('button', {
-              class: 'btn btn-outline btn-sm', type: 'button', text: 'بازگردانی',
-              onclick: function () {
-                try {
-                  DB.restoreOverlapRelation(r.id);
-                  UI.toast('رابطه بازگردانی شد', { description: 'مقادیر تاریخی چرخه‌های قبلی همین رابطه حفظ شده و دوباره فعال شد.' });
-                  rerender();
-                } catch (err) { UI.toastError(err); }
-              },
-            })));
+        U.h('span', { class: 'flex items-center gap-1.5 shrink-0' },
+          crossActivity
+            ? U.h('span', {
+                class: 'mx-chip-cross',
+                title: 'رابطهٔ بین‌فعالیت — عناصر در دو فعالیتِ متفاوت همین پروژه هستند.',
+                text: 'بین‌فعالیت',
+              })
+            : null,
+          U.h('button', {
+            class: 'btn btn-outline btn-sm', type: 'button', text: 'بازگردانی',
+            onclick: function () {
+              try {
+                DB.restoreOverlapRelation(r.id);
+                UI.toast('رابطه بازگردانی شد', { description: 'مقادیر تاریخی چرخه‌های قبلی همین رابطه حفظ شده و دوباره فعال شد.' });
+                rerender();
+              } catch (err) { UI.toastError(err); }
+            },
+          }))));
     });
     details.appendChild(ul);
     return details;
@@ -812,23 +815,25 @@
                 style: { fontSize: '10px', color: 'var(--muted-foreground)' },
                 text: r.otherActivityName + ' / ' + r.otherStationName + (r.crossActivity ? ' — بین‌فعالیت' : ''),
               })),
-            r.crossActivity
-              ? U.h('span', {
-                  class: 'text-xs', style: { fontSize: '10px', color: 'var(--muted-foreground)' },
-                  title: 'رابطهٔ بین‌فعالیت تا زمانی که هر دو عنصر در یک فعالیت نباشند قابل بازگردانی نیست.',
-                  text: 'بین‌فعالیت — بازگردانی ممنوع',
-                })
-              : U.h('button', {
-                  class: 'btn btn-ghost btn-sm', type: 'button',
-                  style: { color: 'var(--green)' },
-                  onclick: function () {
-                    try {
-                      DB.restoreOverlapRelation(r.relationId);
-                      UI.toast('رابطه بازگردانی شد', { description: 'زیرردیف‌ها و مقادیر تاریخی آن دوباره نمایش داده می‌شوند.' });
-                      draw();
-                    } catch (err) { UI.toastError(err); }
-                  },
-                }, U.icon('rotateCcw'), 'بازگردانی')));
+            U.h('span', { class: 'flex shrink-0 items-center gap-1.5' },
+              r.crossActivity
+                ? U.h('span', {
+                    class: 'mx-chip-cross',
+                    title: 'رابطهٔ بین‌فعالیت — عنصر مقابل در فعالیت دیگری از همین پروژه است.',
+                    text: 'بین‌فعالیت',
+                  })
+                : null,
+              U.h('button', {
+                class: 'btn btn-ghost btn-sm', type: 'button',
+                style: { color: 'var(--green)' },
+                onclick: function () {
+                  try {
+                    DB.restoreOverlapRelation(r.relationId);
+                    UI.toast('رابطه بازگردانی شد', { description: 'زیرردیف‌ها و مقادیر تاریخی آن دوباره نمایش داده می‌شوند.' });
+                    draw();
+                  } catch (err) { UI.toastError(err); }
+                },
+              }, U.icon('rotateCcw'), 'بازگردانی'))));
         });
         archBox.appendChild(archUl);
         sectionEl.appendChild(archBox);
@@ -910,7 +915,8 @@
       return li;
     }
 
-    /** افزودن رابطهٔ موازی از فرم — فقط عناصر همین فعالیت، بدون خود و بدون رابطهٔ فعال تکراری (§۴.۱/§۴.۳) */
+    /** افزودن رابطهٔ موازی از فرم — تمام عناصر همان پروژه (هر Activity/Station)،
+     *  بدون خود و بدون رابطهٔ فعال تکراری — v1.5.1 §۲ */
     function buildInlineAdd() {
       var box = U.h('div', { class: 'mx-quick-editor flex flex-col gap-2' });
       var selected = null;
@@ -919,9 +925,7 @@
       try {
         catalogAll = DB.getOverlapMatrix(projectId, null).elementsCatalog;
       } catch (e) { catalogAll = []; }
-      /* v1.5.0 §۴.۳ — فقط عناصر همین فعالیت؛ روابط فعال تکراری پیشنهاد نمی‌شوند */
-      var ownEntry = catalogAll.find(function (c) { return c.elementId === elementId; });
-      var ownActivityId = ownEntry ? ownEntry.activityId : null;
+      /* v1.5.1 §۲ — روابط فعال تکراری پیشنهاد نمی‌شوند؛ محدودیت هم‌فعالیت حذف شد */
       var relatedIds = {};
       try {
         DB.getElementRelations(elementId, { sessionId: opts.sessionId || null }).rows
@@ -929,12 +933,18 @@
           .forEach(function (r) { relatedIds[r.otherElementId] = true; });
       } catch (e) { /* بی‌اهمیت */ }
       var catalog = catalogAll.filter(function (c) {
-        return c.elementId !== elementId && ownActivityId !== null && c.activityId === ownActivityId && !relatedIds[c.elementId];
+        return c.elementId !== elementId && !relatedIds[c.elementId];
       });
+      var ownEntry = catalogAll.find(function (c) { return c.elementId === elementId; });
+      var ownActivityId = ownEntry ? ownEntry.activityId : null;
 
       function nameOf(id) {
         var e = catalog.find(function (c) { return c.elementId === id; });
         return e ? e.name : '؟';
+      }
+      function activityLabel(id) {
+        var e = catalog.find(function (c) { return c.elementId === id; });
+        return e ? e.activityName + ' / ' + e.stationName : '؟';
       }
 
       function drawAdd() {
@@ -942,11 +952,11 @@
         if (catalog.length === 0) {
           box.appendChild(U.h('p', {
             class: 'text-xs text-muted leading-relaxed',
-            text: 'عنصر دیگری در همین فعالیت برای رابطهٔ موازی وجود ندارد (یا همهٔ روابط ممکن تعریف شده‌اند).',
+            text: 'عنصر دیگری در این پروژه برای رابطهٔ موازی وجود ندارد (یا همهٔ روابط ممکن تعریف شده‌اند).',
           }));
           return box;
         }
-        box.appendChild(U.h('p', { class: 'text-xs', text: 'عنصر موازی «' + elementName + '» را انتخاب کنید (فقط عناصر همین فعالیت):' }));
+        box.appendChild(U.h('p', { class: 'text-xs', text: 'عنصر موازی «' + elementName + '» را انتخاب کنید (عناصر همهٔ فعالیت‌های پروژه):' }));
         box.appendChild(buildElementPicker({
           catalog: catalog,
           selectedId: function () { return selected; },
@@ -961,8 +971,12 @@
             onclick: function () { confirming = true; drawAdd(); },
           })));
         if (confirming) {
+          var crossNow = selected != null && ownActivityId != null && catalog.find(function (c) { return c.elementId === selected; }) && catalog.find(function (c) { return c.elementId === selected; }).activityId !== ownActivityId;
           box.appendChild(U.h('div', { class: 'mx-confirm-brand flex flex-col gap-2' },
-            U.h('p', { text: 'با افزودن رابطهٔ موازی «' + elementName + '» و «' + nameOf(selected) + '»، زیرردیف آن در برگهٔ زمان‌سنجی (برای همهٔ اپراتورهای همین فعالیت)، فرم هر دو عنصر و ماتریس مرکزی نمایش داده می‌شود. ادامه می‌دهید؟' }),
+            U.h('p', null,
+              'با افزودن رابطهٔ موازی «' + elementName + '» و «' + nameOf(selected) + '»'
+              + (crossNow ? ' (رابطهٔ بین‌فعالیت — ' + activityLabel(selected) + ')' : '')
+              + '، زیرردیف آن در برگهٔ زمان‌سنجی (برای همهٔ اپراتورهای هر دو فعالیتِ درگیر)، فرم هر دو عنصر و ماتریس مرکزی نمایش داده می‌شود. ادامه می‌دهید؟'),
             U.h('div', { class: 'flex justify-end gap-2' },
               U.h('button', { class: 'btn btn-ghost btn-sm', type: 'button', text: 'بازگشت', onclick: function () { confirming = false; drawAdd(); } }),
               U.h('button', {
@@ -971,7 +985,7 @@
                   try {
                     DB.createOverlapRelation(projectId, elementId, selected);
                     UI.toast('رابطهٔ موازی افزوده شد', {
-                      description: 'زیرردیف این رابطه در برگهٔ زمان‌سنجی (برای همهٔ اپراتورهای فعالیت) و فرم هر دو عنصر نمایش داده می‌شود.',
+                      description: 'زیرردیف این رابطه در برگهٔ زمان‌سنجی (برای همهٔ اپراتورهای هر دو فعالیت درگیر) و فرم هر دو عنصر نمایش داده می‌شود.',
                     });
                     addOpen = false;
                     draw();

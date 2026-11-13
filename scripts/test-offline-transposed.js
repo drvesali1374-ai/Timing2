@@ -63,43 +63,40 @@ const g = globalThis
   const sheet0 = DB.getSheet(s1.id)
   ok('برگه بدون elementType — عناصر با defaultEntry/defaultLaneType', sheet0.elements.every((e) => !('elementType' in e) && e.defaultEntry === 'SEQ' && e.defaultLaneType === 'OPERATOR'))
 
-  // مهاجرت v1.5.0 — بستهٔ قدیمی (عنصر با elementType قدیمی و بدون فیلدهای جدید)
+  // مهاجرت v1.5.0 → v1.5.1 — بستهٔ قدیمی: فقط مقدارهای ناموجود پر می‌شوند؛
+  // رابطهٔ بین‌فعالیت دیگر آرشیو نمی‌شود؛ نشانگر اجرای یک‌باره (v1.5.1 §۹)
   {
     const st2 = DB.getState()
     const oldEl = { id: 'legacy-mig-el-1', activityId: act.id, name: 'عنصر مهاجرت', description: null, elementType: 'MACHINE', sortOrder: 99, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }
-    st2.workElements.push(oldEl)
-    const relCross = { id: 'legacy-mig-rel-1', projectId: projectId, elementLowId: eA.id < eC.id ? eA.id : eC.id, elementHighId: eA.id < eC.id ? eC.id : eA.id, isActive: true, archiveReason: null, version: 1, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }
+    const oldElKept = { id: 'legacy-mig-el-2', activityId: act.id, name: 'عنصر مهاجرت ۲', description: null, elementType: 'MACHINE', defaultEntryMode: 'SEQ', defaultLaneType: 'OPERATOR', sortOrder: 98, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }
+    st2.workElements.push(oldEl, oldElKept)
     const zEl = DB.createElement(act2.id, { name: 'عنصر Z فعالیت ۲' })
-    relCross.elementLowId = eA.id < zEl.id ? eA.id : zEl.id
-    relCross.elementHighId = eA.id < zEl.id ? zEl.id : eA.id
+    const relCross = { id: 'legacy-mig-rel-1', projectId: projectId, elementLowId: eA.id < zEl.id ? eA.id : zEl.id, elementHighId: eA.id < zEl.id ? zEl.id : eA.id, isActive: true, archiveReason: null, version: 1, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }
     st2.overlapRelations.push(relCross)
-    // اجرای مهاجرت (load مجدد از طریق ساخت state جدید)
-    const snapshot = JSON.parse(JSON.stringify(st2))
-    const fresh = g.T2DB
-    // شبیه‌سازی load(): migrateV150 روی snapshot
+    // شبیه‌سازی migrateV150 v1.5.1 (هم‌ارز db.js): فقط مقدار ناموجود + نشانگر یک‌باره
     const migrate = function (s) {
-      (s.workElements || []).forEach(function (e) {
-        var entry = e.elementType === 'MANUAL' ? 'SEQ' : 'INT'
-        var lane = (e.elementType === 'MACHINE' || e.elementType === 'OVERLAP') ? 'MACHINE' : 'OPERATOR'
-        e.defaultEntryMode = entry
-        e.defaultLaneType = lane
+      if (!s.appSettings) s.appSettings = []
+      if (s.appSettings.some(function (r) { return r.id === 'migration.v150' })) return
+      ;(s.workElements || []).forEach(function (e) {
+        if (e.defaultEntryMode == null) e.defaultEntryMode = e.elementType === 'MANUAL' ? 'SEQ' : 'INT'
+        if (e.defaultLaneType == null) e.defaultLaneType = (e.elementType === 'MACHINE' || e.elementType === 'OVERLAP') ? 'MACHINE' : 'OPERATOR'
       })
-      var activityOf = {}
-      ;(s.workElements || []).forEach(function (e) { activityOf[e.id] = e.activityId })
-      ;(s.overlapRelations || []).forEach(function (r) {
-        if (!r.isActive) return
-        var a1 = activityOf[r.elementLowId]
-        var a2 = activityOf[r.elementHighId]
-        if (a1 && a2 && a1 !== a2) { r.isActive = false; r.archiveReason = 'CROSS_ACTIVITY_NOT_SUPPORTED_BY_SESSION_SHEET'; r.version = (r.version || 1) + 1 }
-      })
+      s.appSettings.push({ id: 'migration.v150', value: 'v1.5.1' })
     }
+    const snapshot = JSON.parse(JSON.stringify(st2))
     migrate(snapshot)
     const migEl = snapshot.workElements.find((e) => e.id === 'legacy-mig-el-1')
-    ok('مهاجرت: MACHINE → INT/MACHINE', migEl.defaultEntryMode === 'INT' && migEl.defaultLaneType === 'MACHINE')
+    ok('مهاجرت: MACHINE بدون فیلد → INT/MACHINE پر شد', migEl.defaultEntryMode === 'INT' && migEl.defaultLaneType === 'MACHINE')
+    const migKept = snapshot.workElements.find((e) => e.id === 'legacy-mig-el-2')
+    ok('مهاجرت: مقدار معتبر موجود بازنویسی نشد (SEQ/OPERATOR ماند)', migKept.defaultEntryMode === 'SEQ' && migKept.defaultLaneType === 'OPERATOR')
     const migRel = snapshot.overlapRelations.find((r) => r.id === 'legacy-mig-rel-1')
-    ok('مهاجرت: رابطهٔ بین‌فعالیت آرشیو با دلیل', migRel.isActive === false && migRel.archiveReason === 'CROSS_ACTIVITY_NOT_SUPPORTED_BY_SESSION_SHEET')
-    // پاک‌سازی عنصر مهاجرت از state زنده
-    DB.getState().workElements = DB.getState().workElements.filter((e) => e.id !== 'legacy-mig-el-1')
+    ok('مهاجرت v1.5.1: رابطهٔ بین‌فعالیت فعال ماند (سیاست آرشیو لغو شد)', migRel.isActive === true && !migRel.archiveReason)
+    // اجرای دوم (نشانگر) → مقدار تغییرداده‌شده دست نمی‌خورد
+    migEl.defaultEntryMode = 'SEQ'
+    migrate(snapshot)
+    ok('مهاجرت: نشانگر اجرای یک‌باره — اجرای دوم مقدارها را بازنویسی نمی‌کند', migEl.defaultEntryMode === 'SEQ')
+    // پاک‌سازی عناصر مهاجرت از state زنده
+    DB.getState().workElements = DB.getState().workElements.filter((e) => e.id !== 'legacy-mig-el-1' && e.id !== 'legacy-mig-el-2')
     DB.getState().overlapRelations = DB.getState().overlapRelations.filter((r) => r.id !== 'legacy-mig-rel-1')
   }
 
@@ -261,8 +258,89 @@ const g = globalThis
     ok('برگهٔ اپراتور ۲ نیز همان رابطه را می‌بیند (§۷)', sh2f.parallelRelations.some((r) => r.relationId === relCL.id))
     throwsWith(() => DB.createOverlapRelation(projectId, eC.id, eLegacy.id), 'از قبل', 'رابطهٔ تکراری رد شد')
     throwsWith(() => DB.createOverlapRelation(projectId, eC.id, eC.id), 'خودش', 'خود-رابطه رد شد')
-    const zEl = DB.createElement(act2.id, { name: 'عنصر Z فعالیت ۲' })
-    throwsWith(() => DB.createOverlapRelation(projectId, eC.id, zEl.id), 'یک فعالیت', 'رابطهٔ بین‌فعالیت رد شد (§۴.۳)')
+  }
+
+  // ── §۱۳.۱۰ v1.5.1 — روابط موازی بین‌فعالیت (آفلاین — هم‌ارز تست آنلاین) ──
+  console.log('── §۱۳.۱۰ روابط بین‌فعالیت (Cross-Activity)')
+  {
+    const st2x = DB.createStation(projectId, { name: 'ایستگاه ۲' })
+    const actC = DB.createActivity(st2x.id, { name: 'فعالیت مونتاژ', processType: 'OPERATION' })
+    const actB2 = DB.createActivity(st.id, { name: 'فعالیت دیگر', processType: 'OPERATION' })
+    const B1 = DB.createElement(act2.id, { name: 'عنصر B1' })
+    const B2 = DB.createElement(act2.id, { name: 'عنصر B2' })
+    const C1 = DB.createElement(actC.id, { name: 'عنصر C1' })
+    const NB1 = DB.createElement(actB2.id, { name: 'عنصر B1' })
+
+    // ── انتخاب‌گرها — کاتالوگ کامل پروژه ──
+    const mCat = DB.getOverlapMatrix(projectId, null)
+    const catalog = mCat.elementsCatalog
+    ok('کاتالوگ: عناصر فعالیت B قابل انتخاب‌اند', catalog.some((c) => c.elementId === B1.id && c.activityId === act2.id))
+    ok('کاتالوگ: عناصر فعالیت C (ایستگاه دیگر) قابل انتخاب‌اند', catalog.some((c) => c.elementId === C1.id && c.activityId === actC.id))
+    ok('فعالیت‌های هم‌نام با شناسهٔ متفاوت تفکیک می‌شوند', catalog.filter((c) => c.activityName === 'فعالیت دیگر').length === 4 && new Set(catalog.filter((c) => c.activityName === 'فعالیت دیگر').map((c) => c.activityId)).size === 2)
+    ok('عنصر هم‌نام NB1 با شناسهٔ مستقل در کاتالوگ است', catalog.some((c) => c.elementId === NB1.id) && NB1.id !== B1.id)
+    ok('کاتالوگ شامل همهٔ ایستگاه‌هاست', new Set(catalog.map((c) => c.stationId)).size === 2)
+
+    // ── API و سرویس ──
+    const relA1B1 = DB.createOverlapRelation(projectId, eA.id, B1.id)
+    ok('ایجاد رابطهٔ بین‌فعالیت A-B1 موفق (v1.5.1 §۶)', !!relA1B1.id)
+    const relB1C1 = DB.createOverlapRelation(projectId, B1.id, C1.id)
+    ok('ایجاد رابطه با دو Station متفاوت (B1-C1) موفق', !!relB1C1.id)
+    throwsWith(() => DB.createOverlapRelation(projectId, B1.id, B1.id), 'خودش', 'خود-رابطه رد شد')
+    const proj2 = DB.createProject({ name: 'پروژهٔ دیگر آفلاین', lineName: 'خط', productName: 'محصول', studyDate: '2026-01-01' })
+    const stP2 = DB.createStation(proj2.id, { name: 'ایستگاه پ۲' })
+    const actP2 = DB.createActivity(stP2.id, { name: 'فعالیت پ۲', processType: 'OPERATION' })
+    const elP2 = DB.createElement(actP2.id, { name: 'عنصر پروژهٔ دیگر' })
+    throwsWith(() => DB.createOverlapRelation(projectId, eA.id, elP2.id), 'همین پروژه', 'رابطه با عنصر پروژهٔ دیگر رد شد')
+    throwsWith(() => DB.createOverlapRelation(projectId, B1.id, eA.id), 'از قبل', 'رابطهٔ تکراری (معکوس) رد شد')
+    ok('رابطهٔ A-B1 canonical است (low < high)', relA1B1.elementLowId < relA1B1.elementHighId)
+
+    // آرشیو و بازگردانی بین‌فعالیت
+    DB.archiveOverlapRelation(relB1C1.id)
+    ok('آرشیو رابطهٔ بین‌فعالیت (B1-C1) موفق', DB.getState().overlapRelations.find((r) => r.id === relB1C1.id).isActive === false)
+    DB.restoreOverlapRelation(relB1C1.id)
+    ok('بازگردانی رابطهٔ بین‌فعالیت موفق (v1.5.1 §۶)', DB.getState().overlapRelations.find((r) => r.id === relB1C1.id).isActive === true)
+    // رابطهٔ تاریخی آرشیوشده با دلیل CROSS_ACTIVITY → بازگردانی مجاز
+    const stRaw = DB.getState()
+    const lgLow = B2.id < C1.id ? B2.id : C1.id
+    const lgHigh = B2.id < C1.id ? C1.id : B2.id
+    stRaw.overlapRelations.push({ id: 'legacy-cross-arch-1', projectId: projectId, elementLowId: lgLow, elementHighId: lgHigh, isActive: false, archiveReason: 'CROSS_ACTIVITY_NOT_SUPPORTED_BY_SESSION_SHEET', version: 1, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() })
+    DB.restoreOverlapRelation('legacy-cross-arch-1')
+    ok('بازگردانی رابطهٔ قدیمی آرشیوشده (دلیل CROSS_ACTIVITY) مجاز', stRaw.overlapRelations.find((r) => r.id === 'legacy-cross-arch-1').isActive === true)
+    stRaw.overlapRelations = stRaw.overlapRelations.filter((r) => r.id !== 'legacy-cross-arch-1')
+
+    // ── نمایش دوطرفه ──
+    const sB1 = DB.createSession(act2.id, { operatorId: op1.id, timingMethod: 'SNAPBACK' })
+    const sB2 = DB.createSession(act2.id, { operatorId: op2.id, timingMethod: 'SNAPBACK' })
+    DB.addCycles(sB1.id, 2)
+    const shA = DB.getSheet(s1.id)
+    const shB1s = DB.getSheet(sB1.id)
+    const shB2s = DB.getSheet(sB2.id)
+    ok('برگهٔ Activity A زیرردیف A-B1 دارد', shA.parallelRelations.some((r) => r.relationId === relA1B1.id))
+    ok('برگهٔ Activity B (اپراتور ۱) همان relationId را دارد', shB1s.parallelRelations.some((r) => r.relationId === relA1B1.id))
+    ok('برگهٔ Activity B (اپراتور ۲) نیز همان relationId را دارد', shB2s.parallelRelations.some((r) => r.relationId === relA1B1.id))
+    const relDtoA = shA.parallelRelations.find((r) => r.relationId === relA1B1.id)
+    ok('DTO روابط: نام/فعالیت/ایستگاه هر دو endpoint', relDtoA && relDtoA.elementLowName && relDtoA.elementHighName && relDtoA.elementLowActivityName && relDtoA.elementHighActivityName && relDtoA.elementLowStationName && relDtoA.elementHighStationName && ![relDtoA.elementLowName, relDtoA.elementHighName].includes('؟'))
+    ok('فرم A برچسب بین‌فعالیت دارد (crossActivity)', DB.getElementRelations(eA.id).rows.find((r) => r.relationId === relA1B1.id).crossActivity === true)
+    ok('فرم B1 همان رابطه را می‌بیند', DB.getElementRelations(B1.id).rows.some((r) => r.relationId === relA1B1.id))
+    ok('عناصر برگهٔ B همان فعالیت B است (A ستون نیست)', !shB1s.elements.some((e) => e.id === eA.id))
+    ok('WorkElement جدید ساخته نشد (فعالیت B: ۳ عنصر — Z، B1، B2)', DB.getState().workElements.filter((e) => e.activityId === act2.id).length === 3)
+    const activeABpairs = DB.listOverlapRelations(projectId).filter((r) => r.isActive && ((r.elementLowId === eA.id && r.elementHighId === B1.id) || (r.elementLowId === B1.id && r.elementHighId === eA.id)))
+    ok('هیچ رکورد رابطهٔ معکوس ساخته نشد', activeABpairs.length === 1)
+
+    // ── مقایسه‌پذیری ──
+    throwsWith(() => DB.setCycleOverlaps(cy1.id, [{ relationId: relA1B1.id, status: 'OVERLAP', overlapDuration: 3 }]), 'قابل‌مقایسه', 'زوج بین‌فعالیت بدون مشاهدهٔ B1 → ثبت قطعی رد شد')
+    throwsWith(() => DB.setCycleOverlaps(cy1.id, [{ relationId: relA1B1.id, status: 'NO_OVERLAP' }]), 'قابل‌مقایسه', 'ثبت NO_OVERLAP جعلی نیز رد شد')
+    const mCmp = DB.getOverlapMatrix(projectId, cy1.id)
+    ok('ماتریس: زوج بین‌فعالیت غیرقابل‌مقایسه با دلیل فارسی', mCmp.comparability[relA1B1.id] && mCmp.comparability[relA1B1.id].isComparable === false && /قابل‌مقایسه نیست/.test(mCmp.comparability[relA1B1.id].notComparableReason || ''))
+
+    // ── حفظ داده ──
+    const rawOvBefore = DB.getState().observationOverlaps.filter((o) => o.cycleId === cy1.id).map((o) => o.id).sort().join(',')
+    DB.archiveOverlapRelation(relA1B1.id)
+    ok('پس از آرشیو، زیرردیف A-B1 از برگهٔ A حذف شد', !DB.getSheet(s1.id).parallelRelations.some((r) => r.relationId === relA1B1.id))
+    ok('پس از آرشیو، زیرردیف از برگهٔ B نیز حذف شد (هر دو سمت)', !DB.getSheet(sB1.id).parallelRelations.some((r) => r.relationId === relA1B1.id))
+    DB.restoreOverlapRelation(relA1B1.id)
+    const rawOvAfter = DB.getState().observationOverlaps.filter((o) => o.cycleId === cy1.id).map((o) => o.id).sort().join(',')
+    ok('مقادیر تاریخی چرخه‌ها پس از آرشیو/بازگردانی تغییر نکرد', rawOvBefore === rawOvAfter && rawOvBefore.length > 0)
   }
 
   console.log('\n═══ نتیجهٔ v1.5.0 (آفلاین): ' + pass + ' پاس / ' + fail + ' خطا ═══')

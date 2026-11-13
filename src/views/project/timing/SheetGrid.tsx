@@ -65,6 +65,8 @@ interface SheetGridProps {
   columns: ElementColumn[]
   prefs: Prefs
   editable: boolean
+  /** v1.5.1 §۳ — کاتالوگ کامل عناصر پروژه (برای نامزدهای «+ موازی» از همهٔ فعالیت‌ها) */
+  projectCatalog: Array<{ elementId: string; name: string; activityId: string; activityName: string; stationId: string; stationName: string }>
   onToggleEntryMode: (elementId: string) => void
   commitCell: (cycle: CycleRowDto, column: ElementColumn, payload: CellPayload) => void
   /** §۵.۳/§۵.۵ — ثبت مقدار هم‌پوشانی از مسیر مرکزی setCycleOverlaps */
@@ -83,6 +85,7 @@ export function SheetGrid({
   columns,
   prefs,
   editable,
+  projectCatalog,
   onToggleEntryMode,
   commitCell,
   commitOverlap,
@@ -124,26 +127,31 @@ export function SheetGrid({
     () => new Map(sheet.parallelRelations.map((r) => [r.relationId, r])),
     [sheet.parallelRelations]
   )
-  // نامزدهای «+ موازی»: عناصر همین Activity بدون خود و بدون رابطهٔ فعال تکراری (§۴.۳)
+  // نامزدهای «+ موازی»: تمام عناصر «همان پروژه» (هر Activity/Station) بدون خود و
+  // بدون رابطهٔ فعال تکراری — v1.5.1 §۳ از کاتالوگ کامل پروژه، نه فقط ستون‌های برگه.
+  // منبع داده به‌صورت batch از DTO ماتریس دریافت و از طریق SheetPanel پاس می‌شود؛
+  // برای هر ردیف Query تکراری زده نمی‌شود و رابطه‌های فعال موجود حذف می‌شوند.
   const relationCandidates = useMemo(() => {
     return (elementId: string) =>
-      columns
+      projectCatalog
         .filter(
           (c) =>
-            c.id !== elementId &&
+            c.elementId !== elementId &&
             !sheet.parallelRelations.some(
               (r) =>
-                (r.elementLowId === elementId && r.elementHighId === c.id) ||
-                (r.elementHighId === elementId && r.elementLowId === c.id)
+                (r.elementLowId === elementId && r.elementHighId === c.elementId) ||
+                (r.elementHighId === elementId && r.elementLowId === c.elementId)
             )
         )
         .map((c) => ({
-          elementId: c.id,
+          elementId: c.elementId,
           name: c.name,
-          activityName: sheet.activity.name,
-          stationName: sheet.activity.stationName,
+          activityId: c.activityId,
+          activityName: c.activityName,
+          stationId: c.stationId,
+          stationName: c.stationName,
         }))
-  }, [columns, sheet.parallelRelations, sheet.activity])
+  }, [projectCatalog, sheet.parallelRelations])
 
   // ── دیالوگ تشخیص: بازکردن فوری/زمان‌بندی‌شده و لغو ──
   const cancelDiag = useCallback(() => {
@@ -488,8 +496,16 @@ export function SheetGrid({
   }
 
   const nameOf = useCallback(
-    (id: string) => sheet.elements.find((e) => e.id === id)?.name ?? '؟',
-    [sheet.elements]
+    // v1.5.1 §۷ — نام عناصر خارج از Activity جاری نیز از روابط برگه حل می‌شود
+    (id: string) =>
+      sheet.elements.find((e) => e.id === id)?.name ??
+      sheet.parallelRelations.reduce<string>((acc, r) => {
+        if (acc !== '؟') return acc
+        if (r.elementLowId === id) return r.elementLowName
+        if (r.elementHighId === id) return r.elementHighName
+        return acc
+      }, '؟'),
+    [sheet.elements, sheet.parallelRelations]
   )
 
   return (
@@ -605,12 +621,13 @@ export function SheetGrid({
                           projectId={sheet.activity.projectId}
                           elementId={row.elementId}
                           elementName={row.name}
+                          currentActivityId={sheet.activity.id}
                           candidates={relationCandidates(row.elementId)}
                           trigger={
                             <button
                               type="button"
                               aria-label={`افزودن عنصر موازی برای ${row.name}`}
-                              title="افزودن رابطهٔ موازی — فقط عناصر همین فعالیت"
+                              title="افزودن رابطهٔ موازی — عناصر همهٔ فعالیت‌های پروژه"
                               className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-brand-soft hover:text-brand"
                             >
                               <CornerDownRight className="size-3.5 rotate-90" aria-hidden />
@@ -798,8 +815,19 @@ export function SheetGrid({
                     <div className="flex min-w-0 items-center gap-1">
                       {/* اتصال بصری ظریف به عنصر والد — §۹.۱ */}
                       <span className="h-4 w-2 shrink-0 rounded-e border-b-2 border-l-2 border-brand/30" aria-hidden />
-                      <p className="truncate text-[11px] font-bold text-muted-foreground" title={`هم‌پوشانی با ${row.otherName}`}>
-                        ↳ هم‌پوشانی با {row.otherName}
+                      <p
+                        className="flex min-w-0 items-center gap-1 truncate text-[11px] font-bold text-muted-foreground"
+                        title={`هم‌پوشانی با ${row.otherName}${row.crossActivity ? ` (فعالیت ${row.otherActivityName ?? '؟'} / ایستگاه ${row.otherStationName ?? '؟'})` : ''}`}
+                      >
+                        <span className="truncate">↳ هم‌پوشانی با {row.otherName}</span>
+                        {row.crossActivity && (
+                          <span
+                            className="shrink-0 rounded-md border border-amber/70 bg-amber-soft/40 px-1 py-px text-[8px] font-bold"
+                            title={`رابطهٔ بین‌فعالیت — «${row.otherActivityName ?? '؟'}» / «${row.otherStationName ?? '؟'}»؛ در برگهٔ آن فعالیت نیز زیر «${row.otherName}» دیده می‌شود`}
+                          >
+                            بین‌فعالیت
+                          </span>
+                        )}
                       </p>
                     </div>
                     {editable && (

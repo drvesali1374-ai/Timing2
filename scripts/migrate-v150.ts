@@ -5,16 +5,19 @@
 //       MANUAL          → SEQ     / OPERATOR
 //       MACHINE, OVERLAP→ INT     / MACHINE
 //       WAITING         → INT     / OPERATOR
-//  ۲) آرشیو نرم روابط فعال بین عناصر دو Activity متفاوت با دلیل
-//     CROSS_ACTIVITY_NOT_SUPPORTED_BY_SESSION_SHEET (§۴.۳) —
-//     بدون حذف هیچ ObservationOverlap تاریخی.
+//
+// v1.5.1 §۹ — سیاست آرشیو روابط بین‌فعالیت (CROSS_ACTIVITY_
+// NOT_SUPPORTED_BY_SESSION_SHEET) لغو شد:
+//  • archiveCrossActivityRelations دیگر به عنوان سیاست جاری اجرا نمی‌شود.
+//  • رابطهٔ فعال بین دو Activity هرگز آرشیو نمی‌شود.
+//  • روابطی که قبلاً (در v1.5.0) با همین دلیل آرشیو شده‌اند، به صورت
+//    خودکار فعال نمی‌شوند — کاربر باید از UI آگاهانه Restore کند.
+//  • مقدارهای تاریخی ObservationOverlap هرگز حذف یا بازنویسی نمی‌شوند.
 // idempotent — اجرای مکرر بی‌اثر است.
 // ═══════════════════════════════════════════════════════════
 import { PrismaClient } from '@prisma/client'
 
 const prisma = new PrismaClient()
-
-const CROSS_ACTIVITY_REASON = 'CROSS_ACTIVITY_NOT_SUPPORTED_BY_SESSION_SHEET'
 
 async function migrateElementDefaults(): Promise<{ backfilled: number }> {
   const elements = await prisma.workElement.findMany({
@@ -22,58 +25,32 @@ async function migrateElementDefaults(): Promise<{ backfilled: number }> {
   })
   let backfilled = 0
   for (const el of elements) {
+    // v1.5.1 — فقط مقدارهای تهی/ناموجود پر می‌شوند؛ مقدارهای معتبر
+    // موجود (مثلاً تنظیم‌شده توسط کاربر) هرگز بازنویسی نمی‌شوند.
+    if (el.defaultEntryMode != null && el.defaultLaneType != null) continue
     const entryMode = el.elementType === 'MANUAL' ? 'SEQ' : 'INT'
     const laneType = el.elementType === 'MACHINE' || el.elementType === 'OVERLAP' ? 'MACHINE' : 'OPERATOR'
-    if (el.defaultEntryMode === entryMode && el.defaultLaneType === laneType) continue
     await prisma.workElement.update({
       where: { id: el.id },
-      data: { defaultEntryMode: entryMode, defaultLaneType: laneType },
+      data: {
+        defaultEntryMode: el.defaultEntryMode ?? entryMode,
+        defaultLaneType: el.defaultLaneType ?? laneType,
+      },
     })
     backfilled++
   }
   return { backfilled }
 }
 
-async function archiveCrossActivityRelations(): Promise<{ archived: number }> {
-  // فقط عناصری که هنوز وجود دارند را واکشی می‌کنیم؛ رابطه‌های مرجع به عنصر
-  // حذف‌شده قبلاً توسط archiveRelationsForElement آرشیو شده‌اند.
-  const elements = await prisma.workElement.findMany({
-    select: { id: true, activityId: true },
-  })
-  const activityOf = new Map(elements.map((e) => [e.id, e.activityId]))
-  const relations = await prisma.overlapRelation.findMany({ where: { isActive: true } })
-  let archived = 0
-  for (const rel of relations) {
-    const a1 = activityOf.get(rel.elementLowId)
-    const a2 = activityOf.get(rel.elementHighId)
-    // هر دو عنصر موجود و در یک Activity نیستند → آرشیو نرم با دلیل
-    if (a1 && a2 && a1 !== a2) {
-      await prisma.overlapRelation.update({
-        where: { id: rel.id },
-        data: { isActive: false, archiveReason: CROSS_ACTIVITY_REASON, version: { increment: 1 } },
-      })
-      await prisma.auditEvent.create({
-        data: {
-          entityType: 'OverlapRelation',
-          entityId: rel.id,
-          action: 'DELETE',
-          entityName: 'آرشیو خودکار رابطهٔ بین‌فعالیت (مهاجرت v1.5.0)',
-          afterJson: JSON.stringify({ isActive: false, archiveReason: CROSS_ACTIVITY_REASON }),
-          projectId: rel.projectId,
-          actor: 'کاربر محلی',
-        },
-      })
-      archived++
-    }
-  }
-  return { archived }
-}
-
 async function main() {
   const r1 = await migrateElementDefaults()
-  const r2 = await archiveCrossActivityRelations()
   console.log(
-    JSON.stringify({ ok: true, backfilledElements: r1.backfilled, archivedCrossActivityRelations: r2.archived })
+    JSON.stringify({
+      ok: true,
+      backfilledElements: r1.backfilled,
+      archivedCrossActivityRelations: 0,
+      note: 'v1.5.1: روابط بین‌فعالیت دیگر آرشیو نمی‌شوند؛ روابط آرشیوشدهٔ قبلی از UI قابل بازگردانی‌اند',
+    })
   )
 }
 

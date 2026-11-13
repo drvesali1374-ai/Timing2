@@ -1,6 +1,8 @@
 'use client'
 
 // افزودن رابطهٔ موازی — انتخاب دو عنصر با جست‌وجو + نمایش فعالیت/ایستگاه — §۴.۳/§۱۱
+// v1.5.1 §۵ — هر دو انتخاب‌گر تمام عناصر «همان پروژه» را نشان می‌دهند؛
+// محدودیت restrictToActivityId حذف شد (روابط بین‌فعالیت مجاز است).
 import { useMemo, useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { toast } from 'sonner'
@@ -18,15 +20,12 @@ function ElementPicker({
   catalog,
   excludeId,
   label,
-  /** v1.5.0 §۴.۳ — محدود کردن فهرست به عناصر همین فعالیت */
-  restrictToActivityId,
 }: {
   value: string | null
   onChange: (id: string | null) => void
   catalog: OverlapMatrixDto['elementsCatalog']
   excludeId: string | null
   label: string
-  restrictToActivityId?: string | null
 }) {
   const [open, setOpen] = useState(false)
   const selected = catalog.find((c) => c.elementId === value) ?? null
@@ -35,7 +34,6 @@ function ElementPicker({
     const byStation = new Map<string, Map<string, typeof catalog>>()
     for (const e of catalog) {
       if (excludeId && e.elementId === excludeId) continue
-      if (restrictToActivityId && e.activityId !== restrictToActivityId) continue
       const acts = byStation.get(e.stationName) ?? new Map()
       const list = acts.get(e.activityName) ?? []
       list.push(e)
@@ -43,7 +41,7 @@ function ElementPicker({
       byStation.set(e.stationName, acts)
     }
     return byStation
-  }, [catalog, excludeId, restrictToActivityId])
+  }, [catalog, excludeId])
 
   return (
     <div className="space-y-1.5">
@@ -137,9 +135,10 @@ export default function AddRelationDialog({
   })
 
   const nameOf = (id: string | null) => catalog.find((c) => c.elementId === id)?.name ?? '؟'
-  // v1.5.0 §۴.۳ — عنصر دوم فقط از همان فعالیت عنصر اول selectable است
-  const aActivityId = aId ? catalog.find((c) => c.elementId === aId)?.activityId ?? null : null
   const canSubmit = aId && bId && aId !== bId
+  const aEntry = aId ? catalog.find((c) => c.elementId === aId) : null
+  const bEntry = bId ? catalog.find((c) => c.elementId === bId) : null
+  const isCrossActivity = aEntry != null && bEntry != null && aEntry.activityId !== bEntry.activityId
 
   return (
     <>
@@ -157,16 +156,11 @@ export default function AddRelationDialog({
           </DialogHeader>
           <div className="space-y-3">
             <ElementPicker value={aId} onChange={setAId} catalog={catalog} excludeId={bId} label="عنصر اول" />
-            <ElementPicker
-              value={bId}
-              onChange={setBId}
-              catalog={catalog}
-              excludeId={aId}
-              label={aId ? `عنصر دوم (فقط عناصر فعالیت «${catalog.find((c) => c.elementId === aId)?.activityName ?? '؟'}»)` : 'عنصر دوم'}
-              restrictToActivityId={aActivityId}
-            />
+            <ElementPicker value={bId} onChange={setBId} catalog={catalog} excludeId={aId} label="عنصر دوم" />
             <p className="text-[11px] leading-5 text-muted-foreground">
-              رابطهٔ موازی فقط بین عناصر «یک فعالیت» ممکن است؛ زیرردیف‌های برگهٔ زمان‌سنجی باید قابل‌مقایسه باشند.
+              رابطهٔ موازی بین هر دو عنصرِ همین پروژه ممکن است؛ حتی اگر در دو فعالیت یا ایستگاه متفاوت باشند. ثبت
+              مقدار قطعی هم‌پوشانی فقط در چرخه‌ای مجاز است که هر دو عنصر در همان چرخه مشاهده و شواهد قابل‌مقایسه
+              داشته باشند.
             </p>
           </div>
           <DialogFooter>
@@ -186,8 +180,12 @@ export default function AddRelationDialog({
           <DialogHeader>
             <DialogTitle>تأیید افزودن رابطهٔ موازی</DialogTitle>
             <DialogDescription className="leading-6">
-              با افزودن رابطهٔ موازی «{nameOf(aId)}» و «{nameOf(bId)}»، زیرردیف این رابطه در برگهٔ زمان‌سنجی
-              (برای همهٔ اپراتورهای همین فعالیت)، فرم هر دو عنصر و ماتریس مرکزی نمایش داده می‌شود. ادامه می‌دهید؟
+              با افزودن رابطهٔ موازی «{nameOf(aId)}» و «{nameOf(bId)}»
+              {isCrossActivity
+                ? ` (رابطهٔ بین‌فعالیت — «${aEntry?.activityName ?? '؟'}» و «${bEntry?.activityName ?? '؟'}»)`
+                : ''}
+              ، زیرردیف این رابطه در برگهٔ زمان‌سنجی (برای همهٔ اپراتورهای هر دو فعالیتِ درگیر)، فرم هر دو عنصر و
+              ماتریس مرکزی نمایش داده می‌شود. ادامه می‌دهید؟
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

@@ -113,7 +113,8 @@
         (s.elementObservations || []).forEach(function (o) { if (o.outlierSnapshot === undefined) o.outlierSnapshot = null; });
         (s.chartEdges || []).forEach(function (e) { if (e.sourceAnchor === undefined) e.sourceAnchor = null; if (e.targetAnchor === undefined) e.targetAnchor = null; });
         // ارتقای v1.5.0 — «نوع عنصر کاری» از UI حذف شد (§۳.۳):
-        // backfill پیش‌فرض‌های فنی مستقل + آرشیو نرم روابط بین‌فعالیت (§۴.۳)
+        // backfill پیش‌فرض‌های فنی مستقل (v1.5.1 §۹ — فقط مقدارهای ناموجود؛
+        // بدون آرشیو روابط بین‌فعالیت و با نشانگر اجرای یک‌باره)
         migrateV150(s);
         return s;
       }
@@ -126,32 +127,22 @@
     (s.projects || []).forEach(function (p) { migrateProjectAllowancesIfNeeded(p.id, s); });
   }
 
-  /** مهاجرت v1.5.0 — idempotent:
-   *  ۱) elementType → defaultEntryMode / defaultLaneMode (MANUAL→SEQ/OPERATOR، MACHINE|OVERLAP→INT/MACHINE، WAITING→INT/OPERATOR)
-   *  ۲) آرشیو نرم روابط فعال بین عناصر دو Activity با دلیل CROSS_ACTIVITY_NOT_SUPPORTED_BY_SESSION_SHEET —
-   *     بدون حذف هیچ observationOverlap تاریخی */
+  /** مهاجرت v1.5.0 → v1.5.1 — با نشانگر اجرای یک‌باره در appSettings:
+   *  ۱) elementType → defaultEntryMode / defaultLaneType — فقط وقتی مقدار
+   *     ناموجود است پر می‌شود؛ مقدارهای معتبر موجود هرگز بازنویسی نمی‌شوند.
+   *  ۲) v1.5.1 §۹ — روابط بین‌فعالیت دیگر آرشیو نمی‌شوند. روابطی که در
+   *     v1.5.0 با CROSS_ACTIVITY_NOT_SUPPORTED_BY_SESSION_SHEET آرشیو شده
+   *     بودند، به صورت خودکار فعال نمی‌شوند — کاربر باید آگاهانه Restore کند.
+   *     مقدارهای تاریخی observationOverlap هرگز حذف یا بازنویسی نمی‌شوند. */
   function migrateV150(s) {
-    var CROSS = 'CROSS_ACTIVITY_NOT_SUPPORTED_BY_SESSION_SHEET';
+    if (!s.appSettings) s.appSettings = [];
+    var marker = s.appSettings.find(function (r) { return r.id === 'migration.v150'; });
+    if (marker) return; /* یک‌بار اجرا می‌شود */
     (s.workElements || []).forEach(function (e) {
-      var entry = e.elementType === 'MANUAL' ? 'SEQ' : 'INT';
-      var lane = (e.elementType === 'MACHINE' || e.elementType === 'OVERLAP') ? 'MACHINE' : 'OPERATOR';
-      if (e.defaultEntryMode !== entry || e.defaultLaneType !== lane) {
-        e.defaultEntryMode = entry;
-        e.defaultLaneType = lane;
-      }
+      if (e.defaultEntryMode == null) e.defaultEntryMode = e.elementType === 'MANUAL' ? 'SEQ' : 'INT';
+      if (e.defaultLaneType == null) e.defaultLaneType = (e.elementType === 'MACHINE' || e.elementType === 'OVERLAP') ? 'MACHINE' : 'OPERATOR';
     });
-    var activityOf = {};
-    (s.workElements || []).forEach(function (e) { activityOf[e.id] = e.activityId; });
-    (s.overlapRelations || []).forEach(function (r) {
-      if (!r.isActive) return;
-      var a1 = activityOf[r.elementLowId];
-      var a2 = activityOf[r.elementHighId];
-      if (a1 && a2 && a1 !== a2) {
-        r.isActive = false;
-        r.archiveReason = CROSS;
-        r.version = (r.version || 1) + 1;
-      }
-    });
+    s.appSettings.push({ id: 'migration.v150', value: 'v1.5.1' });
   }
 
   function persist() {
@@ -1584,16 +1575,22 @@
     var elementIds = elements.map(function (e) { return e.id; });
     var cycles = cyclesOfSession(sessionId);
 
-    // v1.5.0 §۱۰ — روابط موازی فعال میان عناصر همین Activity (batch) + مقادیر چرخه‌ها
+    // v1.5.0 §۱۰ + v1.5.1 §۷ — روابط موازی فعال مرتبط با این Activity:
+    // «حداقل یکی» از دو endpoint در Activity جلسه باشد (رابطهٔ بین‌فعالیت
+    // در برگهٔ هر دو Activity دیده می‌شود) + مقادیر چرخه‌ها — همه batch.
     var projectId = station ? station.projectId : '';
     var elIdSet = {};
     elementIds.forEach(function (id) { elIdSet[id] = true; });
     var parallelRelations = state.overlapRelations
-      .filter(function (r) { return r.isActive && r.projectId === projectId && elIdSet[r.elementLowId] && elIdSet[r.elementHighId]; })
+      .filter(function (r) { return r.isActive && r.projectId === projectId && (elIdSet[r.elementLowId] || elIdSet[r.elementHighId]); })
       .map(function (r) {
+        var lo = elementInfoOf(r.elementLowId);
+        var hi = elementInfoOf(r.elementHighId);
         return {
           relationId: r.id, elementLowId: r.elementLowId, elementHighId: r.elementHighId,
-          elementLowName: nameOfElement(r.elementLowId), elementHighName: nameOfElement(r.elementHighId),
+          elementLowName: lo.name, elementHighName: hi.name,
+          elementLowActivityId: lo.activityId, elementLowActivityName: lo.activityName, elementLowStationName: lo.stationName,
+          elementHighActivityId: hi.activityId, elementHighActivityName: hi.activityName, elementHighStationName: hi.stationName,
           version: r.version || 1,
         };
       });
@@ -1682,7 +1679,8 @@
     return { kind: 'NUMBER', value: n };
   }
 
-  /** §۵.۲ — مدل ردیف‌های شبکهٔ برگه: عنصر + زیرردیف روابط فعال همان Activity */
+  /** §۵.۲ + v1.5.1 §۷ — مدل ردیف‌های شبکهٔ برگه: عنصر + زیرردیف روابط فعال
+   *  زیر endpoint حاضر در این Activity؛ روابط بین‌فعالیت پس از روابط داخلی. */
   function sheetGridRows(sheet) {
     var rows = [];
     var indexOf = {};
@@ -1692,9 +1690,18 @@
       var rels = sheet.parallelRelations
         .filter(function (r) { return r.elementLowId === el.id || r.elementHighId === el.id; })
         .map(function (r) {
-          var otherId = r.elementLowId === el.id ? r.elementHighId : r.elementLowId;
-          var otherName = r.elementLowId === el.id ? r.elementHighName : r.elementLowName;
-          return { r: r, otherId: otherId, otherName: otherName, otherSort: indexOf[otherId] !== undefined ? indexOf[otherId] : 9999 };
+          var isLow = r.elementLowId === el.id;
+          var otherId = isLow ? r.elementHighId : r.elementLowId;
+          var otherName = isLow ? r.elementHighName : r.elementLowName;
+          var otherActivityId = isLow ? r.elementHighActivityId : r.elementLowActivityId;
+          var otherActivityName = isLow ? r.elementHighActivityName : r.elementLowActivityName;
+          var otherStationName = isLow ? r.elementHighStationName : r.elementLowStationName;
+          return {
+            r: r, otherId: otherId, otherName: otherName,
+            otherActivityId: otherActivityId, otherActivityName: otherActivityName, otherStationName: otherStationName,
+            crossActivity: otherActivityId !== null && otherActivityId !== sheet.activity.id,
+            otherSort: indexOf[otherId] !== undefined ? indexOf[otherId] : 10000,
+          };
         })
         .sort(function (a, b) { return a.otherSort - b.otherSort; });
       rels.forEach(function (x) {
@@ -3320,6 +3327,15 @@
     return e ? e.name : '؟';
   }
 
+  /** v1.5.1 §۷ — اطلاعات کامل یک عنصر از کل پروژه (نام/فعالیت/ایستگاه) — batch و بدون N+1 */
+  function elementInfoOf(elementId) {
+    var e = byId('workElements', elementId);
+    if (!e) return { name: '؟', activityId: null, activityName: '؟', stationName: '؟' };
+    var a = byId('activities', e.activityId);
+    var st = a ? byId('stations', a.stationId) : null;
+    return { name: e.name, activityId: a ? a.id : null, activityName: a ? a.name : '؟', stationName: st ? st.name : '؟' };
+  }
+
   /** مرتب‌سازی عناصر مطابق ساختار پروژه: ایستگاه → فعالیت → sortOrder */
   function projectElementsSorted(projectId) {
     var stations = filterBy('stations', 'projectId', projectId).slice().sort(function (a, b) { return a.sortOrder - b.sortOrder; });
@@ -3348,10 +3364,11 @@
     var projA = projectIdOfElement(elementAId);
     var projB = projectIdOfElement(elementBId);
     if (projA !== projectId || projB !== projectId) throw new Error('هر دو عنصر باید متعلق به همین پروژه باشند.');
-    // v1.5.0 §۴.۳ — دامنهٔ رابطه‌ها: هر دو عنصر باید متعلق به یک Activity باشند
-    if (elA.activityId !== elB.activityId) {
-      throw new Error('رابطهٔ موازی فقط بین عناصر یک فعالیت ممکن است؛ زیرردیف‌های برگهٔ زمان‌سنجی باید قابل‌مقایسه باشند.');
-    }
+    // v1.5.1 §۶/§۱ — رابطهٔ موازی بین هر دو عنصرِ «یک پروژه» مجاز است؛ حتی اگر
+    // در دو Activity یا دو Station متفاوت باشند. محدودیت هم‌Activity حذف شد.
+    // اعتبارسنجی‌های حفظ‌شده: وجود هر دو عنصر، تعلق به یک Project، منع خود-رابطه،
+    // منع رابطهٔ فعال تکراری و رکورد canonical یکتا. مقایسه‌پذیری چرخه‌ای به‌صورت
+    // مستقل در setCycleOverlaps اعمال می‌شود (§۸).
     var low = elementAId < elementBId ? elementAId : elementBId;
     var high = elementAId < elementBId ? elementBId : elementAId;
     var existing = state.overlapRelations.find(function (r) { return r.projectId === projectId && r.elementLowId === low && r.elementHighId === high; });
@@ -3390,11 +3407,14 @@
     var r = byId('overlapRelations', relationId);
     if (!r) throw new Error('رابطه یافت نشد.');
     if (r.isActive) return r;
-    // v1.5.0 §۴.۳ — بازگردانی رابطهٔ بین‌فعالیت ممنوع است تا وقتی هر دو عنصر در یک Activity نباشند
+    // v1.5.1 §۶ — محدودیت هم‌Activity در بازگردانی حذف شد. بازگردانی هر
+    // رابطهٔ آرشیوشده مجاز است به شرط وجود هر دو عنصر و تعلق آن‌ها به
+    // Project رابطه. Cross-Activity بودن فقط برچسب اطلاعاتی است.
     var elLow = byId('workElements', r.elementLowId);
     var elHigh = byId('workElements', r.elementHighId);
-    if (elLow && elHigh && elLow.activityId !== elHigh.activityId) {
-      throw new Error('این رابطه بین عناصر دو فعالیت مختلف است و تا زمانی که هر دو عنصر در یک فعالیت نباشند قابل بازگردانی نیست.');
+    if (!elLow || !elHigh) throw new Error('یکی از عناصر این رابطه حذف شده است و بازگردانی ممکن نیست.');
+    if (projectIdOfElement(r.elementLowId) !== r.projectId || projectIdOfElement(r.elementHighId) !== r.projectId) {
+      throw new Error('عناصر این رابطه به پروژهٔ دیگری منتقل شده‌اند و بازگردانی ممکن نیست.');
     }
     r.isActive = true;
     r.version = (r.version || 1) + 1;
@@ -3545,7 +3565,7 @@
     return {
       projectId: projectId,
       members: members,
-      relations: relations.map(function (r) { return { id: r.id, elementLowId: r.elementLowId, elementHighId: r.elementHighId, isActive: r.isActive, version: r.version || 1, createdAt: r.createdAt, updatedAt: r.updatedAt }; }),
+      relations: relations.map(function (r) { return { id: r.id, elementLowId: r.elementLowId, elementHighId: r.elementHighId, isActive: r.isActive, archiveReason: r.archiveReason || null, version: r.version || 1, createdAt: r.createdAt, updatedAt: r.updatedAt }; }),
       cells: cells,
       comparability: comparability,
       selectedCycle: selectedCycle,
@@ -3719,7 +3739,7 @@
         otherActivityName: otherActivity ? otherActivity.name : '؟',
         otherStationName: otherStation ? otherStation.name : '؟',
         isActive: r.isActive,
-        // v1.5.0 §۴.۳ — پرچم بین‌فعالیت برای جلوگیری از بازگردانی نامعتبر
+        // v1.5.1 §۶ — پرچم اطلاعاتی بین‌فعالیت (دیگر مانع بازگردانی نیست؛ فقط برچسب UI)
         crossActivity: !!other && other.activityId !== element.activityId,
         archiveReason: r.archiveReason || null,
         latest: latest,

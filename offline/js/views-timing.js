@@ -833,7 +833,8 @@
     var table = U.h('table');
     var gridRows = buildGridRowsLocal();
 
-    /* مدل ردیف‌های شبکه — §۵.۲ (هم‌ارز buildGridRows سرور) */
+    /* مدل ردیف‌های شبکه — §۵.۲ (هم‌ارز buildGridRows سرور) + v1.5.1 §۷:
+       زیرردیف روابط بین‌فعالیت زیر endpoint حاضر؛ پس از روابط داخلی */
     function buildGridRowsLocal() {
       var out = [];
       var indexOf = {};
@@ -843,13 +844,22 @@
         var rels = (sheet.parallelRelations || [])
           .filter(function (r) { return r.elementLowId === el.id || r.elementHighId === el.id; })
           .map(function (r) {
-            var otherId = r.elementLowId === el.id ? r.elementHighId : r.elementLowId;
-            var otherName = r.elementLowId === el.id ? r.elementHighName : r.elementLowName;
-            return { r: r, otherId: otherId, otherName: otherName, otherSort: indexOf[otherId] !== undefined ? indexOf[otherId] : 9999 };
+            var isLow = r.elementLowId === el.id;
+            var otherId = isLow ? r.elementHighId : r.elementLowId;
+            var otherName = isLow ? r.elementHighName : r.elementLowName;
+            var otherActivityId = isLow ? r.elementHighActivityId : r.elementLowActivityId;
+            var otherActivityName = isLow ? r.elementHighActivityName : r.elementLowActivityName;
+            var otherStationName = isLow ? r.elementHighStationName : r.elementLowStationName;
+            return {
+              r: r, otherId: otherId, otherName: otherName,
+              otherActivityName: otherActivityName, otherStationName: otherStationName,
+              crossActivity: otherActivityId !== null && otherActivityId !== sheet.activity.id,
+              otherSort: indexOf[otherId] !== undefined ? indexOf[otherId] : 10000,
+            };
           })
           .sort(function (a, b) { return a.otherSort - b.otherSort; });
         rels.forEach(function (x) {
-          out.push({ kind: 'PARALLEL', parent: el, relation: x.r, otherId: x.otherId, otherName: x.otherName });
+          out.push({ kind: 'PARALLEL', parent: el, relation: x.r, otherId: x.otherId, otherName: x.otherName, otherActivityName: x.otherActivityName, otherStationName: x.otherStationName, crossActivity: x.crossActivity });
         });
       });
       return out;
@@ -877,6 +887,12 @@
     }
     function nameOfElementLocal(id) {
       for (var i = 0; i < elements.length; i++) if (elements[i].id === id) return elements[i].name;
+      /* v1.5.1 §۷ — نام عنصر خارج از Activity جاری از روابط برگه */
+      var rels = sheet.parallelRelations || [];
+      for (var j = 0; j < rels.length; j++) {
+        if (rels[j].elementLowId === id) return rels[j].elementLowName;
+        if (rels[j].elementHighId === id) return rels[j].elementHighName;
+      }
       return '؟';
     }
     /* هم‌پوشانی محاسبه‌شده از بازهٔ واقعی — §۵.۵ */
@@ -1065,12 +1081,13 @@
       }
       info.appendChild(metaRow);
       inner.appendChild(info);
-      /* §۶ — میانبر افزودن رابطهٔ موازی از خود جدول (فقط عناصر همین فعالیت §۴.۳) */
+      /* §۶ + v1.5.1 §۳ — میانبر افزودن رابطهٔ موازی از خود جدول
+         (عناصر همهٔ فعالیت‌های پروژه) */
       if (editable) {
         inner.appendChild(U.h('button', {
           class: 'icon-btn sm', type: 'button',
           'aria-label': 'افزودن عنصر موازی برای ' + el.name,
-          title: 'افزودن رابطهٔ موازی — فقط عناصر همین فعالیت',
+          title: 'افزودن رابطهٔ موازی — عناصر همهٔ فعالیت‌های پروژه',
           style: { width: '22px', height: '22px', flexShrink: '0' },
           onclick: function () { openAddRelationDialog(el); },
         }, U.icon('network')));
@@ -1079,7 +1096,8 @@
       return th;
     }
 
-    /* ── سربرگ زیرردیف رابطه (چسبان راست) — «↳ هم‌پوشانی با X» + حذف §۶.۱ ── */
+    /* ── سربرگ زیرردیف رابطه (چسبان راست) — «↳ هم‌پوشانی با X» + حذف §۶.۱ ──
+       v1.5.1 §۷ — روابط بین‌فعالیت با برچسب فعالیت/ایستگاه عنصر مقابل */
     function parallelRowHeader(grow) {
       var th = U.h('th', { class: 'sticky-col t2t-row-head t2t-subrow-head', scope: 'row' });
       var inner = U.h('div', { class: 'flex items-center justify-between gap-1' });
@@ -1087,8 +1105,16 @@
         U.h('span', { class: 't2t-subrow-tie', 'aria-hidden': 'true' }),
         U.h('span', {
           class: 'font-bold truncate', style: { fontSize: '11px', color: 'var(--muted-foreground)' },
-          title: 'هم‌پوشانی با ' + grow.otherName, text: '↳ هم‌پوشانی با ' + grow.otherName,
-        })));
+          title: 'هم‌پوشانی با ' + grow.otherName + (grow.crossActivity ? ' (فعالیت ' + (grow.otherActivityName || '؟') + ' / ایستگاه ' + (grow.otherStationName || '؟') + ')' : ''),
+          text: '↳ هم‌پوشانی با ' + grow.otherName,
+        }),
+        grow.crossActivity
+          ? U.h('span', {
+              class: 'mx-chip-cross shrink-0',
+              title: 'رابطهٔ بین‌فعالیت — «' + (grow.otherActivityName || '؟') + '» / «' + (grow.otherStationName || '؟') + '»؛ در برگهٔ آن فعالیت نیز زیر همین عنصر دیده می‌شود',
+              text: 'بین‌فعالیت',
+            })
+          : null));
       if (editable) {
         inner.appendChild(U.h('button', {
           class: 'icon-btn sm danger', type: 'button',
@@ -1102,38 +1128,78 @@
       return th;
     }
 
-    /* ── دیالوگ افزودن رابطهٔ موازی — فقط عناصر همین فعالیت (§۴.۳/§۶) ── */
+    /* ── دیالوگ افزودن رابطهٔ موازی — عناصر همهٔ فعالیت‌های پروژه
+       (v1.5.1 §۳/§۴ — دسکتاپ و موبایل یکسان؛ گروه‌بندی ایستگاه ← فعالیت) ── */
     function openAddRelationDialog(el) {
       var related = {};
       (sheet.parallelRelations || []).forEach(function (r) {
         if (r.elementLowId === el.id) related[r.elementHighId] = true;
         if (r.elementHighId === el.id) related[r.elementLowId] = true;
       });
-      var candidates = elements.filter(function (e) { return e.id !== el.id && !related[e.id]; });
+      /* کاتالوگ کامل عناصر پروژه — batch از ماتریس (بدون چرخه) */
+      var catalogAll = [];
+      try {
+        catalogAll = DB.getOverlapMatrix(sheet.activity.projectId, null).elementsCatalog;
+      } catch (e) { catalogAll = []; }
+      var candidates = catalogAll.filter(function (c) { return c.elementId !== el.id && !related[c.elementId]; });
+      var ownEntry = catalogAll.find(function (c) { return c.elementId === el.id; });
+      var ownActivityId = ownEntry ? ownEntry.activityId : null;
       var selectedId = null;
+
+      function nameOfCand(id) {
+        var e = candidates.find(function (c) { return c.elementId === id; });
+        return e ? e.name : '؟';
+      }
+      function activityLabelOf(id) {
+        var e = candidates.find(function (c) { return c.elementId === id; });
+        return e ? e.activityName + ' / ' + e.stationName : '؟';
+      }
 
       UI.dialog({
         title: 'افزودن عنصر موازی',
-        desc: 'عنصر «' + el.name + '» — فقط عناصر همین فعالیت قابل انتخاب هستند.',
+        desc: 'عنصر «' + el.name + '» — عناصر همهٔ فعالیت‌ها و ایستگاه‌های همین پروژه قابل انتخاب‌اند.',
         bodyBuilder: function (body) {
           if (candidates.length === 0) {
             body.appendChild(U.h('p', {
               class: 'text-sm text-muted leading-relaxed',
-              text: 'عنصر دیگری در همین فعالیت برای رابطهٔ موازی وجود ندارد (یا همهٔ روابط ممکن تعریف شده‌اند).',
+              text: 'عنصر دیگری در این پروژه برای رابطهٔ موازی وجود ندارد (یا همهٔ روابط ممکن تعریف شده‌اند).',
             }));
             return;
           }
-          var list = U.h('div', { class: 'flex flex-col gap-1.5' });
-          candidates.forEach(function (cand) {
-            var card = U.h('label', { class: 'radio-card' + (selectedId === cand.id ? ' selected' : '') },
-              U.h('input', { type: 'radio', name: 't2t-add-rel', checked: selectedId === cand.id, style: { accentColor: 'var(--brand)', marginTop: '3px' } }),
-              U.h('span', { class: 'text-sm font-medium', text: cand.name }));
-            card.addEventListener('change', function () {
-              selectedId = cand.id;
-              list.querySelectorAll('.radio-card').forEach(function (rc) { rc.classList.remove('selected'); });
-              card.classList.add('selected');
+          /* گروه‌بندی ایستگاه ← فعالیت — همان الگوی ماتریس */
+          var groups = {};
+          var stationOrder = [];
+          candidates.forEach(function (c) {
+            var key = c.stationId + '|' + c.activityId;
+            if (!groups[key]) { groups[key] = { stationName: c.stationName, activityName: c.activityName, list: [] }; stationOrder.push(key); }
+            groups[key].list.push(c);
+          });
+          var list = U.h('div', { class: 'flex flex-col gap-1.5', style: { maxHeight: '46vh', overflowY: 'auto' } });
+          stationOrder.forEach(function (key) {
+            var g = groups[key];
+            list.appendChild(U.h('div', { class: 'mx-picker-group', style: { fontSize: '11px', fontWeight: 700 } },
+              U.icon('factory'), g.stationName,
+              U.h('span', { class: 'text-faint', style: { fontWeight: 400 } }, ' — ' + g.activityName)));
+            g.list.forEach(function (cand) {
+              var cross = ownActivityId != null && cand.activityId !== ownActivityId;
+              var card = U.h('label', { class: 'radio-card' + (selectedId === cand.id ? ' selected' : '') },
+                U.h('input', { type: 'radio', name: 't2t-add-rel', checked: selectedId === cand.id, style: { accentColor: 'var(--brand)', marginTop: '3px' } }),
+                U.h('span', { class: 'flex min-w-0 flex-1 items-center gap-1.5' },
+                  U.h('span', { class: 'text-sm font-medium truncate', text: cand.name }),
+                  cross
+                    ? U.h('span', {
+                        class: 'mx-chip-cross shrink-0',
+                        title: 'این عنصر در فعالیت دیگری از همین پروژه است — رابطهٔ بین‌فعالیت',
+                        text: 'بین‌فعالیت',
+                      })
+                    : null));
+              card.addEventListener('change', function () {
+                selectedId = cand.id;
+                list.querySelectorAll('.radio-card').forEach(function (rc) { rc.classList.remove('selected'); });
+                card.classList.add('selected');
+              });
+              list.appendChild(card);
             });
-            list.appendChild(card);
           });
           body.appendChild(list);
         },
@@ -1145,15 +1211,28 @@
               class: 'btn btn-brand', type: 'button', disabled: !candidates.length,
               onclick: function () {
                 if (!selectedId) return;
-                try {
-                  DB.createOverlapRelation(sheet.activity.projectId, el.id, selectedId);
-                  invalidateSheetCache(); /* همهٔ جلسات — ساختار ردیف‌ها تغییر کرد (§۷) */
-                  UI.toast('رابطهٔ موازی افزوده شد', {
-                    desc: 'زیرردیف آن در برگهٔ همهٔ اپراتورهای این فعالیت و فرم هر دو عنصر نمایش داده می‌شود.',
-                  });
-                  close();
-                  ctx.render();
-                } catch (err) { UI.toastError(err); }
+                var crossNow = selectedId != null && ownActivityId != null && (catalogAll.find(function (c) { return c.elementId === selectedId; }) || {}).activityId !== ownActivityId;
+                UI.confirmDialog({
+                  title: 'تأیید افزودن رابطهٔ موازی',
+                  body: function (body2) {
+                    body2.appendChild(U.h('p', { class: 'text-sm leading-relaxed' },
+                      'با افزودن رابطهٔ «' + el.name + '» و «' + nameOfCand(selectedId) + '»'
+                      + (crossNow ? ' (رابطهٔ بین‌فعالیت — ' + activityLabelOf(selectedId) + ')' : '')
+                      + '، زیرردیف آن در برگهٔ زمان‌سنجی (برای همهٔ اپراتورهای هر دو فعالیتِ درگیر)، فرم هر دو عنصر و ماتریس مرکزی نمایش داده می‌شود. ادامه می‌دهید؟'));
+                  },
+                  confirmLabel: 'افزودن',
+                }).then(function (ok) {
+                  if (!ok) return;
+                  try {
+                    DB.createOverlapRelation(sheet.activity.projectId, el.id, selectedId);
+                    invalidateSheetCache(); /* همهٔ جلسات — ساختار ردیف‌ها تغییر کرد (§۷) */
+                    UI.toast('رابطهٔ موازی افزوده شد', {
+                      desc: 'زیرردیف آن در برگهٔ همهٔ اپراتورهای هر دو فعالیت درگیر و فرم هر دو عنصر نمایش داده می‌شود.',
+                    });
+                    close();
+                    ctx.render();
+                  } catch (err) { UI.toastError(err); }
+                });
               },
             }, U.icon('plus'), 'افزودن'));
         },

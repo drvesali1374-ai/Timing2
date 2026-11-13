@@ -924,6 +924,14 @@ td.mx-editor-cell { background: var(--surface-2); border-bottom: 1px solid var(-
   background: var(--card); border-radius: var(--radius); padding: 8px 12px; font-size: 13px; color: var(--muted-foreground);
 }
 
+/* ── برچسب بین‌فعالیت — v1.5.1 §۶ (اطلاعاتی؛ بازگردانی را مسدود نمی‌کند) ── */
+.mx-chip-cross {
+  display: inline-flex; align-items: center; padding: 1px 6px; border-radius: calc(var(--radius) - 6px);
+  font-size: 9.5px; font-weight: 700; white-space: nowrap;
+  border: 1px solid color-mix(in srgb, var(--amber) 70%, transparent);
+  background: color-mix(in srgb, var(--amber-soft) 40%, transparent); color: var(--amber);
+}
+
 /* ── لیست زوج‌ها (موبایل) — جدول دسکتاپ مخفی ── */
 .matrix-desktop { display: block; }
 .matrix-mobile { display: none; }

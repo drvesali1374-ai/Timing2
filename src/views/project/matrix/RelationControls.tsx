@@ -1,11 +1,13 @@
 'use client'
 
 // ═══════════════════════════════════════════════════════════
-// کنترل‌های مشترک مدیریت رابطهٔ موازی — v1.5.0 §۶
+// کنترل‌های مشترک مدیریت رابطهٔ موازی — v1.5.0 §۶ / v1.5.1 §۲
 // افزودن/آرشیو/بازگردانی رابطه از «یک» کامپوننت مشترک؛
 // هم برگهٔ زمان‌سنجی (دکمهٔ «+ موازی» و زیرردیف‌ها) و هم فرم
 // ویرایش عنصر کاری از همین‌جا استفاده می‌کنند — منطق ایجاد
 // رابطه در دو محل جداگانه کپی نمی‌شود.
+// v1.5.1 — نامزدها از «تمام Activityهای همان پروژه» انتخاب می‌شوند؛
+// گروه‌بندی بر اساس شناسهٔ واقعی ایستگاه/فعالیت (Station ← Activity ← Element).
 // ═══════════════════════════════════════════════════════════
 import { useMemo, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
@@ -13,16 +15,18 @@ import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { ArchiveRestore, Check, ChevronsUpDown, Factory, Network, Plus, Trash2 } from 'lucide-react'
+import { ArchiveRestore, Check, Factory, Network, Plus, Trash2 } from 'lucide-react'
 import { overlapApi } from '@/lib/api/endpoints'
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
 import { cn } from '@/lib/utils'
 
-/** گزینهٔ عنصر برای انتخاب رابطه */
+/** گزینهٔ عنصر برای انتخاب رابطه — v1.5.1: شناسه‌های واقعی برای هویت (نه نام‌ها) */
 export interface RelationCandidate {
   elementId: string
   name: string
+  activityId: string
   activityName: string
+  stationId: string
   stationName: string
 }
 
@@ -42,8 +46,10 @@ export function AddRelationControl({
   projectId,
   elementId,
   elementName,
-  /** فقط عناصر مجاز: همان Activity، بدون خود عنصر و بدون رابطهٔ فعال تکراری (§۴.۳) */
+  /** نامزدها: تمام عناصر همان پروژه، بدون خود عنصر و بدون رابطهٔ فعال تکراری (v1.5.1 §۲) */
   candidates,
+  /** v1.5.1 §۲ — شناسهٔ فعالیت عنصر جاری؛ برای برچسب «بین‌فعالیت» روی نامزدهای سایر فعالیت‌ها */
+  currentActivityId,
   onAdded,
   trigger,
 }: {
@@ -51,6 +57,7 @@ export function AddRelationControl({
   elementId: string
   elementName: string
   candidates: RelationCandidate[]
+  currentActivityId?: string | null
   onAdded?: () => void
   trigger?: React.ReactNode
 }) {
@@ -59,15 +66,22 @@ export function AddRelationControl({
   const [confirming, setConfirming] = useState(false)
   const invalidate = useRelationInvalidation(projectId)
 
+  // گروه‌بندی سلسله‌مراتبی Station ← Activity ← Element بر اساس شناسه‌های واقعی (§۲ قاعدهٔ ۶)
   const groups = useMemo(() => {
-    const byStation = new Map<string, Map<string, RelationCandidate[]>>()
+    const byStation = new Map<string, { stationName: string; activities: Map<string, { activityName: string; elements: RelationCandidate[] }> }>()
     for (const e of candidates) {
       if (e.elementId === elementId) continue
-      const acts = byStation.get(e.stationName) ?? new Map()
-      const list = acts.get(e.activityName) ?? []
-      list.push(e)
-      acts.set(e.activityName, list)
-      byStation.set(e.stationName, acts)
+      let st = byStation.get(e.stationId)
+      if (!st) {
+        st = { stationName: e.stationName, activities: new Map() }
+        byStation.set(e.stationId, st)
+      }
+      let act = st.activities.get(e.activityId)
+      if (!act) {
+        act = { activityName: e.activityName, elements: [] }
+        st.activities.set(e.activityId, act)
+      }
+      act.elements.push(e)
     }
     return byStation
   }, [candidates, elementId])
@@ -81,13 +95,15 @@ export function AddRelationControl({
       setConfirming(false)
       setOpen(false)
       toast.success('رابطهٔ موازی افزوده شد', {
-        description: 'زیرردیف مربوطه در برگهٔ زمان‌سنجی، فرم هر دو عنصر و ماتریس نمایش داده می‌شود.',
+        description: 'زیرردیف مربوطه در برگهٔ زمان‌سنجی (برای همهٔ اپراتورهای هر دو فعالیت درگیر)، فرم هر دو عنصر و ماتریس نمایش داده می‌شود.',
       })
     },
     onError: (err) => toast.error(err instanceof Error ? err.message : 'ایجاد رابطه ناموفق بود'),
   })
 
-  const selectedName = candidates.find((c) => c.elementId === selected)?.name ?? '؟'
+  const selectedEntry = candidates.find((c) => c.elementId === selected)
+  const selectedName = selectedEntry?.name ?? '؟'
+  const isCrossActivity = selectedEntry != null && currentActivityId != null && selectedEntry.activityId !== currentActivityId
   const candidateCount = candidates.filter((c) => c.elementId !== elementId).length
 
   return (
@@ -101,7 +117,7 @@ export function AddRelationControl({
               variant="outline"
               className="gap-1"
               aria-label={`افزودن عنصر موازی برای ${elementName}`}
-              title="افزودن رابطهٔ موازی — فقط عناصر همین فعالیت"
+              title="افزودن رابطهٔ موازی — عناصر همهٔ فعالیت‌های پروژه"
             >
               <Plus className="size-3.5" aria-hidden />
               موازی
@@ -110,38 +126,49 @@ export function AddRelationControl({
         </PopoverTrigger>
         <PopoverContent className="w-[20rem] p-0" dir="rtl" align="start">
           <Command>
-            <CommandInput placeholder="نام عنصر کاری…" />
+            <CommandInput placeholder="نام عنصر، فعالیت یا ایستگاه…" />
             <CommandList>
               <CommandEmpty>
                 {candidateCount === 0
-                  ? 'عنصر دیگری در همین فعالیت برای رابطه وجود ندارد.'
+                  ? 'عنصر دیگری در این پروژه برای رابطه وجود ندارد (یا همهٔ روابط ممکن تعریف شده‌اند).'
                   : 'عنصری یافت نشد.'}
               </CommandEmpty>
-              {[...groups.entries()].map(([stationName, acts]) =>
-                [...acts.entries()].map(([activityName, elements]) => (
+              {[...groups.entries()].map(([stationId, st]) =>
+                [...st.activities.entries()].map(([activityId, act]) => (
                   <CommandGroup
-                    key={`${stationName}|${activityName}`}
+                    key={`${stationId}|${activityId}`}
                     heading={
                       <span className="flex items-center gap-1 text-[11px]">
-                        <Factory className="size-3" aria-hidden /> {stationName}
-                        <span className="text-muted-foreground">— {activityName}</span>
+                        <Factory className="size-3" aria-hidden /> {st.stationName}
+                        <span className="text-muted-foreground">— {act.activityName}</span>
                       </span>
                     }
                   >
-                    {elements.map((e) => (
-                      <CommandItem
-                        key={e.elementId}
-                        value={`${e.name} ${activityName} ${stationName}`}
-                        onSelect={() => {
-                          setSelected(e.elementId)
-                          setOpen(false)
-                          setConfirming(true)
-                        }}
-                      >
-                        <Check className={cn('size-4', selected === e.elementId ? 'opacity-100' : 'opacity-0')} aria-hidden />
-                        {e.name}
-                      </CommandItem>
-                    ))}
+                    {act.elements.map((e) => {
+                      const cross = currentActivityId != null && e.activityId !== currentActivityId
+                      return (
+                        <CommandItem
+                          key={e.elementId}
+                          value={`${e.name} ${act.activityName} ${st.stationName}`}
+                          onSelect={() => {
+                            setSelected(e.elementId)
+                            setOpen(false)
+                            setConfirming(true)
+                          }}
+                        >
+                          <Check className={cn('size-4 shrink-0', selected === e.elementId ? 'opacity-100' : 'opacity-0')} aria-hidden />
+                          <span className="min-w-0 flex-1 truncate">{e.name}</span>
+                          {cross && (
+                            <span
+                              className="shrink-0 rounded-md border border-amber/70 bg-amber-soft/40 px-1 py-px text-[9px] font-bold"
+                              title="این عنصر در فعالیت دیگری از همین پروژه است — رابطهٔ بین‌فعالیت"
+                            >
+                              بین‌فعالیت
+                            </span>
+                          )}
+                        </CommandItem>
+                      )
+                    })}
                   </CommandGroup>
                 ))
               )}
@@ -159,8 +186,12 @@ export function AddRelationControl({
               افزودن رابطهٔ موازی
             </DialogTitle>
             <DialogDescription>
-              با افزودن رابطهٔ «{elementName}» و «{selectedName}»، زیرردیف هم‌پوشانی در برگهٔ زمان‌سنجی (برای همهٔ
-              اپراتورهای این فعالیت)، فرم هر دو عنصر و ماتریس مرکزی نمایش داده می‌شود. ادامه می‌دهید؟
+              با افزودن رابطهٔ «{elementName}» و «{selectedName}»
+              {isCrossActivity
+                ? ` (رابطهٔ بین‌فعالیت — «${selectedEntry?.activityName ?? '؟'}» / «${selectedEntry?.stationName ?? '؟'}»)`
+                : ''}
+              ، زیرردیف هم‌پوشانی در برگهٔ زمان‌سنجی (برای همهٔ اپراتورهای هر دو فعالیتِ درگیر)، فرم هر دو عنصر و ماتریس مرکزی
+              نمایش داده می‌شود. ادامه می‌دهید؟
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -244,13 +275,13 @@ export function ArchiveRelationControl({
   )
 }
 
-// ── بازگردانی رابطهٔ آرشیوشده — در صورت معتبر بودن (§۴.۱/§۴.۳) ──
+// ── بازگردانی رابطهٔ آرشیوشده — در صورت معتبر بودن (§۴.۱) ──
 
 export function RestoreRelationControl({
   projectId,
   relationId,
   label,
-  /** رابطهٔ بین‌فعالیت تا هم‌فعالیت‌شدن عناصر قابل بازگردانی نیست (§۴.۳) */
+  /** v1.5.1 §۶ — فقط برچسب اطلاعاتی بین‌فعالیت؛ دیگر مانع بازگردانی نیست */
   crossActivity,
   onDone,
 }: {
@@ -272,17 +303,22 @@ export function RestoreRelationControl({
     },
     onError: (err) => toast.error(err instanceof Error ? err.message : 'بازگردانی ناموفق بود'),
   })
-  if (crossActivity) {
-    return (
-      <span className="text-[10px] leading-4 text-muted-foreground" title="رابطهٔ بین‌فعالیت تا زمانی که هر دو عنصر در یک فعالیت نباشند قابل بازگردانی نیست.">
-        بین‌فعالیت — بازگردانی ممنوع
-      </span>
-    )
-  }
+  // v1.5.1 §۶ — Cross-Activity بودن دیگر Restore را غیرفعال نمی‌کند؛
+  // فقط یک برچسب اطلاعاتی کنار دکمه نمایش داده می‌شود.
   return (
-    <Button type="button" size="sm" variant="ghost" className="text-green" onClick={() => restore.mutate()} disabled={restore.isPending}>
-      <ArchiveRestore className="size-3.5" aria-hidden />
-      {restore.isPending ? 'در حال بازگردانی…' : 'بازگردانی'}
-    </Button>
+    <span className="flex items-center gap-1.5">
+      {crossActivity && (
+        <span
+          className="rounded-md border border-amber/70 bg-amber-soft/40 px-1 py-px text-[9px] font-bold"
+          title="رابطهٔ بین‌فعالیت — عناصر در دو فعالیتِ متفاوت همین پروژه هستند."
+        >
+          بین‌فعالیت
+        </span>
+      )}
+      <Button type="button" size="sm" variant="ghost" className="text-green" onClick={() => restore.mutate()} disabled={restore.isPending}>
+        <ArchiveRestore className="size-3.5" aria-hidden />
+        {restore.isPending ? 'در حال بازگردانی…' : 'بازگردانی'}
+      </Button>
+    </span>
   )
 }

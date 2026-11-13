@@ -65,12 +65,14 @@ DB.putCells(s2.id, [
 
 const relAB = DB.createOverlapRelation(projectId, A.id, B.id);
 const relAC = DB.createOverlapRelation(projectId, A.id, C.id);
-// v1.5.0 §۴.۳ — ایجاد رابطهٔ بین‌فعالیت در سرور رد می‌شود (دامنه: یک Activity).
-// برای سناریوی آرشیو/بازگردانیِ بین‌فعالیت (مهاجرت v1.5.0)، رابطه به‌صورت مستقیم
-// در state ساخته و آرشیو می‌شود تا مسیر «دادهٔ قدیمی» شبیه‌سازی شود.
-let relCross = { id: 'rel-cross-legacy-' + A.id.slice(0, 4), projectId: projectId, elementLowId: A.id < Z.id ? A.id : Z.id, elementHighId: A.id < Z.id ? Z.id : A.id, isActive: true, archiveReason: null, version: 1, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
-DB.getState().overlapRelations.push(relCross);
-throwsWith(() => DB.createOverlapRelation(projectId, A.id, Z.id), 'یک فعالیت', 'ایجاد رابطهٔ بین‌فعالیت → خطا (v1.5.0 §۴.۳)');
+// v1.5.1 §۶ — ایجاد رابطهٔ بین‌فعالیت مجاز است (دامنه: یک Project، نه یک Activity).
+const relCross = DB.createOverlapRelation(projectId, A.id, Z.id);
+ok(!!relCross.id, 'ایجاد رابطهٔ بین‌فعالیت موفق (v1.5.1 §۶)');
+// آرشیو و بازگردانی بین‌فعالیت — هر دو مجازند
+DB.archiveOverlapRelation(relCross.id);
+ok(!DB.getState().overlapRelations.find(r => r.id === relCross.id).isActive, 'آرشیو رابطهٔ بین‌فعالیت موفق');
+DB.restoreOverlapRelation(relCross.id);
+ok(!!DB.getState().overlapRelations.find(r => r.id === relCross.id).isActive, 'بازگردانی رابطهٔ بین‌فعالیت موفق (v1.5.1 §۶)');
 
 // ═══ §۱۲ UNREVIEWED ═══
 console.log('── UNREVIEWED: تفکیک سه حالت');
@@ -114,11 +116,11 @@ console.log('── مقایسه‌پذیری چرخه');
   ok(m2.cells[relAC.id] == null, 'هیچ رکورد جعلی ساخته نشد');
   ok(m.comparability[relAB.id].isComparable === true, 'A-B با مشاهدهٔ هر دو → قابل‌مقایسه');
   ok(m.comparability[relCross.id].isComparable === false, 'رابطهٔ بین‌فعالیتتی در چرخهٔ فعالیت دیگر → غیرقابل‌مقایسه');
-  // v1.5.0 §۴.۳ — بازگردانی رابطهٔ بین‌فعالیت (هر دو عنصر موجود ولی در فعالیت‌های متفاوت) ممنوع است
+  // v1.5.1 §۶ — بازگردانی رابطهٔ بین‌فعالیت (هر دو عنصر موجود در فعالیت‌های متفاوت) مجاز است
   DB.archiveOverlapRelation(relCross.id);
-  throwsWith(() => DB.restoreOverlapRelation(relCross.id), 'دو فعالیت', 'بازگردانی رابطهٔ بین‌فعالیت → خطا (§۴.۳)');
+  DB.restoreOverlapRelation(relCross.id);
   const crossRelState = DB.getState().overlapRelations.find(r => r.id === relCross.id);
-  ok(crossRelState && crossRelState.isActive === false, 'رابطهٔ بین‌فعالیت آرشیو ماند');
+  ok(crossRelState && crossRelState.isActive === true, 'رابطهٔ بین‌فعالیت پس از آرشیو/بازگردانی فعال شد (v1.5.1 §۶)');
 }
 
 // ═══ §۱۲ چند Session/Operator مستقل + Undo/Redo ═══

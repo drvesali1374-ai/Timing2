@@ -314,13 +314,16 @@ export async function importProjectPackage(jsonText: string): Promise<{ projectI
   // مهاجرت idempotent پس از درج اجرا می‌شود (§۴)
   const { migrateProjectAllowancesIfNeeded } = await import('../application/effective-allowance-service')
   await migrateProjectAllowancesIfNeeded(result.projectId)
-  // v1.5.0 §۳.۳ — بستهٔ قدیمی دارای elementType: نرمال‌سازی به پیش‌فرض‌های فنی مستقل
-  // (MANUAL→SEQ/OPERATOR، MACHINE|OVERLAP→INT/MACHINE، WAITING→INT/OPERATOR) + آرشیو روابط بین‌فعالیت
+  // v1.5.0 §۳.۳ — بستهٔ قدیمی دارای elementType: نرمال‌سازی به پیش‌فرض‌های فنی مستقل.
+  // v1.5.1 §۹ — روابط بین‌فعالیت بسته‌های قدیمی دیگر آرشیو نمی‌شوند؛
+  // وضعیت اصلی isActive حفظ می‌شود (سیاست CROSS_ACTIVITY_NOT_SUPPORTED لغو شد).
   await normalizeV150Elements(result.projectId)
   return { projectId: result.projectId, name: newName }
 }
 
-/** §۳.۳ v1.5.0 — نرمال‌سازی عناصر بستهٔ قدیمی پس از Import (idempotent) */
+/** §۳.۳ v1.5.0 — نرمال‌سازی عناصر بستهٔ قدیمی پس از Import (idempotent)
+ *  v1.5.1 §۹ — فقط مقدارهای تهی/ناموجود پر می‌شوند؛ مقدارهای معتبر موجود
+ *  هرگز بازنویسی نمی‌شوند و هیچ رابطه‌ای به دلیل تفاوت Activity آرشیو نمی‌شود. */
 async function normalizeV150Elements(projectId: string): Promise<void> {
   const elements = await db.workElement.findMany({
     where: { activity: { station: { projectId } } },
@@ -329,21 +332,13 @@ async function normalizeV150Elements(projectId: string): Promise<void> {
   for (const el of elements) {
     const entryMode = el.elementType === 'MANUAL' ? 'SEQ' : 'INT'
     const laneType = el.elementType === 'MACHINE' || el.elementType === 'OVERLAP' ? 'MACHINE' : 'OPERATOR'
-    if (el.defaultEntryMode !== entryMode || el.defaultLaneType !== laneType) {
-      await db.workElement.update({ where: { id: el.id }, data: { defaultEntryMode: entryMode, defaultLaneType: laneType } })
-    }
-  }
-  // §۴.۳ — آرشیو نرم روابط فعال بین‌فعالیت در بستهٔ قدیمی
-  const relations = await db.overlapRelation.findMany({ where: { projectId, isActive: true } })
-  for (const rel of relations) {
-    const [a, b] = await Promise.all([
-      db.workElement.findUnique({ where: { id: rel.elementLowId }, select: { activityId: true } }),
-      db.workElement.findUnique({ where: { id: rel.elementHighId }, select: { activityId: true } }),
-    ])
-    if (a && b && a.activityId !== b.activityId) {
-      await db.overlapRelation.update({
-        where: { id: rel.id },
-        data: { isActive: false, archiveReason: 'CROSS_ACTIVITY_NOT_SUPPORTED_BY_SESSION_SHEET', version: { increment: 1 } },
+    if (el.defaultEntryMode == null || el.defaultLaneType == null) {
+      await db.workElement.update({
+        where: { id: el.id },
+        data: {
+          defaultEntryMode: el.defaultEntryMode ?? entryMode,
+          defaultLaneType: el.defaultLaneType ?? laneType,
+        },
       })
     }
   }

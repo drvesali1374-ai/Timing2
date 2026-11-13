@@ -120,24 +120,15 @@ async function main() {
 
   const relAB = await req('POST', `/api/projects/${projectId}/overlap/relations`, { elementAId: elIds.A, elementBId: elIds.B })
   const relAC = await req('POST', `/api/projects/${projectId}/overlap/relations`, { elementAId: elIds.A, elementBId: elIds.C })
-  // v1.5.0 §۴.۳ — ایجاد رابطهٔ بین‌فعالیت از API رد می‌شود (دامنه: یک Activity).
-  // رابطهٔ legacy بین‌فعالیت برای سناریوهای آرشیو/بازگردانی مستقیماً در DB ساخته می‌شود
-  // (معادل دادهٔ قدیمی پس از مهاجرت v1.5.0 که آرشیو شده و بازگردانی‌اش ممنوع است).
+  // v1.5.1 §۶ — ایجاد رابطهٔ بین‌فعالیت از API مجاز است (دامنه: یک Project، نه یک Activity).
   const relCrossTry = await req('POST', `/api/projects/${projectId}/overlap/relations`, { elementAId: elIds.A, elementBId: crossElId })
-  check('ایجاد رابطهٔ بین‌فعالیت → 422 (v1.5.0 §۴.۳)', relCrossTry.status === 422, `status=${relCrossTry.status}`)
-  const { db } = await import('@prisma/client').then(m => ({ db: new m.PrismaClient() }))
-  const lowId = elIds.A < crossElId ? elIds.A : crossElId
-  const highId = elIds.A < crossElId ? crossElId : elIds.A
-  const crossRow = await db.overlapRelation.create({
-    data: { projectId, elementLowId: lowId, elementHighId: highId, isActive: true },
-  })
-  const relCross = { status: 201, data: { relation: crossRow } }
-  // بازگردانی رابطهٔ بین‌فعالیت آرشیوشده نیز ممنوع است (§۴.۳)
-  await db.overlapRelation.update({ where: { id: crossRow.id }, data: { isActive: false, archiveReason: 'CROSS_ACTIVITY_NOT_SUPPORTED_BY_SESSION_SHEET' } })
-  const restoreTry = await req('PATCH', `/api/overlap-relations/${crossRow.id}`, { action: 'restore' })
-  check('بازگردانی رابطهٔ بین‌فعالیت آرشیوشده → 422 (§۴.۳)', restoreTry.status === 422, `status=${restoreTry.status}`)
-  await db.overlapRelation.update({ where: { id: crossRow.id }, data: { isActive: true, archiveReason: null } })
-  await db.$disconnect()
+  check('ایجاد رابطهٔ بین‌فعالیت → 201 (v1.5.1 §۶)', relCrossTry.status === 201, `status=${relCrossTry.status}`)
+  const relCross = relCrossTry
+  // آرشیو و بازگردانی رابطهٔ بین‌فعالیت — هر دو مجازند (§۶ v1.5.1)
+  const archCross = await req('PATCH', `/api/overlap-relations/${relCross.data.relation.id}`, { action: 'archive' })
+  check('آرشیو رابطهٔ بین‌فعالیت موفق', archCross.status === 200 && archCross.data.relation.isActive === false, `status=${archCross.status}`)
+  const restoreCross = await req('PATCH', `/api/overlap-relations/${relCross.data.relation.id}`, { action: 'restore' })
+  check('بازگردانی رابطهٔ بین‌فعالیت موفق (v1.5.1 §۶)', restoreCross.status === 200 && restoreCross.data.relation.isActive === true, `status=${restoreCross.status}`)
 
   console.log('── §۱۲ UNREVIEWED: تفکیک سه حالت')
   {

@@ -368,13 +368,21 @@ export interface CycleRowDto {
   overlaps: Record<string, { status: string; overlapDuration: number | null; version: number }>
 }
 
-/** v1.5.0 — رابطهٔ موازی فعال میان دو عنصرِ همین Activity (زیرردیف برگه §۵) */
+/** v1.5.1 §۷ — رابطهٔ موازی فعال که حداقل یکی از دو endpoint آن در Activity جلسه است.
+ *  رابطهٔ بین‌فعالیت در برگهٔ هر دو Activity (زیر endpoint حاضر) دیده می‌شود. */
 export interface SessionRelationDto {
   relationId: string
   elementLowId: string
   elementHighId: string
   elementLowName: string
   elementHighName: string
+  /** v1.5.1 §۷ — فعالیت/ایستگاه هر دو endpoint (برای برچسب بین‌فعالیت) */
+  elementLowActivityId: string | null
+  elementLowActivityName: string
+  elementLowStationName: string
+  elementHighActivityId: string | null
+  elementHighActivityName: string
+  elementHighStationName: string
   version: number
 }
 
@@ -405,7 +413,7 @@ export interface SessionSheetDto {
     defaultEntry: 'SEQ' | 'INT'
     defaultLaneType: 'OPERATOR' | 'MACHINE'
   }[]
-  /** v1.5.0 — روابط موازی فعال همین Activity؛ زیرردیف‌های برگه (§۵) */
+  /** v1.5.1 §۷ — روابط موازی فعال مرتبط با Activity جلسه (حداقل یک endpoint)؛ زیرردیف‌های برگه (§۵) */
   parallelRelations: SessionRelationDto[]
   cycles: CycleRowDto[]
   stats: {
@@ -1027,7 +1035,7 @@ export interface ElementRelationRowDto {
   otherActivityName: string
   otherStationName: string
   isActive: boolean
-  /** v1.5.0 §۴.۳ — رابطهٔ بین‌فعالیت (آرشیو؛ بازگردانی ممنوع تا هم‌فعالیت شود) */
+  /** v1.5.1 §۶ — پرچم اطلاعاتی بین‌فعالیت (بازگردانی مجاز است؛ فقط برچسب UI) */
   crossActivity: boolean
   /** v1.5.0 — دلیل آرشیو در صورت وجود */
   archiveReason: string | null

@@ -242,10 +242,10 @@ function toValidationSummary(
 }
 
 // ── مقایسه‌پذیری زوج‌ها در یک چرخه — §۵ ممیزی جلسه ۲ ──
-// رابطه در سطح پروژه بین عناصر دو Activity متفاوت مجاز است؛ اما ثبت مقدار چرخه‌ای
-// فقط وقتی معنا دارد که هر دو عنصر در همان چرخه روی یک محور زمانی مشترک داده
+// رابطه در سطح پروژه بین عناصر دو Activity متفاوت مجاز است (v1.5.1)؛ اما ثبت مقدار
+// چرخه‌ای فقط وقتی معنا دارد که هر دو عنصر در همان چرخه روی یک محور زمانی مشترک داده
 // قابل‌مقایسه داشته باشند. چون هر چرخه به یک جلسه (و هر جلسه به یک فعالیت)
-// تعلق دارد، عنصرِ فعالیت دیگر هرگز در این چرخه مشاهده‌ای ندارد → غیرقابل‌مقایسه.
+// تعلق دارد، عنصرِ فعالیت دیگر معمولاً در این چرخه مشاهده‌ای ندارد → غیرقابل‌مقایسه.
 // این وضعیت به‌عنوان NO_OVERLAP ذخیره نمی‌شود و رکورد قطعی جعلی ساخته نمی‌شود.
 
 /** آیا عنصر در این چرخه ردیف مشاهده دارد؟ (حضور در durations — حتی با مقدار تهی) */
@@ -298,7 +298,7 @@ export async function listRelations(projectId: string) {
   return relations
 }
 
-/** v1.5.0 §۴.۳ — دلیل آرشیو رابطهٔ بین‌فعالیت */
+/** v1.5.0 §۴.۳ — دلیل آرشیو تاریخی رابطهٔ بین‌فعالیت (فقط نمایش؛ v1.5.1 سیاست آرشیو را لغو کرد) */
 export const CROSS_ACTIVITY_ARCHIVE_REASON = 'CROSS_ACTIVITY_NOT_SUPPORTED_BY_SESSION_SHEET'
 
 export async function createRelation(projectId: string, elementAId: string, elementBId: string): Promise<RelationDto> {
@@ -319,15 +319,11 @@ export async function createRelation(projectId: string, elementAId: string, elem
   if (elA.activity.station.projectId !== projectId || elB.activity.station.projectId !== projectId) {
     throw new AppError('WRONG_PROJECT', 'هر دو عنصر باید متعلق به همین پروژه باشند.', 422)
   }
-  // v1.5.0 §۴.۳ — دامنهٔ رابطه‌ها: هر دو عنصر باید متعلق به یک Activity باشند؛
-  // برگهٔ زمان‌سنجی (Activity × Operator × Method) فقط عناصر همان Activity را دارد.
-  if (elA.activityId !== elB.activityId) {
-    throw new AppError(
-      'CROSS_ACTIVITY_NOT_SUPPORTED',
-      'رابطهٔ موازی فقط بین عناصر یک فعالیت ممکن است؛ زیرردیف‌های برگهٔ زمان‌سنجی باید قابل‌مقایسه باشند.',
-      422,
-    )
-  }
+  // v1.5.1 §۶/§۱ — رابطهٔ موازی بین هر دو عنصرِ «یک پروژه» مجاز است؛ حتی اگر در دو
+  // Activity یا دو Station متفاوت باشند. محدودیت هم‌Activity (v1.5.0 §۴.۳) حذف شد.
+  // اعتبارسنجی‌های حفظ‌شده: وجود هر دو عنصر، تعلق به یک Project، منع خود-رابطه،
+  // منع رابطهٔ فعال تکراری و رکورد canonical یکتا (unique constraint دیتابیس).
+  // مقایسه‌پذیری چرخه‌ای به‌صورت مستقل در setCycleOverlaps اعمال می‌شود (§۸).
   const low = elementAId < elementBId ? elementAId : elementBId
   const high = elementAId < elementBId ? elementBId : elementAId
   const existing = await db.overlapRelation.findUnique({
@@ -384,18 +380,18 @@ export async function restoreRelation(relationId: string): Promise<RelationDto> 
   const relation = await db.overlapRelation.findUnique({ where: { id: relationId } })
   if (!relation) throw new AppError('RELATION_NOT_FOUND', 'رابطه یافت نشد.', 404)
   if (relation.isActive) return serializeRelation(relation)
-  // v1.5.0 §۴.۳ — بازگردانی رابطهٔ بین‌فعالیت ممنوع است تا وقتی هر دو عنصر
-  // در یک Activity نباشند (دادهٔ تاریخی حفظ می‌شود؛ رابطه آرشیو می‌ماند).
+  // v1.5.1 §۶ — محدودیت هم‌Activity در بازگردانی حذف شد. بازگردانی هر رابطهٔ
+  // آرشیوشده مجاز است به شرط وجود هر دو عنصر و تعلق آن‌ها به Project رابطه.
+  // Cross-Activity بودن به تنهایی هرگز مانع Restore نیست (فقط برچسب اطلاعاتی است).
   const [elLow, elHigh] = await Promise.all([
-    db.workElement.findUnique({ where: { id: relation.elementLowId }, select: { activityId: true } }),
-    db.workElement.findUnique({ where: { id: relation.elementHighId }, select: { activityId: true } }),
+    db.workElement.findUnique({ where: { id: relation.elementLowId }, select: { id: true, activity: { select: { station: { select: { projectId: true } } } } } }),
+    db.workElement.findUnique({ where: { id: relation.elementHighId }, select: { id: true, activity: { select: { station: { select: { projectId: true } } } } } }),
   ])
-  if (elLow && elHigh && elLow.activityId !== elHigh.activityId) {
-    throw new AppError(
-      'CROSS_ACTIVITY_NOT_SUPPORTED',
-      'این رابطه بین عناصر دو فعالیت مختلف است و تا زمانی که هر دو عنصر در یک فعالیت نباشند قابل بازگردانی نیست.',
-      422,
-    )
+  if (!elLow || !elHigh) {
+    throw new AppError('ELEMENT_NOT_FOUND', 'یکی از عناصر این رابطه حذف شده است و بازگردانی ممکن نیست.', 422)
+  }
+  if (elLow.activity.station.projectId !== relation.projectId || elHigh.activity.station.projectId !== relation.projectId) {
+    throw new AppError('WRONG_PROJECT', 'عناصر این رابطه به پروژهٔ دیگری منتقل شده‌اند و بازگردانی ممکن نیست.', 422)
   }
   const updated = await db.overlapRelation.update({
     where: { id: relationId },
@@ -927,7 +923,7 @@ export interface ElementRelationRow {
   otherActivityName: string
   otherStationName: string
   isActive: boolean
-  /** v1.5.0 §۴.۳ — رابطهٔ بین‌فعالیت (آرشیو شده؛ بازگردانی ممنوع تا هم‌فعالیت نشود) */
+  /** v1.5.1 §۶ — پرچم اطلاعاتی بین‌فعالیت (دیگر مانع بازگردانی نیست؛ فقط برچسب UI) */
   crossActivity: boolean
   /** v1.5.0 — دلیل آرشیو در صورت وجود */
   archiveReason: string | null
@@ -1002,7 +998,7 @@ export async function getElementRelations(
       otherActivityName: other?.activity.name ?? '؟',
       otherStationName: other?.activity.station.name ?? '؟',
       isActive: r.isActive,
-      // v1.5.0 §۴.۳ — پرچم بین‌فعالیت برای جلوگیری از بازگردانی نامعتبر
+      // v1.5.1 §۶ — پرچم اطلاعاتی بین‌فعالیت برای نمایش برچسب در UI
       crossActivity: other != null && other.activityId !== element.activityId,
       archiveReason: r.archiveReason ?? null,
       latest,

@@ -87,13 +87,22 @@ export interface CycleDto {
   overlaps: Record<string, { status: string; overlapDuration: number | null; version: number }>
 }
 
-/** v1.5.0 — رابطهٔ موازی فعال میان دو عنصرِ همین Activity (§۵/§۱۰) */
+/** v1.5.1 §۷ — رابطهٔ موازی فعال که «حداقل یکی» از دو endpoint آن در Activity جلسه است.
+ *  رابطهٔ بین‌فعالیت در برگهٔ هر دو Activity (زیر endpoint حاضر) دیده می‌شود؛
+ *  نام/فعالیت/ایستگاه هر دو endpoint از اطلاعات کامل پروژه batch دریافت می‌شود. */
 export interface SessionRelationDto {
   relationId: string
   elementLowId: string
   elementHighId: string
   elementLowName: string
   elementHighName: string
+  /** v1.5.1 §۷ — فعالیت/ایستگاه هر دو endpoint (برای برچسب بین‌فعالیت) */
+  elementLowActivityId: string | null
+  elementLowActivityName: string
+  elementLowStationName: string
+  elementHighActivityId: string | null
+  elementHighActivityName: string
+  elementHighStationName: string
   version: number
 }
 
@@ -126,7 +135,7 @@ export interface SessionDetailDto {
     /** خط زمانی پیش‌فرض عنصر — v1.5.0 مستقل از نوع عنصر (داده تاریخی حفظ شده) */
     defaultLaneType: 'OPERATOR' | 'MACHINE'
   }[]
-  /** v1.5.0 — روابط موازی فعال میان عناصر همین Activity؛ زیرردیف‌های برگه (§۵) */
+  /** v1.5.1 §۷ — روابط موازی فعال مرتبط با Activity جلسه (حداقل یک endpoint)؛ زیرردیف‌های برگه (§۵) */
   parallelRelations: SessionRelationDto[]
   cycles: CycleDto[]
   stats: {
@@ -457,9 +466,10 @@ async function buildSessionDetail(sessionId: string): Promise<SessionDetailDto> 
   const elements = await loadActivityElements(session.activityId)
   const elementIds = elements.map((e) => e.id)
 
-  // v1.5.0 §۱۰ — روابط فعال میان عناصر همین Activity + مقادیر چرخه‌های جلسه،
-  // همه به‌صورت batch (بدون N+1). رابطهٔ بین‌فعالیت پس از مهاجرت v1.5.0 آرشیو است.
-  const [cyclesRaw, activityValidCycles, relationsRaw, overlapsRaw] = await Promise.all([
+  // v1.5.1 §۷ — روابط فعال که «حداقل یکی» از دو endpoint آن در Activity جاری است
+  // به برگه ارسال می‌شوند (روابط بین‌فعالیت در برگهٔ هر دو Activity دیده می‌شوند) +
+  // مقادیر چرخه‌های جلسه و اطلاعات کامل عناصر پروژه، همه به‌صورت batch (بدون N+1).
+  const [cyclesRaw, activityValidCycles, relationsRaw, overlapsRaw, projectElementsRaw] = await Promise.all([
     db.cycleObservation.findMany({
       where: { sessionId },
       orderBy: { cycleNo: 'asc' },
@@ -481,23 +491,43 @@ async function buildSessionDetail(sessionId: string): Promise<SessionDetailDto> 
           where: {
             projectId: session.activity.station.projectId,
             isActive: true,
-            AND: [{ elementLowId: { in: elementIds } }, { elementHighId: { in: elementIds } }],
+            OR: [{ elementLowId: { in: elementIds } }, { elementHighId: { in: elementIds } }],
           },
+          orderBy: { createdAt: 'asc' },
         })
       : Promise.resolve([]),
     // §۱۰ — همهٔ مقادیر هم‌پوشانی چرخه‌های جلسه در یک کوئری (بدون N+1)
     db.observationOverlap.findMany({ where: { cycle: { sessionId } } }),
+    // v1.5.1 §۷ — اطلاعات کامل عناصر پروژه برای نام/فعالیت/ایستگاه هر دو endpoint (batch)
+    db.workElement.findMany({
+      where: { activity: { station: { projectId: session.activity.station.projectId } } },
+      select: {
+        id: true,
+        name: true,
+        activity: { select: { id: true, name: true, station: { select: { id: true, name: true } } } },
+      },
+    }),
   ])
 
-  const nameById = new Map(elements.map((e) => [e.id, e.name]))
-  const parallelRelations: SessionRelationDto[] = relationsRaw.map((r) => ({
-    relationId: r.id,
-    elementLowId: r.elementLowId,
-    elementHighId: r.elementHighId,
-    elementLowName: nameById.get(r.elementLowId) ?? '؟',
-    elementHighName: nameById.get(r.elementHighId) ?? '؟',
-    version: r.version,
-  }))
+  const projectElementById = new Map(projectElementsRaw.map((e) => [e.id, e]))
+  const parallelRelations: SessionRelationDto[] = relationsRaw.map((r) => {
+    const lo = projectElementById.get(r.elementLowId)
+    const hi = projectElementById.get(r.elementHighId)
+    return {
+      relationId: r.id,
+      elementLowId: r.elementLowId,
+      elementHighId: r.elementHighId,
+      elementLowName: lo?.name ?? '؟',
+      elementHighName: hi?.name ?? '؟',
+      elementLowActivityId: lo?.activity.id ?? null,
+      elementLowActivityName: lo?.activity.name ?? '؟',
+      elementLowStationName: lo?.activity.station.name ?? '؟',
+      elementHighActivityId: hi?.activity.id ?? null,
+      elementHighActivityName: hi?.activity.name ?? '؟',
+      elementHighStationName: hi?.activity.station.name ?? '؟',
+      version: r.version,
+    }
+  })
 
   // مقادیر هم‌پوشانی بر اساس cycleId گروه‌بندی می‌شوند (§۱۰ — گروه‌بندی با relationId و cycleId)
   const overlapsByCycle = new Map<string, Record<string, { status: string; overlapDuration: number | null; version: number }>>()
@@ -1103,7 +1133,9 @@ export interface GridModelRow {
 }
 
 /** ساخت مدل ردیف‌های شبکه: عناصر به ترتیب sortOrder + زیرردیف روابط فعال
- *  همان Activity زیر هر عنصر، به ترتیب عنصر مقصد (§۵.۱/§۹.۱) */
+ *  مرتبط با این Activity زیر هر endpoint حاضر (به ترتیب عنصر مقصد) — §۵.۱/§۹.۱.
+ *  v1.5.1 §۷ — روابط بین‌فعالیت نیز زیر endpoint حاضر در این Activity می‌آیند؛
+ *  نام عنصر خارجی از اطلاعات کامل پروژه (batch) حل می‌شود. */
 async function buildGridRows(activityId: string, projectId: string) {
   const elements = await loadActivityElements(activityId)
   const elementIds = elements.map((e) => e.id)
@@ -1113,11 +1145,19 @@ async function buildGridRows(activityId: string, projectId: string) {
           where: {
             projectId,
             isActive: true,
-            AND: [{ elementLowId: { in: elementIds } }, { elementHighId: { in: elementIds } }],
+            OR: [{ elementLowId: { in: elementIds } }, { elementHighId: { in: elementIds } }],
           },
+          orderBy: { createdAt: 'asc' },
         })
       : []
   const byId = new Map(elements.map((e) => [e.id, e]))
+  // v1.5.1 §۷ — نام عناصر خارج از Activity جاری (endpoint مقابل رابطهٔ بین‌فعالیت) — batch
+  const externalIds = [...new Set(relations.flatMap((r) => [r.elementLowId, r.elementHighId]).filter((id) => !byId.has(id)))]
+  const external = externalIds.length > 0
+    ? await db.workElement.findMany({ where: { id: { in: externalIds } }, select: { id: true, name: true } })
+    : []
+  const externalById = new Map(external.map((e) => [e.id, e]))
+  const nameResolv = (id: string) => byId.get(id)?.name ?? externalById.get(id)?.name ?? '؟'
   const rows: GridModelRow[] = []
   for (const el of elements) {
     rows.push({ kind: 'ELEMENT', elementId: el.id, elementName: el.name, relationId: null, otherElementId: null, otherElementName: null })
@@ -1125,7 +1165,8 @@ async function buildGridRows(activityId: string, projectId: string) {
       .filter((r) => r.elementLowId === el.id || r.elementHighId === el.id)
       .map((r) => {
         const otherId = r.elementLowId === el.id ? r.elementHighId : r.elementLowId
-        return { r, otherId, otherSort: byId.get(otherId)?.sortOrder ?? 0, otherName: byId.get(otherId)?.name ?? '؟' }
+        // عناصر همین Activity بر اساس ترتیب ستون؛ عناصر خارجی پس از آن‌ها (پایدار)
+        return { r, otherId, otherSort: byId.get(otherId)?.sortOrder ?? 10000, otherName: nameResolv(otherId) }
       })
       .sort((a, b) => a.otherSort - b.otherSort)
     for (const { r, otherId, otherName } of rels) {

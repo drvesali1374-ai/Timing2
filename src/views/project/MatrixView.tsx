@@ -144,7 +144,7 @@ export default function MatrixView({ projectId }: { projectId: string }) {
         onAdded={(rel) => {
           invalidate()
           toast.success(`رابطهٔ موازی «${rel.label}» افزوده شد`, {
-            description: 'زیرردیف این رابطه در برگهٔ زمان‌سنجی (برای همهٔ اپراتورهای فعالیت) و فرم هر دو عنصر نمایش داده می‌شود.',
+            description: 'زیرردیف این رابطه در برگهٔ زمان‌سنجی (برای همهٔ اپراتورهای هر دو فعالیت درگیر) و فرم هر دو عنصر نمایش داده می‌شود.',
           })
         }}
       />
@@ -156,6 +156,8 @@ function ArchivedRelations({ matrix, onRestored }: { matrix: OverlapMatrixDto | 
   const archived = useMemo(() => matrix?.relations.filter((r) => !r.isActive) ?? [], [matrix])
   const nameOf = (id: string) => matrix?.members.find((m) => m.elementId === id)?.name
   if (archived.length === 0) return null
+  // v1.5.1 §۶ — دلیل آرشیو CROSS_ACTIVITY صرفاً برچسب اطلاعاتی است؛
+  // بازگردانی رابطهٔ بین‌فعالیت مجاز است و دیگر مسدود نمی‌شود.
   const isCrossActivity = (r: { elementLowId: string; elementHighId: string; archiveReason: string | null }) =>
     r.archiveReason === 'CROSS_ACTIVITY_NOT_SUPPORTED_BY_SESSION_SHEET'
   return (
@@ -168,6 +170,7 @@ function ArchivedRelations({ matrix, onRestored }: { matrix: OverlapMatrixDto | 
           <li key={r.id} className="flex items-center justify-between gap-2 rounded-lg bg-card px-3 py-2 text-sm">
             <span className="text-muted-foreground">
               {nameOf(r.elementLowId) ?? '؟'} ↔ {nameOf(r.elementHighId) ?? '؟'}
+              {isCrossActivity(r) ? ' — بین‌فعالیت' : ''}
             </span>
             <RestoreRelationControl
               projectId={matrix?.projectId ?? ''}
