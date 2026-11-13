@@ -120,8 +120,24 @@ async function main() {
 
   const relAB = await req('POST', `/api/projects/${projectId}/overlap/relations`, { elementAId: elIds.A, elementBId: elIds.B })
   const relAC = await req('POST', `/api/projects/${projectId}/overlap/relations`, { elementAId: elIds.A, elementBId: elIds.C })
-  const relCross = await req('POST', `/api/projects/${projectId}/overlap/relations`, { elementAId: elIds.A, elementBId: crossElId })
-  check('رابطهٔ بین‌فعالیتتی (A ↔ Z فعالیت دیگر) در سطح پروژه مجاز است', relCross.status === 201, `status=${relCross.status}`)
+  // v1.5.0 §۴.۳ — ایجاد رابطهٔ بین‌فعالیت از API رد می‌شود (دامنه: یک Activity).
+  // رابطهٔ legacy بین‌فعالیت برای سناریوهای آرشیو/بازگردانی مستقیماً در DB ساخته می‌شود
+  // (معادل دادهٔ قدیمی پس از مهاجرت v1.5.0 که آرشیو شده و بازگردانی‌اش ممنوع است).
+  const relCrossTry = await req('POST', `/api/projects/${projectId}/overlap/relations`, { elementAId: elIds.A, elementBId: crossElId })
+  check('ایجاد رابطهٔ بین‌فعالیت → 422 (v1.5.0 §۴.۳)', relCrossTry.status === 422, `status=${relCrossTry.status}`)
+  const { db } = await import('@prisma/client').then(m => ({ db: new m.PrismaClient() }))
+  const lowId = elIds.A < crossElId ? elIds.A : crossElId
+  const highId = elIds.A < crossElId ? crossElId : elIds.A
+  const crossRow = await db.overlapRelation.create({
+    data: { projectId, elementLowId: lowId, elementHighId: highId, isActive: true },
+  })
+  const relCross = { status: 201, data: { relation: crossRow } }
+  // بازگردانی رابطهٔ بین‌فعالیت آرشیوشده نیز ممنوع است (§۴.۳)
+  await db.overlapRelation.update({ where: { id: crossRow.id }, data: { isActive: false, archiveReason: 'CROSS_ACTIVITY_NOT_SUPPORTED_BY_SESSION_SHEET' } })
+  const restoreTry = await req('PATCH', `/api/overlap-relations/${crossRow.id}`, { action: 'restore' })
+  check('بازگردانی رابطهٔ بین‌فعالیت آرشیوشده → 422 (§۴.۳)', restoreTry.status === 422, `status=${restoreTry.status}`)
+  await db.overlapRelation.update({ where: { id: crossRow.id }, data: { isActive: true, archiveReason: null } })
+  await db.$disconnect()
 
   console.log('── §۱۲ UNREVIEWED: تفکیک سه حالت')
   {

@@ -326,8 +326,10 @@ async function recomputeSession(tx: Tx, sessionId: string): Promise<void> {
     }
   } else {
     // روش برگشت به صفر: مدت = مقدار خام — FR-08
+    // v1.5.0: مشاهدهٔ دارای بازهٔ کامل، مدتش از بازه است؛ خام آن را بازنویسی نمی‌کند
     for (const cycle of cycles) {
       for (const o of cycle.observations) {
+        if (o.startOffset !== null && o.endOffset !== null) continue
         if (o.rawDuration !== null && o.derivedDuration !== o.rawDuration) {
           await tx.elementObservation.update({ where: { id: o.id }, data: { derivedDuration: o.rawDuration } })
           o.derivedDuration = o.rawDuration

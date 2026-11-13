@@ -1451,8 +1451,10 @@
         prev = reading;
       }
     } else {
+      /* v1.5.0: مشاهدهٔ دارای بازهٔ کامل، مدتش از بازه است؛ خام آن را بازنویسی نمی‌کند */
       cycles.forEach(function (cycle) {
         obsOfCycle(cycle.id).forEach(function (o) {
+          if (o.startOffset !== null && o.endOffset !== null) return;
           if (o.rawDuration !== null && o.derivedDuration !== o.rawDuration) o.derivedDuration = o.rawDuration;
         });
       });

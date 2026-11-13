@@ -34,6 +34,17 @@ export function POST(req: NextRequest, ctx: Ctx) {
     const { id } = await ctx.params
     const body = elementCreateSchema.parse(await readJson(req))
     const element = await createElement(id, body)
-    return ok({ element }, 201)
+    // v1.5.0 §۳ — elementType legacy در DTO عرضه نمی‌شود
+    return ok({
+      element: {
+        id: element.id,
+        activityId: element.activityId,
+        name: element.name,
+        description: element.description,
+        sortOrder: element.sortOrder,
+        createdAt: element.createdAt.toISOString(),
+        updatedAt: element.updatedAt.toISOString(),
+      },
+    }, 201)
   })
 }

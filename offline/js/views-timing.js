@@ -1301,6 +1301,7 @@
       function commitCell() {
         liveValidate();
         if (errEl) { scheduleRender(); return; } /* ورودی نامعتبر → بازگردانی */
+        /* v1.5.0 هم‌ارزی آنلاین: فیلدهای غایب صریحاً null می‌شوند (جایگزینی کامل سلول) */
         var cell;
         if (mode === 'INT') {
           var a = readNum(startIn.value);
@@ -1312,19 +1313,19 @@
             var sv = a.empty ? null : a.n;
             var ev = b.empty ? null : b.n;
             if (obs && obs.startOffset === sv && obs.endOffset === ev) { scheduleRender(); return; }
-            cell = { cycleNo: cycle.cycleNo, workElementId: el.id, startOffset: sv, endOffset: ev };
+            cell = { cycleNo: cycle.cycleNo, workElementId: el.id, rawDuration: null, cumulativeReading: null, startOffset: sv, endOffset: ev };
           }
         } else {
           var q = readNum(seqIn.value);
           if (q.empty) {
             if (!obs || (obs.rawDuration === null && obs.cumulativeReading === null)) { scheduleRender(); return; }
-            cell = { cycleNo: cycle.cycleNo, workElementId: el.id, rawDuration: null, cumulativeReading: null };
+            cell = { cycleNo: cycle.cycleNo, workElementId: el.id, rawDuration: null, cumulativeReading: null, startOffset: null, endOffset: null };
           } else {
             var cur = method === 'SNAPBACK' ? (obs ? obs.rawDuration : null) : (obs ? obs.cumulativeReading : null);
-            if (cur === q.n) { scheduleRender(); return; }
+            if (cur === q.n && obs && obs.startOffset === null && obs.endOffset === null) { scheduleRender(); return; }
             cell = method === 'SNAPBACK'
-              ? { cycleNo: cycle.cycleNo, workElementId: el.id, rawDuration: q.n }
-              : { cycleNo: cycle.cycleNo, workElementId: el.id, cumulativeReading: q.n };
+              ? { cycleNo: cycle.cycleNo, workElementId: el.id, rawDuration: q.n, cumulativeReading: null, startOffset: null, endOffset: null }
+              : { cycleNo: cycle.cycleNo, workElementId: el.id, rawDuration: null, cumulativeReading: q.n, startOffset: null, endOffset: null };
           }
         }
         if (withUndo(sessionId, 'ثبت سلول', function () { DB.putCells(sessionId, [cell]); })) {
