@@ -1,16 +1,12 @@
 'use client'
 
-// نمای موبایل — لیست زوج‌ها به‌جای جدول فشرده — §۱۱
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
-import { cn } from '@/lib/utils'
+// نمای موبایل — لیست زوج‌ها به‌جای جدول فشرده — فقط‌خواندنی — v1.5.0 §۱۱
+// هیچ ورودی عددی یا دکمهٔ ثبت مقداری وجود ندارد؛ ثبت مقدار فقط
+// در برگهٔ زمان‌سنجی (زیرردیف رابطه) انجام می‌شود.
+import { useState } from 'react'
 import { useDisplayPrefs } from '@/store/display-store'
 import { formatTimeValue } from '@/lib/format'
 import type { OverlapMatrixDto, OverlapStatusValue } from '@/lib/api/endpoints'
-import type { CellDraft } from '../MatrixView'
-import { useState } from 'react'
 
 const STATUS_LABEL: Record<OverlapStatusValue, string> = {
   UNREVIEWED: 'بررسی‌نشده',
@@ -20,14 +16,12 @@ const STATUS_LABEL: Record<OverlapStatusValue, string> = {
 
 export default function PairList({
   matrix,
-  drafts,
-  onDraft,
   cycleSelected,
+  onGoTiming,
 }: {
   matrix: OverlapMatrixDto | null
-  drafts: Record<string, CellDraft>
-  onDraft: (relationId: string, draft: CellDraft | null) => void
   cycleSelected: boolean
+  onGoTiming: () => void
 }) {
   const prefs = useDisplayPrefs()
   const [expanded, setExpanded] = useState<string | null>(null)
@@ -41,15 +35,11 @@ export default function PairList({
         const a = nameOf(r.elementLowId)
         const b = nameOf(r.elementHighId)
         const cell = matrix.cells[r.id] ?? null
-        const draft = drafts[r.id] ?? null
         const comparable = matrix.comparability[r.id]?.isComparable !== false
         const notComparableReason = matrix.comparability[r.id]?.notComparableReason ?? null
-        const effective: CellDraft = draft ?? {
-          status: cell?.status ?? 'UNREVIEWED',
-          overlapDuration: cell?.overlapDuration ?? null,
-        }
+        const status = cell?.status ?? 'UNREVIEWED'
+        const overlapDuration = cell?.overlapDuration ?? null
         const isOpen = expanded === r.id
-        const editable = cycleSelected && comparable
         return (
           <li key={r.id} className="rounded-xl border bg-card p-3">
             <button
@@ -67,85 +57,45 @@ export default function PairList({
                 </span>
               </span>
               <span className="shrink-0">
-                {effective.status === 'UNREVIEWED' ? (
+                {!cycleSelected ? (
+                  <span className="text-[10px] text-muted-foreground">—</span>
+                ) : status === 'UNREVIEWED' ? (
                   <span className="rounded-md border border-dashed border-amber/70 bg-amber-soft/40 px-2 py-1 text-[11px]">
                     {STATUS_LABEL.UNREVIEWED}
                   </span>
-                ) : effective.status === 'NO_OVERLAP' ? (
+                ) : status === 'NO_OVERLAP' ? (
                   <span className="rounded-md border border-green/40 bg-green-soft/50 px-2 py-1 text-[11px]">
                     {STATUS_LABEL.NO_OVERLAP}
                   </span>
                 ) : (
                   <span className="num rounded-md bg-brand-soft px-2 py-1 text-xs font-bold" dir="ltr">
-                    {formatTimeValue(effective.overlapDuration, prefs)} s
+                    {formatTimeValue(overlapDuration, prefs)} s
                   </span>
                 )}
               </span>
             </button>
-            {isOpen && !editable && (
-              <p className="mt-3 border-t pt-3 text-xs text-muted-foreground">
-                {!cycleSelected
-                  ? 'برای ویرایش مقدار، ابتدا یک چرخه انتخاب کنید.'
-                  : notComparableReason ?? 'این زوج در این چرخه قابل‌مقایسه نیست.'}
-              </p>
-            )}
-            {isOpen && editable && (
-              <div className="mt-3 space-y-3 border-t pt-3">
-                <RadioGroup
-                  value={effective.status}
-                  onValueChange={(v) =>
-                    onDraft(r.id, {
-                      status: v as OverlapStatusValue,
-                      overlapDuration: v === 'OVERLAP' ? effective.overlapDuration : null,
-                    })
-                  }
-                  className="gap-2"
+            {isOpen && (
+              <div className="mt-3 space-y-2 border-t pt-3">
+                {!cycleSelected ? (
+                  <p className="text-xs text-muted-foreground">برای مشاهدهٔ مقدار، ابتدا یک چرخه انتخاب کنید.</p>
+                ) : !comparable ? (
+                  <p className="text-xs text-muted-foreground">
+                    {notComparableReason ?? 'این زوج در این چرخه قابل‌مقایسه نیست.'}
+                  </p>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    مقدار این چرخه:{' '}
+                    {status === 'OVERLAP' ? `${formatTimeValue(overlapDuration, prefs)} ثانیه` : STATUS_LABEL[status]}
+                  </p>
+                )}
+                <button
+                  type="button"
+                  onClick={onGoTiming}
+                  className="text-xs font-bold text-brand underline underline-offset-2"
                 >
-                  <Label className="flex items-center gap-2 rounded-lg border p-2 text-xs font-normal">
-                    <RadioGroupItem value="UNREVIEWED" />
-                    بررسی‌نشده
-                  </Label>
-                  <Label className="flex items-center gap-2 rounded-lg border p-2 text-xs font-normal">
-                    <RadioGroupItem value="NO_OVERLAP" />
-                    بدون هم‌پوشانی
-                  </Label>
-                  <Label className="flex items-center gap-2 rounded-lg border p-2 text-xs font-normal">
-                    <RadioGroupItem value="OVERLAP" />
-                    دارای هم‌پوشانی
-                  </Label>
-                </RadioGroup>
-                {effective.status === 'OVERLAP' && (
-                  <div className="space-y-1">
-                    <Label htmlFor={`mov-${r.id}`} className="text-xs">
-                      مدت هم‌پوشانی (ثانیه)
-                    </Label>
-                    <Input
-                      id={`mov-${r.id}`}
-                      dir="ltr"
-                      type="number"
-                      min="0.001"
-                      step="0.001"
-                      value={effective.overlapDuration ?? ''}
-                      onChange={(e) =>
-                        onDraft(r.id, {
-                          status: 'OVERLAP',
-                          overlapDuration: e.target.value === '' ? null : Number(e.target.value),
-                        })
-                      }
-                    />
-                  </div>
-                )}
-                {draft && (
-                  <Button variant="ghost" size="sm" onClick={() => onDraft(r.id, null)}>
-                    بازگردانی سلول
-                  </Button>
-                )}
+                  ورود به برگهٔ زمان‌سنجی برای ثبت مقدار
+                </button>
               </div>
-            )}
-            {isOpen && editable && draft && (
-              <Button variant="ghost" size="sm" onClick={() => onDraft(r.id, null)}>
-                بازگردانی سلول
-              </Button>
             )}
           </li>
         )

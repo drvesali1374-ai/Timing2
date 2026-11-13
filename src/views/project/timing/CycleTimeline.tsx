@@ -1,21 +1,22 @@
 'use client'
 
 // ═══════════════════════════════════════════════════════════
-// نمایش خط زمانی چرخه — FR-10
+// نمایش خط زمانی چرخه — FR-10 — v1.5.0
 // بازه‌های هم‌پوشانی روی خطوط زمانی مستقل (اپراتور/ماشین)
 // به‌صورت میله‌های نسبی؛ مقیاس بر اساس دیرترین پایان.
 // زمان سپری‌شده = دیرترین پایان − زودترین شروع (نه جمع!)
+// v1.5.0: رنگ/خط زمانی بر اساس laneType واقعی مشاهده یا
+// defaultLaneType عنصر (مستقل از نوع عنصرِ حذف‌شده §۳.۲).
 // ═══════════════════════════════════════════════════════════
 import { useMemo } from 'react'
 import { Timer } from 'lucide-react'
 import type { CycleRowDto, SessionSheetDto } from '@/lib/api/endpoints'
 import { formatTimeValue, type DisplayPrefs as Prefs } from '@/lib/format'
-import { ELEMENT_TYPE_BADGE, elementTypeLabel } from './shared'
 
 interface TimelineBar {
   key: string
   elementName: string
-  elementType: string
+  laneType: string
   start: number
   end: number
 }
@@ -32,33 +33,24 @@ export function CycleTimeline({
   const { lanes, maxEnd, bars } = useMemo(() => {
     const elementById = new Map(sheet.elements.map((e) => [e.id, e]))
     const allBars: TimelineBar[] = []
-    for (const o of cycle.observations) {
-      if (o.startOffset === null || o.endOffset === null) continue
-      const el = elementById.get(o.workElementId)
-      if (!el) continue
-      allBars.push({
-        key: o.id,
-        elementName: el.name,
-        elementType: el.elementType,
-        start: o.startOffset,
-        end: o.endOffset,
-      })
-    }
     const laneMap = new Map<string, TimelineBar[]>()
     for (const o of cycle.observations) {
       if (o.startOffset === null || o.endOffset === null) continue
       const el = elementById.get(o.workElementId)
       if (!el) continue
-      const laneType = o.laneType ?? (el.elementType === 'MACHINE' || el.elementType === 'OVERLAP' ? 'MACHINE' : 'OPERATOR')
+      // خط زمانی: مقدار واقعی مشاهده، وگرنه پیش‌فرض فنی عنصر (§۳.۲)
+      const laneType = o.laneType ?? el.defaultLaneType
       const label = laneType === 'MACHINE' ? 'ماشین' : 'اپراتور'
-      const list = laneMap.get(label) ?? []
-      list.push({
+      const bar: TimelineBar = {
         key: o.id,
         elementName: el.name,
-        elementType: el.elementType,
+        laneType,
         start: o.startOffset,
         end: o.endOffset,
-      })
+      }
+      allBars.push(bar)
+      const list = laneMap.get(label) ?? []
+      list.push(bar)
       laneMap.set(label, list)
     }
     const end = allBars.length > 0 ? Math.max(...allBars.map((b) => b.end)) : 0
@@ -79,7 +71,7 @@ export function CycleTimeline({
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="flex items-center gap-1.5 text-xs font-bold">
           <Timer className="size-4 text-brand" aria-hidden />
-          خط زمانی چرخهٔ {formatTimeValue(cycle.cycleNo, prefs, 0)}
+          خط زمانی چرخه
         </p>
         <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
           {cycle.elapsed !== null && (
@@ -103,13 +95,9 @@ export function CycleTimeline({
                 <div
                   key={bar.key}
                   className={`absolute top-1.5 flex h-7 items-center justify-center overflow-hidden rounded-md text-[10px] font-bold leading-none ring-2 ring-inset shadow-sm ${
-                    bar.elementType === 'MACHINE'
+                    bar.laneType === 'MACHINE'
                       ? 'bg-cyan-soft text-cyan ring-cyan/60'
-                      : bar.elementType === 'WAITING'
-                        ? 'bg-amber-soft text-amber ring-amber/60'
-                        : bar.elementType === 'OVERLAP'
-                          ? 'bg-green-soft text-green ring-green/60'
-                          : 'bg-brand-soft text-brand ring-brand/60'
+                      : 'bg-brand-soft text-brand ring-brand/60'
                   } ${bar.end - bar.start < maxEnd * 0.12 ? 'justify-start pr-1' : ''}`}
                   style={{
                     right: `${(bar.start / maxEnd) * 100}%`,
@@ -132,9 +120,12 @@ export function CycleTimeline({
         {bars.map((b) => (
           <li key={b.key} className="flex items-center justify-between gap-2 rounded-lg bg-background/60 px-2 py-1">
             <span className="flex min-w-0 items-center gap-1.5">
-              <span className={`size-2 shrink-0 rounded-full ${ELEMENT_TYPE_BADGE[b.elementType as keyof typeof ELEMENT_TYPE_BADGE]?.className ?? 'bg-muted'}`} aria-hidden />
+              <span
+                className={`size-2 shrink-0 rounded-full ${b.laneType === 'MACHINE' ? 'bg-cyan' : 'bg-brand'}`}
+                aria-hidden
+              />
               <span className="truncate font-bold text-foreground">{b.elementName}</span>
-              <span className="shrink-0">({elementTypeLabel(b.elementType)})</span>
+              <span className="shrink-0">({b.laneType === 'MACHINE' ? 'ماشین' : 'اپراتور'})</span>
             </span>
             <span className="num shrink-0">
               {formatTimeValue(b.start, prefs)}–{formatTimeValue(b.end, prefs)}
@@ -152,4 +143,3 @@ export function CycleTimeline({
     </div>
   )
 }
-

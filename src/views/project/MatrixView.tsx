@@ -1,15 +1,16 @@
 'use client'
 
 // ═══════════════════════════════════════════════════════════
-// ماتریس هم‌پوشانی عناصر کاری — جلسه دوم §۲/§۳/§۵/§۱۱
+// ماتریس هم‌پوشانی عناصر کاری — نمای مرور فقط‌خواندنی — v1.5.0 §۱۱
 // ▸ یک ماتریس مرکزی یکتا در هر پروژه — عضویت پویا از روابط فعال
 // ▸ انتخاب چرخه نزدیک عنوان؛ فقط مقادیر همان چرخه
 // ▸ سه وضعیت متمایز: بررسی‌نشده / بدون هم‌پوشانی / دارای هم‌پوشانی
-// ▸ ویرایش سلول با draft + «ثبت تغییرات» + تأیید اثرات
-// ▸ موبایل: نمای لیست زوج‌ها به‌جای جدول فشرده
+// ▸ ثبت و ویرایش مقدار فقط در برگهٔ زمان‌سنجی (زیرردیف‌ها) انجام
+//   می‌شود؛ هیچ ورودی عددی یا دکمهٔ ثبت مقداری در این صفحه نیست.
+// ▸ روابط آرشیوشده + بازگردانی معتبر حفظ شده است.
 // ═══════════════════════════════════════════════════════════
 import { useMemo, useState } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Network, Plus } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -17,26 +18,20 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { HelpDot } from '@/components/common/HelpDot'
 import { EmptyState } from '@/components/common/Feedback'
 import { qk } from '@/lib/api/keys'
-import { overlapApi, type OverlapMatrixDto, type OverlapStatusValue } from '@/lib/api/endpoints'
+import { overlapApi, type OverlapMatrixDto } from '@/lib/api/endpoints'
 import { useAppStore } from '@/store/app-store'
 import MatrixTable from './matrix/MatrixTable'
 import PairList from './matrix/PairList'
 import AddRelationDialog from './matrix/AddRelationDialog'
 import ValidationPanel from './matrix/ValidationPanel'
 import CycleSelector from './matrix/CycleSelector'
-
-export interface CellDraft {
-  status: OverlapStatusValue
-  overlapDuration: number | null
-}
+import { RestoreRelationControl } from './matrix/RelationControls'
 
 export default function MatrixView({ projectId }: { projectId: string }) {
   const qc = useQueryClient()
   const openProject = useAppStore((s) => s.openProject)
   const [cycleId, setCycleId] = useState<string | null>(null)
   const [addOpen, setAddOpen] = useState(false)
-  const [drafts, setDrafts] = useState<Record<string, CellDraft>>({})
-  const [busy, setBusy] = useState(false)
 
   const matrixQ = useQuery({
     queryKey: qk.overlapMatrix(projectId, cycleId),
@@ -51,65 +46,6 @@ export default function MatrixView({ projectId }: { projectId: string }) {
     void qc.invalidateQueries({ queryKey: ['overlap-matrix', projectId] })
     void qc.invalidateQueries({ queryKey: ['element-relations'] })
     void qc.invalidateQueries({ queryKey: ['timing-sheet'] })
-  }
-
-  const commitMutation = useMutation({
-    mutationFn: async (payload: { cycleId: string; expectedOverlapRevision?: number; updates: Array<{ relationId: string; status: OverlapStatusValue; overlapDuration: number | null; expectedVersion?: number }> }) =>
-      overlapApi.setCycleOverlaps(payload.cycleId, { updates: payload.updates, expectedOverlapRevision: payload.expectedOverlapRevision }),
-    onSuccess: (res) => {
-      setDrafts({})
-      invalidate()
-      toast.success('تغییرات هم‌پوشانی ثبت شد', {
-        description: res.warnings.length > 0 ? undefined : 'فرم هر دو عنصر و ماتریس از همان منبع به‌روز شد.',
-      })
-      for (const w of res.warnings) {
-        toast.warning('هشدار — نتیجه موقتی است', { description: w })
-      }
-    },
-    onError: (err) => {
-      const msg = err instanceof Error ? err.message : 'ثبت تغییرات ناموفق بود'
-      // نمایش همهٔ دلایل قطعی (Payload multiline)
-      toast.error('ثبت تغییرات ممکن نیست', { description: msg })
-    },
-  })
-
-  const setDraft = (relationId: string, draft: CellDraft | null) => {
-    setDrafts((prev) => {
-      const next = { ...prev }
-      if (draft === null) delete next[relationId]
-      else next[relationId] = draft
-      return next
-    })
-  }
-
-  // §۷ ممیزی جلسه ۲ — تغییر چرخه باید Draftهای قبلی را پاک کند؛
-  // Draft چرخهٔ قبلی هرگز روی چرخهٔ جدید اعمال نمی‌شود.
-  const changeCycle = (nextCycleId: string | null) => {
-    setCycleId(nextCycleId)
-    setDrafts({})
-  }
-
-  const commitDrafts = async () => {
-    if (!cycleId || !matrix) return
-    const updates = Object.entries(drafts).map(([relationId, d]) => {
-      const existing = matrix.cells[relationId]
-      return {
-        relationId,
-        status: d.status,
-        overlapDuration: d.status === 'NO_OVERLAP' ? 0 : d.status === 'UNREVIEWED' ? null : d.overlapDuration,
-        expectedVersion: existing?.version,
-      }
-    })
-    setBusy(true)
-    try {
-      await commitMutation.mutateAsync({
-        cycleId,
-        expectedOverlapRevision: matrix.selectedCycle?.overlapRevision,
-        updates,
-      })
-    } finally {
-      setBusy(false)
-    }
   }
 
   const goTiming = () => openProject(projectId, 'timing')
@@ -128,9 +64,9 @@ export default function MatrixView({ projectId }: { projectId: string }) {
                 label="ماتریس هم‌پوشانی"
                 content={{
                   what: 'این ماتریس، روابط موازی عناصر کاری پروژه را در یک نما نشان می‌دهد. هر خانه، میزان هم‌پوشانی دو عنصر در چرخهٔ انتخاب‌شده را نمایش می‌دهد.',
-                  input: 'ابتدا یک «رابطهٔ موازی» بین دو عنصر تعریف کنید؛ سپس یک چرخه انتخاب کنید و مقدار هر خانه را با کلیک روی آن ثبت کنید. مقدار ثبت‌شده فقط برای همان چرخه است.',
-                  example: 'اگر عنصر «بارگذاری» و «پرس کوبی» هم‌زمان اجرا می‌شوند، رابطهٔ موازی آن‌ها را تعریف کنید و در هر چرخه مقدار هم‌پوشانی (مثلاً ۳٫۵ ثانیه) را ثبت کنید.',
-                  note: 'تغییر مقدار از فرم هر عنصر، ماتریس و فرم عنصر مقابل را هم‌زمان به‌روز می‌کند — همهٔ نماها به یک منبع داده وصل هستند. «بررسی‌نشده» به معنی صفر نیست.',
+                  input: 'این صفحه فقط برای مرور و تحلیل است. ثبت مقدار هم‌پوشانی در برگهٔ زمان‌سنجی و در زیرردیف همان رابطه انجام می‌شود؛ روابط را می‌توانید از فرم عنصر یا خود برگه تعریف کنید.',
+                  example: 'اگر عنصر «بارگذاری» و «پرس کوبی» هم‌زمان اجرا می‌شوند، رابطهٔ موازی آن‌ها را تعریف کنید؛ سپس مقدار هر چرخه را در زیرردیف همین رابطه در برگهٔ زمان‌سنجی ثبت کنید.',
+                  note: 'همهٔ نماها به یک منبع داده وصل هستند؛ تغییر مقدار از برگهٔ زمان‌سنجی، ماتریس و فرم هر دو عنصر را هم‌زمان به‌روز می‌کند. «بررسی‌نشده» به معنی صفر نیست.',
                 }}
               />
             </span>
@@ -146,26 +82,8 @@ export default function MatrixView({ projectId }: { projectId: string }) {
             matrix={matrix ?? null}
             isLoading={matrixQ.isLoading}
             cycleId={cycleId}
-            onChange={changeCycle}
+            onChange={setCycleId}
           />
-
-          {/* نوار ثبت تغییرات draft (§۴.۴) */}
-          {Object.keys(drafts).length > 0 && (
-            <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-brand/30 bg-brand-soft/50 p-3">
-              <p className="text-sm">
-                {Object.keys(drafts).length.toLocaleString('fa-IR')} تغییر ثبت‌نشده دارید. پس از «ثبت تغییرات»،
-                هم‌پوشانی چندتایی و اعتبارسنجی مجدداً محاسبه می‌شود.
-              </p>
-              <div className="flex gap-2">
-                <Button variant="ghost" size="sm" onClick={() => setDrafts({})} disabled={busy}>
-                  انصراف
-                </Button>
-                <Button size="sm" onClick={commitDrafts} disabled={busy || !cycleId}>
-                  {busy ? 'در حال ثبت…' : 'ثبت تغییرات'}
-                </Button>
-              </div>
-            </div>
-          )}
 
           {matrixQ.isLoading ? (
             <div className="h-48 animate-pulse rounded-2xl bg-muted" aria-label="در حال بارگذاری" />
@@ -196,34 +114,22 @@ export default function MatrixView({ projectId }: { projectId: string }) {
                 </p>
               ) : (
                 <p className="rounded-xl bg-amber-soft/60 p-3 text-sm">
-                  برای مشاهده و ویرایش مقادیر، یک چرخه انتخاب کنید. تا پیش از انتخاب چرخه، مقداری نمایش داده
-                  نمی‌شود (میانگین یا حدس زده نمی‌شود).
+                  برای مشاهدهٔ مقادیر، یک چرخه انتخاب کنید. تا پیش از انتخاب چرخه، مقداری نمایش داده نمی‌شود
+                  (میانگین یا حدس زده نمی‌شود).
                 </p>
               )}
 
-              {/* جدول دسکتاپ / لیست موبایل — §۷ ممیزی جلسه ۲:
-                  تا زمانی که چرخه‌ای انتخاب نشده، سلول‌ها کاملاً غیرقابل‌ویرایش‌اند؛
-                  موبایل و دسکتاپ رفتار یکسان دارند. */}
+              {/* جدول دسکتاپ / لیست موبایل — فقط‌خواندنی (§۱۱) */}
               <div className="hidden md:block">
-                <MatrixTable
-                  matrix={matrix ?? null}
-                  drafts={drafts}
-                  onDraft={setDraft}
-                  cycleSelected={!!cycleId}
-                />
+                <MatrixTable matrix={matrix ?? null} cycleSelected={!!cycleId} onGoTiming={goTiming} />
               </div>
               <div className="md:hidden">
-                <PairList
-                  matrix={matrix ?? null}
-                  drafts={drafts}
-                  onDraft={setDraft}
-                  cycleSelected={!!cycleId}
-                />
+                <PairList matrix={matrix ?? null} cycleSelected={!!cycleId} onGoTiming={goTiming} />
               </div>
 
               <ValidationPanel matrix={matrix ?? null} />
 
-              {/* روابط آرشیوشده — بازگردانی */}
+              {/* روابط آرشیوشده — بازگردانی در صورت معتبر بودن */}
               <ArchivedRelations matrix={matrix ?? null} onRestored={invalidate} />
             </>
           )}
@@ -238,7 +144,7 @@ export default function MatrixView({ projectId }: { projectId: string }) {
         onAdded={(rel) => {
           invalidate()
           toast.success(`رابطهٔ موازی «${rel.label}» افزوده شد`, {
-            description: 'این رابطه در ماتریس مرکزی و فرم زمان‌سنجی هر دو عنصر نمایش داده می‌شود.',
+            description: 'زیرردیف این رابطه در برگهٔ زمان‌سنجی (برای همهٔ اپراتورهای فعالیت) و فرم هر دو عنصر نمایش داده می‌شود.',
           })
         }}
       />
@@ -247,24 +153,11 @@ export default function MatrixView({ projectId }: { projectId: string }) {
 }
 
 function ArchivedRelations({ matrix, onRestored }: { matrix: OverlapMatrixDto | null; onRestored: () => void }) {
-  const [busyId, setBusyId] = useState<string | null>(null)
   const archived = useMemo(() => matrix?.relations.filter((r) => !r.isActive) ?? [], [matrix])
   const nameOf = (id: string) => matrix?.members.find((m) => m.elementId === id)?.name
   if (archived.length === 0) return null
-  const restore = async (relationId: string) => {
-    setBusyId(relationId)
-    try {
-      await overlapApi.restoreRelation(relationId)
-      onRestored()
-      toast.success('رابطه بازگردانی شد', {
-        description: 'مقادیر تاریخی چرخه‌های قبلی همین رابطه حفظ شده و دوباره فعال شد.',
-      })
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'بازگردانی ناموفق بود')
-    } finally {
-      setBusyId(null)
-    }
-  }
+  const isCrossActivity = (r: { elementLowId: string; elementHighId: string; archiveReason: string | null }) =>
+    r.archiveReason === 'CROSS_ACTIVITY_NOT_SUPPORTED_BY_SESSION_SHEET'
   return (
     <details className="rounded-xl border bg-surface-2 p-3">
       <summary className="cursor-pointer text-sm font-bold">
@@ -276,14 +169,13 @@ function ArchivedRelations({ matrix, onRestored }: { matrix: OverlapMatrixDto | 
             <span className="text-muted-foreground">
               {nameOf(r.elementLowId) ?? '؟'} ↔ {nameOf(r.elementHighId) ?? '؟'}
             </span>
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={busyId === r.id}
-              onClick={() => restore(r.id)}
-            >
-              بازگردانی
-            </Button>
+            <RestoreRelationControl
+              projectId={matrix?.projectId ?? ''}
+              relationId={r.id}
+              label={`${nameOf(r.elementLowId) ?? '؟'} ↔ ${nameOf(r.elementHighId) ?? '؟'}`}
+              crossActivity={isCrossActivity(r)}
+              onDone={onRestored}
+            />
           </li>
         ))}
       </ul>

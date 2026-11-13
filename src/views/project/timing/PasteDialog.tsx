@@ -1,10 +1,11 @@
 'use client'
 
 // ═══════════════════════════════════════════════════════════
-// Paste چندسلولی از Excel با پیش‌نمایش — FR-07 / ۷.۴
-// جریان: چسباندن متن در ناحیهٔ ورودی → پیش‌نمایش سروری با
-// اعتبارسنجی هر سلول (محل + علت دقیق) → انتخاب حالت ثبت
-// («همه یا هیچ» / «رد سلول‌های مشکل‌دار») → تأیید.
+// Paste چندسلولی از Excel با پیش‌نمایش — FR-07 / v1.5.0 §۸.۳
+// محور جدید: ردیف‌های داده = ردیف‌های شبکهٔ برگه (عنصر +
+// زیرردیف رابطه)، ستون‌های داده = چرخه‌ها. لنگر بر اساس
+// شناسهٔ ردیف و شمارهٔ چرخه است. پیش‌نمایش مشخص می‌کند هر
+// مقدار به کدام عنصر/رابطه و کدام چرخه وارد می‌شود.
 // Paste نامعتبر هرگز ثبت ناقص و پنهانی ایجاد نمی‌کند.
 // ═══════════════════════════════════════════════════════════
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -23,21 +24,19 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { HelpDot } from '@/components/common/HelpDot'
-import { timingApi, type PastePreviewDto } from '@/lib/api/endpoints'
+import { timingApi, type PastePreviewDto, type SessionSheetDto } from '@/lib/api/endpoints'
 import type { DisplayPrefs as Prefs } from '@/lib/format'
 import { formatTimeValue, formatInt } from '@/lib/format'
-
-export interface PasteAnchor {
-  cycleNo: number
-  colIndex: number
-}
+import type { GridPasteAnchor } from './SheetGrid'
+import type { ElementColumn } from './shared'
 
 export function PasteDialog({
   open,
   onOpenChange,
   sessionId,
   anchor,
-  elementNames,
+  sheet,
+  columns,
   prefs,
   initialText,
   onCommit,
@@ -45,8 +44,9 @@ export function PasteDialog({
   open: boolean
   onOpenChange: (open: boolean) => void
   sessionId: string
-  anchor: PasteAnchor
-  elementNames: string[]
+  anchor: GridPasteAnchor
+  sheet: SessionSheetDto
+  columns: ElementColumn[]
   prefs: Prefs
   initialText?: string
   /** ثبت واقعی توسط پنل انجام می‌شود (سازگار با Undo) */
@@ -73,7 +73,7 @@ export function PasteDialog({
     }
   }, [open, initialText])
 
-  // تجزیهٔ محلی متن به سطر×ستون (TSV/جدول)
+  // تجزیهٔ محلی متن به سطر×ستون (TSV/جدول) — سطر=ردیف شبکه، ستون=چرخه
   const parsedData = useMemo(() => {
     const t = text.replace(/\r\n?/g, '\n').replace(/\n+$/, '')
     if (!t.trim()) return null
@@ -85,7 +85,8 @@ export function PasteDialog({
       if (!parsedData) throw new Error('متن Paste خالی است')
       const res = await timingApi.pastePreview(sessionId, {
         startCycleNo: anchor.cycleNo,
-        startColIndex: anchor.colIndex,
+        startElementId: anchor.elementId,
+        startRelationId: anchor.relationId ?? undefined,
         data: parsedData,
       })
       return res.preview
@@ -116,7 +117,14 @@ export function PasteDialog({
     }
   }
 
-  const targetElement = elementNames[anchor.colIndex]
+  const anchorRelation = anchor.relationId
+    ? sheet.parallelRelations.find((r) => r.relationId === anchor.relationId)
+    : null
+  const anchorElementName =
+    columns.find((c) => c.id === anchor.elementId)?.name ??
+    sheet.elements.find((e) => e.id === anchor.elementId)?.name
+
+  const maxCols = preview ? Math.max(...preview.rows.map((r) => r.cells.length), 0) : 0
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -128,16 +136,16 @@ export function PasteDialog({
             <HelpDot
               label="Paste چندسلولی"
               content={{
-                what: 'کپی چند سطر و ستون از Excel و ثبت هم‌زمان آن‌ها در برگهٔ زمان‌سنجی.',
-                input: 'محدودهٔ موردنظر را در Excel کپی کنید (Ctrl+C) و همین‌جا بچسبانید (Ctrl+V). ستون‌ها از عنصری که سلول فعال روی آن است شروع می‌شوند و سطرها از چرخهٔ همان ردیف.',
-                example: 'اگر ۳ ستون عنصر دارید و ۵ چرخه Paste می‌کنید، یک محدودهٔ ۵×۳ کپی کنید. برای عنصر هم‌زمان می‌توانید به‌جای یک عدد، «۳-۹» (شروع تا پایان) بنویسید.',
+                what: 'کپی چند سطر و ستون از Excel و ثبت هم‌زمان آن‌ها در برگهٔ زمان‌سنجی — با چیدمان جدید: هر سطر داده یک ردیف شبکه (عنصر یا زیرردیف هم‌پوشانی) و هر ستون داده یک چرخه.',
+                input: 'محدودهٔ موردنظر را در Excel کپی کنید (Ctrl+C) و همین‌جا بچسبانید (Ctrl+V). سطرها از ردیفی که سلول فعال روی آن است و ستون‌ها از چرخهٔ همان ستون شروع می‌شوند.',
+                example: 'اگر ۳ عنصر دارید و ۵ چرخه Paste می‌کنید، یک محدودهٔ ۳ سطر × ۵ ستون کپی کنید. برای عنصر هم‌زمان به‌جای یک عدد «۳-۹» (شروع تا پایان) و برای زیرردیف هم‌پوشانی خالی/۰/مقدار مثبت بنویسید.',
                 note: 'هیچ داده‌ای بدون پیش‌نمایش و تأیید شما ثبت نمی‌شود؛ خطای هر سلول با محل و علت دقیق نمایش داده می‌شود.',
               }}
             />
           </DialogTitle>
           <DialogDescription>
             مبدأ: چرخهٔ {formatInt(anchor.cycleNo, prefs)}
-            {targetElement ? `، عنصر «${targetElement}»` : '، بدون عنصر (ابتدا سلولی از برگه انتخاب کنید)'}
+            {anchorElementName ? `، ردیف «${anchorRelation ? `هم‌پوشانی (${anchorElementName} ↔ ${anchorRelation.elementLowId === anchor.elementId ? anchorRelation.elementHighName : anchorRelation.elementLowName})` : anchorElementName}»` : '، بدون ردیف (ابتدا سلولی از برگه انتخاب کنید)'}
           </DialogDescription>
         </DialogHeader>
 
@@ -167,7 +175,8 @@ export function PasteDialog({
               className="num min-h-24 w-full rounded-xl border bg-background p-3 font-mono text-xs focus-visible:outline-2 focus-visible:outline-ring"
             />
             <p className="text-[11px] text-muted-foreground">
-              جداکنندهٔ ستون: Tab — جداکنندهٔ اعشار: نقطه یا «٫» — بازه: «۳-۹» یا «۳ تا ۹» — خالی/«-» = بدون تغییر
+              هر سطر = یک ردیف شبکه (عنصر یا زیرردیف هم‌پوشانی) — هر ستون = یک چرخه — جداکنندهٔ ستون: Tab — اعشار:
+              نقطه یا «٫» — بازهٔ عنصر: «۳-۹» — زیرردیف هم‌پوشانی: خالی/۰/مقدار مثبت — خالی = بدون تغییر
             </p>
           </div>
 
@@ -181,7 +190,7 @@ export function PasteDialog({
             پیش‌نمایش و اعتبارسنجی
           </Button>
 
-          {/* پیش‌نمایش */}
+          {/* پیش‌نمایش — چیدمان مطابق جدول جدید (§۸.۳) */}
           {preview && (
             <div className="space-y-3">
               <div className="flex flex-wrap items-center gap-2 text-xs">
@@ -208,33 +217,36 @@ export function PasteDialog({
                 )}
               </div>
 
-              {/* جدول پیش‌نمایش */}
+              {/* جدول پیش‌نمایش — ردیف=شبکه، ستون=چرخه */}
               <div className="overflow-x-auto rounded-xl border">
                 <table className="w-full text-xs">
                   <thead>
                     <tr className="border-b bg-surface-2/70 text-right">
-                      <th className="px-2 py-2 font-bold">چرخه</th>
-                      {Array.from({ length: Math.max(...preview.rows.map((r) => r.cells.length)) }).map((_, i) => (
-                        <th key={i} className="px-2 py-2 font-bold">
-                          {elementNames[anchor.colIndex + i] ?? `ستون ${anchor.colIndex + i + 1}`}
+                      <th className="px-2 py-2 font-bold">عنصر / رابطه</th>
+                      {Array.from({ length: maxCols }).map((_, i) => (
+                        <th key={i} className="num px-2 py-2 text-center font-bold">
+                          چرخهٔ {formatInt(preview.startCycleNo + i, prefs)}
                         </th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
                     {preview.rows.map((row) => (
-                      <tr key={row.cycleNo} className="border-b last:border-0">
-                        <td className="num px-2 py-1.5 font-bold">
-                          {formatInt(row.cycleNo, prefs)}
-                          {row.isNew && <span className="mr-1 text-[10px] text-brand">(جدید)</span>}
+                      <tr key={row.row} className={`border-b last:border-0 ${row.kind === 'RELATION' ? 'bg-surface-2/40' : ''}`}>
+                        <td className="px-2 py-1.5 font-bold">
+                          {row.kind === 'RELATION' ? (
+                            <span className="text-[11px] text-muted-foreground">↳ هم‌پوشانی با {row.otherElementName}</span>
+                          ) : (
+                            row.elementName
+                          )}
                         </td>
-                        {Array.from({ length: Math.max(...preview.rows.map((r) => r.cells.length)) }).map((_, ci) => {
+                        {Array.from({ length: maxCols }).map((_, ci) => {
                           const cell = row.cells[ci]
                           if (!cell) return <td key={ci} className="px-2 py-1.5" />
                           return (
                             <td
                               key={ci}
-                              className={`px-2 py-1.5 ${
+                              className={`px-2 py-1.5 text-center ${
                                 cell.status === 'ERROR'
                                   ? 'bg-red-soft/60 text-red'
                                   : cell.status === 'WARN'
@@ -249,16 +261,23 @@ export function PasteDialog({
                                 <p className="num">
                                   {cell.status === 'SKIP'
                                     ? '—'
-                                    : cell.startOffset !== undefined
-                                      ? `${formatTimeValue(cell.startOffset ?? 0, prefs)}–${formatTimeValue(cell.endOffset ?? 0, prefs)}`
-                                      : formatTimeValue(
-                                          cell.cumulativeReading ?? cell.rawDuration ?? cell.previewDerived ?? null,
-                                          prefs
-                                        )}
+                                    : cell.relationId
+                                      ? cell.overlapStatus === 'NO_OVERLAP'
+                                        ? '۰ (بدون هم‌پوشانی)'
+                                        : cell.overlapStatus === 'OVERLAP'
+                                          ? formatTimeValue(cell.overlapDuration ?? null, prefs)
+                                          : '—'
+                                      : cell.startOffset !== undefined
+                                        ? `${formatTimeValue(cell.startOffset ?? 0, prefs)}–${formatTimeValue(cell.endOffset ?? 0, prefs)}`
+                                        : formatTimeValue(
+                                            cell.cumulativeReading ?? cell.rawDuration ?? cell.previewDerived ?? null,
+                                            prefs
+                                          )}
                                 </p>
                                 {(() => {
                                   const isOkWithDerived =
                                     cell.status === 'OK' &&
+                                    !cell.relationId &&
                                     cell.cumulativeReading !== undefined &&
                                     cell.previewDerived !== undefined &&
                                     cell.previewDerived !== null

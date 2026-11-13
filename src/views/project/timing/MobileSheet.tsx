@@ -1,29 +1,39 @@
 'use client'
 
 // ═══════════════════════════════════════════════════════════
-// برگهٔ زمان‌سنجی موبایل — حالت کارت/فرم چرخه — FR-07 / FR-30
-// همان مدل داده و همان قواعد اعتبارسنجی دسکتاپ؛
-// جدول به کارت تبدیل می‌شود نه حذف قابلیت.
+// برگهٔ زمان‌سنجی موبایل — v1.5.0 §۹.۳
+// همان مدل محوری دسکتاپ حفظ می‌شود (عنصر=ردیف، چرخه=ستون)؛
+// نام عنصر/رابطه ثابت سمت راست، ستون‌های چرخه در سمت چپ با
+// اسکرول افقی، هدر چسبان، ارتفاع لمسی، بدون نیاز به Hover.
+// به مدل قدیمی «کارت برای هر چرخه» برنمی‌گردد.
 // ═══════════════════════════════════════════════════════════
-import { useEffect, useState } from 'react'
-import { AlertTriangle, Check, ChevronDown, Eraser, Plus, Trash2, XCircle } from 'lucide-react'
+import { useMemo, useState } from 'react'
+import { AlertTriangle, Check, CornerDownRight, Plus, StickyNote, XCircle } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import type { CycleRowDto, ObservationCellDto, SessionSheetDto } from '@/lib/api/endpoints'
 import type { DisplayPrefs as Prefs } from '@/lib/format'
-import { formatTimeValue, formatInt } from '@/lib/format'
+import { formatInt, formatTimeValue } from '@/lib/format'
 import {
-  ELEMENT_TYPE_BADGE,
+  buildRows,
+  cellDisplayValue,
   cellEditValue,
+  computedOverlapFor,
   findObservation,
+  overlapCellOf,
   parseCellInput,
+  parseOverlapInput,
   payloadFromParsed,
+  relationComparability,
   type CellPayload,
   type ElementColumn,
+  type GridRow,
+  type OverlapCellState,
 } from './shared'
-import { CycleTimeline } from './CycleTimeline'
+import { AddRelationControl, ArchiveRelationControl } from '../matrix/RelationControls'
 import { SuspectDiagnosticDialog, type SuspectDiagTarget } from './SuspectDiagnosticDialog'
 import { DeleteCycleConfirm } from './DeleteCycleConfirm'
+import { CycleDetailDialog } from './CycleDetailDialog'
 
 interface MobileSheetProps {
   sheet: SessionSheetDto
@@ -31,6 +41,8 @@ interface MobileSheetProps {
   prefs: Prefs
   editable: boolean
   commitCell: (cycle: CycleRowDto, column: ElementColumn, payload: CellPayload) => void
+  commitOverlap: (relationId: string, cycle: CycleRowDto, state: OverlapCellState) => void
+  onCellError: (key: string, message: string) => void
   onDeleteCycle: (cycle: CycleRowDto) => void
   onSetValidity: (cycle: CycleRowDto, obs: ObservationCellDto) => void
   onUpdateNotes: (cycle: CycleRowDto, notes: string) => void
@@ -44,51 +56,160 @@ export function MobileSheet({
   prefs,
   editable,
   commitCell,
+  commitOverlap,
+  onCellError,
   onDeleteCycle,
   onSetValidity,
   onUpdateNotes,
   onAddCycle,
   adding,
 }: MobileSheetProps) {
-  const [expanded, setExpanded] = useState<string | null>(null)
-  // هدف دیالوگ تشخیص مشاهدهٔ مشکوک — §۱۲.۳
   const [diagTarget, setDiagTarget] = useState<SuspectDiagTarget | null>(null)
-  // چرخهٔ در انتظار تأیید حذف — §۱۲.۴
   const [deleteTarget, setDeleteTarget] = useState<CycleRowDto | null>(null)
+  const [detailTarget, setDetailTarget] = useState<CycleRowDto | null>(null)
+
+  const cycles = sheet.cycles
   const method = sheet.session.timingMethod
+  const rows: GridRow[] = useMemo(() => buildRows(sheet, columns), [sheet, columns])
+  const relationById = useMemo(
+    () => new Map(sheet.parallelRelations.map((r) => [r.relationId, r])),
+    [sheet.parallelRelations]
+  )
+  const nameOf = (id: string) => sheet.elements.find((e) => e.id === id)?.name ?? '؟'
 
   return (
     <div className="space-y-3">
-      {sheet.cycles.length === 0 && (
-        <div className="card-premium p-8 text-center text-sm text-muted-foreground">
-          هنوز چرخه‌ای ثبت نشده است.
+      <div className="card-premium overflow-hidden">
+        {/* سربرگ جلسه */}
+        <div className="card-head flex items-center justify-between gap-2 px-3 py-2">
+          <p className="num text-xs font-bold">
+            {formatInt(cycles.length, prefs)} چرخه — {sheet.operator.displayName}
+          </p>
+          <Button size="sm" variant="outline" onClick={onAddCycle} disabled={adding || !editable} className="gap-1">
+            <Plus className="size-3.5" aria-hidden />
+            چرخه
+          </Button>
         </div>
-      )}
-      {sheet.cycles.map((cycle) => (
-        <MobileCycleCard
-          key={cycle.id}
-          cycle={cycle}
-          sheet={sheet}
-          columns={columns}
-          prefs={prefs}
-          editable={editable}
-          expanded={expanded === cycle.id}
-          onToggle={() => setExpanded(expanded === cycle.id ? null : cycle.id)}
-          commitCell={commitCell}
-          onDeleteCycle={onDeleteCycle}
-          onSetValidity={onSetValidity}
-          onDiagnose={(obs, elementName) => setDiagTarget({ cycle, obs, elementName })}
-          onUpdateNotes={onUpdateNotes}
-        />
-      ))}
-      {editable && (
-        <Button onClick={onAddCycle} disabled={adding} className="btn-brand w-full gap-1.5 border-0">
-          <Plus className="size-4" aria-hidden />
-          افزودن چرخه
-        </Button>
-      )}
 
-      {/* دیالوگ تشخیص مشاهدهٔ مشکوک — §۱۲.۳ */}
+        {/* جدول معکوس‌شده لمسی — §۹.۳ */}
+        <div className="timing-grid-mobile max-h-[70vh] overflow-auto" dir="rtl">
+          <table className="w-full border-collapse text-sm">
+            <thead className="sticky top-0 z-20">
+              <tr className="bg-surface-2/95 backdrop-blur">
+                <th className="sticky right-0 z-30 min-w-32 border-b border-l bg-surface-2/95 px-2 py-2 text-center text-[10px] font-bold backdrop-blur">
+                  عنصر / رابطه
+                </th>
+                {cycles.length === 0 && (
+                  <th className="border-b px-2 py-2 text-center text-[10px] font-bold text-muted-foreground">
+                    چرخه‌ای نیست
+                  </th>
+                )}
+                {cycles.map((cycle) => (
+                  <th key={cycle.id} className="min-w-20 border-b border-l px-1 py-1.5 text-center last:border-l-0">
+                    <button
+                      type="button"
+                      onClick={() => setDetailTarget(cycle)}
+                      className="flex w-full flex-col items-center gap-0.5 rounded-lg px-1 py-1 transition-colors active:bg-brand-soft/60"
+                      aria-label={`جزئیات چرخهٔ ${cycle.cycleNo}`}
+                    >
+                      <span className="num text-sm font-extrabold">{formatInt(cycle.cycleNo, prefs)}</span>
+                      <span className="flex items-center gap-0.5">
+                        {cycle.isComplete ? (
+                          <Check className="size-3.5 text-green" aria-hidden />
+                        ) : (
+                          <AlertTriangle className="size-3.5 text-amber" aria-hidden />
+                        )}
+                        {cycle.notes && <StickyNote className="size-3 text-faint" aria-hidden />}
+                      </span>
+                    </button>
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {cycles.length === 0 && (
+                <tr>
+                  <td colSpan={2} className="px-4 py-8 text-center text-xs text-muted-foreground">
+                    هنوز چرخه‌ای ثبت نشده است؛ با دکمهٔ «چرخه» شروع کنید.
+                  </td>
+                </tr>
+              )}
+              {rows.map((row) =>
+                row.kind === 'ELEMENT' ? (
+                  <MobileElementRow
+                    key={`el:${row.elementId}`}
+                    row={row}
+                    column={columns[row.elementIndex]}
+                    sheet={sheet}
+                    cycles={cycles}
+                    prefs={prefs}
+                    editable={editable}
+                    method={method}
+                    commitCell={commitCell}
+                    onCellError={onCellError}
+                    onOpenDiag={(cycle, obs) => setDiagTarget({ cycle, obs, elementName: row.name })}
+                  />
+                ) : (
+                  <MobileParallelRow
+                    key={row.displayKey}
+                    row={row}
+                    relation={relationById.get(row.relationId)}
+                    sheet={sheet}
+                    cycles={cycles}
+                    prefs={prefs}
+                    editable={editable}
+                    commitOverlap={commitOverlap}
+                    onCellError={onCellError}
+                    nameOf={nameOf}
+                  />
+                )
+              )}
+            </tbody>
+            {cycles.length > 0 && rows.length > 0 && (
+              <tfoot className="sticky bottom-0 bg-surface-2/95 backdrop-blur">
+                <tr>
+                  <th scope="row" className="sticky right-0 z-10 border-t bg-surface-2/95 px-2 py-1.5 text-right text-[10px] font-bold text-muted-foreground backdrop-blur">
+                    سپری‌شده
+                  </th>
+                  {cycles.map((cycle) => (
+                    <td key={cycle.id} className="border-t border-l px-1 py-1.5 text-center last:border-l-0">
+                      {cycle.elapsed === null ? (
+                        <span className="text-[9px] text-faint">تکمیل</span>
+                      ) : (
+                        <span className="num inline-flex items-center gap-0.5 text-[10px] font-bold">
+                          {formatTimeValue(cycle.elapsed, prefs)}
+                          {cycle.elapsedExcludesSequential && <AlertTriangle className="size-2.5 text-amber" aria-hidden />}
+                        </span>
+                      )}
+                    </td>
+                  ))}
+                </tr>
+              </tfoot>
+            )}
+          </table>
+        </div>
+      </div>
+
+      {/* دیالوگ جزئیات چرخه — §۸.۱ */}
+      <CycleDetailDialog
+        cycle={detailTarget}
+        sheet={sheet}
+        columns={columns}
+        prefs={prefs}
+        editable={editable}
+        onClose={() => setDetailTarget(null)}
+        onDelete={(c) => {
+          setDetailTarget(null)
+          setDeleteTarget(c)
+        }}
+        onSetValidity={onSetValidity}
+        onDiagnose={(obs) => {
+          const cycle = detailTarget
+          if (cycle) setDiagTarget({ cycle, obs, elementName: columns.find((c) => c.id === obs.workElementId)?.name ?? '' })
+        }}
+        onUpdateNotes={onUpdateNotes}
+      />
+
       <SuspectDiagnosticDialog
         target={diagTarget}
         prefs={prefs}
@@ -99,7 +220,6 @@ export function MobileSheet({
         }}
       />
 
-      {/* تأیید حذف چرخه — §۱۲.۴ (حذف یک‌کلیکی غیرممکن است) */}
       <DeleteCycleConfirm
         cycle={deleteTarget}
         sheet={sheet}
@@ -117,196 +237,143 @@ export function MobileSheet({
   )
 }
 
-function MobileCycleCard({
-  cycle,
+// ── ردیف اصلی عنصر با ورودی‌های لمسی ──
+
+function MobileElementRow({
+  row,
+  column,
   sheet,
-  columns,
+  cycles,
   prefs,
   editable,
-  expanded,
-  onToggle,
+  method,
   commitCell,
-  onDeleteCycle,
-  onSetValidity,
-  onDiagnose,
-  onUpdateNotes,
+  onCellError,
+  onOpenDiag,
 }: {
-  cycle: CycleRowDto
+  row: Extract<GridRow, { kind: 'ELEMENT' }>
+  column: ElementColumn | undefined
   sheet: SessionSheetDto
-  columns: ElementColumn[]
+  cycles: CycleRowDto[]
   prefs: Prefs
   editable: boolean
-  expanded: boolean
-  onToggle: () => void
+  method: 'SNAPBACK' | 'CONTINUOUS'
   commitCell: (cycle: CycleRowDto, column: ElementColumn, payload: CellPayload) => void
-  onDeleteCycle: (cycle: CycleRowDto) => void
-  onSetValidity: (cycle: CycleRowDto, obs: ObservationCellDto) => void
-  /** بازکردن دیالوگ تشخیص برای مشاهدهٔ مشکوک — §۱۲.۳ */
-  onDiagnose: (obs: ObservationCellDto, elementName: string) => void
-  onUpdateNotes: (cycle: CycleRowDto, notes: string) => void
+  onCellError: (key: string, message: string) => void
+  onOpenDiag: (cycle: CycleRowDto, obs: ObservationCellDto) => void
 }) {
-  const method = sheet.session.timingMethod
-  const [notes, setNotes] = useState(cycle.notes ?? '')
-  const [notesDirty, setNotesDirty] = useState(false)
+  const candidates = useMemo(
+    () =>
+      column
+        ? sheet.elements
+            .filter(
+              (e) =>
+                e.id !== column.id &&
+                !sheet.parallelRelations.some(
+                  (r) =>
+                    (r.elementLowId === column.id && r.elementHighId === e.id) ||
+                    (r.elementHighId === column.id && r.elementLowId === e.id)
+                )
+            )
+            .map((e) => ({
+              elementId: e.id,
+              name: e.name,
+              activityName: sheet.activity.name,
+              stationName: sheet.activity.stationName,
+            }))
+        : [],
+    [column, sheet]
+  )
 
-  // همگام‌سازی با تغییر سرور (Undo/Redo) — تنظیم حالت در رندر
-  const [prevServerNotes, setPrevServerNotes] = useState(cycle.notes ?? '')
-  if ((cycle.notes ?? '') !== prevServerNotes) {
-    setPrevServerNotes(cycle.notes ?? '')
-    if (!notesDirty) setNotes(cycle.notes ?? '')
-  }
+  if (!column) return null
+  const stats = sheet.stats.perElement[column.id]
 
   return (
-    <div className="card-premium overflow-hidden">
-      {/* سربرگ کارت */}
-      <button
-        type="button"
-        onClick={onToggle}
-        aria-expanded={expanded}
-        className="flex w-full items-center justify-between gap-2 p-3 text-right"
-      >
-        <span className="flex items-center gap-2">
-          <span className="num flex size-9 items-center justify-center rounded-xl bg-brand-soft text-sm font-extrabold text-brand">
-            {formatInt(cycle.cycleNo, prefs)}
-          </span>
-          <span className="text-right">
-            <span className="block text-xs font-bold">چرخه</span>
-            <span className="num flex items-center gap-1.5 text-[11px] text-muted-foreground">
-              {cycle.elapsed !== null ? (
-                <>
-                  <span className="font-bold">{formatTimeValue(cycle.elapsed, prefs)} ثانیه</span>
-                  {cycle.elapsedExcludesSequential && <AlertTriangle className="size-3 text-amber" aria-hidden />}
-                </>
-              ) : (
-                <span>نیازمند تکمیل</span>
-              )}
-            </span>
-          </span>
-        </span>
-        <span className="flex items-center gap-1.5">
-          {cycle.isComplete ? (
-            <span className="flex items-center gap-1 rounded-full bg-green-soft px-2 py-0.5 text-[10px] font-bold text-green">
-              <Check className="size-3" aria-hidden /> کامل
-            </span>
-          ) : (
-            <span className="flex items-center gap-1 rounded-full bg-amber-soft px-2 py-0.5 text-[10px] font-bold text-amber">
-              <AlertTriangle className="size-3" aria-hidden /> ناقص
-            </span>
-          )}
-          {cycle.hasExcluded && (
-            <span className="flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[10px] font-bold text-faint">
-              <Eraser className="size-3" aria-hidden /> خروج
-            </span>
-          )}
-          <ChevronDown className={`size-4 text-muted-foreground transition-transform ${expanded ? 'rotate-180' : ''}`} aria-hidden />
-        </span>
-      </button>
-
-      {expanded && (
-        <div className="space-y-3 border-t p-3">
-          {/* فرم عناصر — همان اعتبارسنجی — FR-07 */}
-          <div className="space-y-3">
-            {columns.map((col) => {
-              const obs = findObservation(cycle, col.id)
-              const excluded = obs?.validityStatus === 'EXCLUDED'
-              return (
-                <MobileElementField
-                  key={col.id}
-                  cycle={cycle}
-                  column={col}
-                  obs={obs}
-                  method={method}
-                  prefs={prefs}
-                  editable={editable && !excluded}
-                  commitCell={commitCell}
-                  onSetValidity={() => obs && onSetValidity(cycle, obs)}
-                  onDiagnose={() => obs && onDiagnose(obs, col.name)}
-                />
-              )
-            })}
+    <tr className="border-t-2 border-border/70">
+      <th scope="row" className="sticky right-0 z-10 border-b border-l bg-card/95 px-2 py-1.5 text-right backdrop-blur">
+        <div className="flex items-start justify-between gap-1">
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-xs font-extrabold" title={row.name}>
+              {row.name}
+            </p>
+            {stats && stats.calcCount > 0 && (
+              <span className="num text-[10px] text-faint" title="مشاهدات وارد محاسبه">
+                {formatInt(stats.calcCount, prefs)}/{formatInt(stats.totalCount, prefs)}
+              </span>
+            )}
           </div>
-
-          {/* خط زمانی — FR-10 */}
-          <CycleTimeline cycle={cycle} sheet={sheet} prefs={prefs} />
-
-          {/* یادداشت */}
-          <div className="space-y-1">
-            <p className="text-[11px] font-bold text-muted-foreground">یادداشت چرخه</p>
-            <textarea
-              value={notes}
-              onChange={(e) => {
-                setNotes(e.target.value)
-                setNotesDirty(true)
-              }}
-              onBlur={() => {
-                if (notesDirty) {
-                  onUpdateNotes(cycle, notes)
-                  setNotesDirty(false)
-                }
-              }}
-              disabled={!editable}
-              rows={2}
-              className="w-full rounded-xl border bg-background p-2 text-xs focus-visible:outline-2 focus-visible:outline-ring"
-            />
-          </div>
-
           {editable && (
-            <div className="flex items-center justify-between gap-2 pt-1">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => onDeleteCycle(cycle)}
-                className="gap-1.5 text-red hover:text-red"
-              >
-                <Trash2 className="size-3.5" aria-hidden />
-                حذف چرخه…
-              </Button>
-              <span className="text-[10px] text-faint">حذف با Undo قابل بازگردانی است</span>
-            </div>
+            <AddRelationControl
+              projectId={sheet.activity.projectId}
+              elementId={row.elementId}
+              elementName={row.name}
+              candidates={candidates}
+              trigger={
+                <button
+                  type="button"
+                  aria-label={`افزودن عنصر موازی برای ${row.name}`}
+                  title="افزودن رابطهٔ موازی — فقط عناصر همین فعالیت"
+                  className="flex size-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors active:bg-brand-soft active:text-brand"
+                >
+                  <CornerDownRight className="size-4 rotate-90" aria-hidden />
+                </button>
+              }
+            />
           )}
         </div>
-      )}
-    </div>
+      </th>
+      {cycles.map((cycle) => (
+        <MobileElementCell
+          key={cycle.id}
+          cycle={cycle}
+          column={column}
+          rowName={row.name}
+          prefs={prefs}
+          editable={editable}
+          method={method}
+          commitCell={commitCell}
+          onCellError={onCellError}
+          onOpenDiag={onOpenDiag}
+        />
+      ))}
+    </tr>
   )
 }
 
-function MobileElementField({
+function MobileElementCell({
   cycle,
   column,
-  obs,
-  method,
+  rowName,
   prefs,
   editable,
+  method,
   commitCell,
-  onSetValidity,
-  onDiagnose,
+  onCellError,
+  onOpenDiag,
 }: {
   cycle: CycleRowDto
   column: ElementColumn
-  obs: ObservationCellDto | undefined
-  method: 'SNAPBACK' | 'CONTINUOUS'
+  rowName: string
   prefs: Prefs
   editable: boolean
+  method: 'SNAPBACK' | 'CONTINUOUS'
   commitCell: (cycle: CycleRowDto, column: ElementColumn, payload: CellPayload) => void
-  onSetValidity: () => void
-  /** بازکردن دیالوگ تشخیص مشاهدهٔ مشکوک — §۱۲.۳ */
-  onDiagnose: () => void
+  onCellError: (key: string, message: string) => void
+  onOpenDiag: (cycle: CycleRowDto, obs: ObservationCellDto) => void
 }) {
-  const init = cellEditValue(obs, method)
-  const [seq, setSeq] = useState(init.seq)
-  const [start, setStart] = useState(init.start)
-  const [end, setEnd] = useState(init.end)
-  const [error, setError] = useState<string | null>(null)
-
-  // همگام‌سازی با دادهٔ سرور (Undo/Redo) — تنظیم حالت در رندر
+  const obs = findObservation(cycle, column.id)
+  const v = cellEditValue(obs, method)
+  const [seq, setSeq] = useState(v.seq)
+  const [start, setStart] = useState(v.start)
+  const [end, setEnd] = useState(v.end)
+  // همگام‌سازی با تغییر سرور (Undo/Redo) — تنظیم حالت در رندر
   const [prevObs, setPrevObs] = useState(obs)
   if (obs !== prevObs) {
     setPrevObs(obs)
-    const v = cellEditValue(obs, method)
-    setSeq(v.seq)
-    setStart(v.start)
-    setEnd(v.end)
-    setError(null)
+    const nv = cellEditValue(obs, method)
+    setSeq(nv.seq)
+    setStart(nv.start)
+    setEnd(nv.end)
   }
 
   const commit = () => {
@@ -314,114 +381,273 @@ function MobileElementField({
     if (column.entryMode === 'INT') {
       const s = start.trim()
       const e = end.trim()
-      parsed = s === '' && e === '' ? ({ kind: 'EMPTY' } as const) : parseCellInput(s === '' || e === '' ? s || e : `${s}-${e}`)
+      parsed = s === '' && e === '' ? ({ kind: 'EMPTY' } as const) : parseCellInput(s === '' || e === '' ? (s || e) : `${s}-${e}`)
     } else {
       parsed = parseCellInput(seq)
     }
     const result = payloadFromParsed(parsed, column, method)
     if ('error' in result) {
-      setError(result.error)
-      toast.error(`${column.name}: ${result.error}`)
+      onCellError(`${column.id}:${cycle.id}`, result.error)
+      toast.error(result.error)
     } else {
-      setError(null)
       commitCell(cycle, column, result)
     }
   }
 
   const excluded = obs?.validityStatus === 'EXCLUDED'
+  const suspect = obs?.validityStatus === 'SUSPECT'
+  const invalid = obs?.validityStatus === 'INVALID'
+  const partialInterval = obs && (obs.startOffset !== null) !== (obs.endOffset !== null)
 
   return (
-    <div className={`space-y-1 rounded-xl border p-2.5 ${excluded ? 'opacity-60' : ''}`}>
-      <div className="flex items-center justify-between gap-2">
-        <p className="flex min-w-0 items-center gap-1.5 text-xs font-bold">
-          <span className={`shrink-0 rounded-full px-1.5 py-px text-[10px] font-bold ${ELEMENT_TYPE_BADGE[column.elementType].className}`}>
-            {ELEMENT_TYPE_BADGE[column.elementType].label}
-          </span>
-          <span className="truncate">{column.name}</span>
-        </p>
-        <span className="num shrink-0 text-[10px] text-faint">
-          {obs?.derivedDuration != null ? `مدت: ${formatTimeValue(obs.derivedDuration, prefs)}` : '—'}
-        </span>
-      </div>
-
-      {column.entryMode === 'INT' ? (
-        // گروه بصری «از/تا» برای ورودی بازه‌ای — §۱۲.۲
-        <div
-          dir="ltr"
-          className="grid grid-cols-[1fr_auto_1fr] items-end gap-1 rounded-lg border bg-background p-1 focus-within:border-brand focus-within:ring-1 focus-within:ring-brand"
+    <td
+      className={`relative border-b border-l p-0.5 text-center align-middle last:border-l-0 ${
+        suspect ? 'bg-amber-soft/50' : ''
+      } ${invalid ? 'bg-red-soft/60' : ''} ${excluded ? 'bg-muted/60' : ''} ${partialInterval ? 'ring-1 ring-inset ring-amber/60' : ''}`}
+    >
+      {excluded ? (
+        <button
+          type="button"
+          onClick={() => obs && onOpenDiag(cycle, obs)}
+          className="num w-full px-1 py-2 text-[10px] text-faint line-through"
+          title="خارج‌شده از محاسبات — برای بازگشت، جزئیات چرخه را باز کنید"
         >
-          <label className="flex min-w-0 flex-col items-center gap-0.5">
-            <span className="text-[10px] font-bold leading-none text-muted-foreground" aria-hidden>
-              از
-            </span>
+          خارج
+        </button>
+      ) : suspect && obs ? (
+        <button
+          type="button"
+          onClick={() => onOpenDiag(cycle, obs)}
+          className="flex w-full flex-col items-center gap-0.5 px-1 py-1.5 text-amber"
+          aria-label="تشخیص مشاهدهٔ مشکوک"
+        >
+          <AlertTriangle className="size-4" aria-hidden />
+          <span className="num text-[10px]">{cellDisplayValue(obs, method, prefs)}</span>
+        </button>
+      ) : editable ? (
+        column.entryMode === 'INT' ? (
+          <span dir="ltr" className="inline-flex items-end justify-center gap-0.5 rounded-md border bg-background px-0.5 py-0.5">
             <input
               value={start}
               onChange={(e) => setStart(e.target.value)}
               onBlur={commit}
-              disabled={!editable}
+              aria-label={`شروع بازهٔ ${rowName} چرخهٔ ${cycle.cycleNo}`}
+              className="num w-11 rounded-sm border-0 bg-transparent px-0.5 py-1 text-center text-xs focus-visible:bg-brand-soft/40 focus-visible:outline-none"
               inputMode="decimal"
-              aria-label={`شروع بازهٔ ${column.name}`}
-              placeholder="شروع"
               dir="ltr"
-              className="num w-full rounded-md bg-muted/50 px-2 py-1.5 text-center text-xs focus-visible:bg-brand-soft/40 focus-visible:outline-none"
             />
-          </label>
-          <span className="self-end pb-2.5 text-faint" aria-hidden>
-            –
-          </span>
-          <label className="flex min-w-0 flex-col items-center gap-0.5">
-            <span className="text-[10px] font-bold leading-none text-muted-foreground" aria-hidden>
-              تا
-            </span>
+            <span className="pb-1.5 text-faint" aria-hidden>–</span>
             <input
               value={end}
               onChange={(e) => setEnd(e.target.value)}
               onBlur={commit}
-              disabled={!editable}
+              aria-label={`پایان بازهٔ ${rowName} چرخهٔ ${cycle.cycleNo}`}
+              className="num w-11 rounded-sm border-0 bg-transparent px-0.5 py-1 text-center text-xs focus-visible:bg-brand-soft/40 focus-visible:outline-none"
               inputMode="decimal"
-              aria-label={`پایان بازهٔ ${column.name}`}
-              placeholder="پایان"
               dir="ltr"
-              className="num w-full rounded-md bg-muted/50 px-2 py-1.5 text-center text-xs focus-visible:bg-brand-soft/40 focus-visible:outline-none"
             />
-          </label>
-        </div>
+          </span>
+        ) : (
+          <input
+            value={seq}
+            onChange={(e) => setSeq(e.target.value)}
+            onBlur={commit}
+            aria-label={`مقدار ${rowName} چرخهٔ ${cycle.cycleNo}`}
+            className="num w-16 rounded-md border-0 bg-transparent px-0.5 py-2 text-center text-xs focus-visible:bg-brand-soft/40 focus-visible:outline-none"
+            inputMode="decimal"
+            dir="ltr"
+            placeholder="—"
+          />
+        )
       ) : (
-        <input
-          value={seq}
-          onChange={(e) => setSeq(e.target.value)}
-          onBlur={commit}
-          disabled={!editable}
-          inputMode="decimal"
-          aria-label={`${column.name} — ${method === 'CONTINUOUS' ? 'قرائت تجمعی' : 'مدت'}`}
-          placeholder={method === 'CONTINUOUS' ? 'قرائت تجمعی کرنومتر' : 'مدت (ثانیه)'}
-          className="num w-full rounded-lg border bg-background px-2 py-1.5 text-center text-xs focus-visible:outline-2 focus-visible:outline-ring"
-        />
+        <span className="num block px-1 py-2 text-xs">{cellDisplayValue(obs, method, prefs)}</span>
       )}
+      {method === 'CONTINUOUS' && obs?.cumulativeReading != null && obs?.derivedDuration != null && (
+        <span className="block text-[9px] leading-3 text-faint">({formatTimeValue(obs.derivedDuration, prefs)})</span>
+      )}
+      {obs?.startOffset != null && obs?.endOffset != null && obs.derivedDuration != null && (
+        <span className="block text-[9px] leading-3 text-faint">({formatTimeValue(obs.derivedDuration, prefs)})</span>
+      )}
+    </td>
+  )
+}
 
-      {error && (
-        <p className="flex items-center gap-1 text-[10px] text-red">
-          <XCircle className="size-3" aria-hidden /> {error}
-        </p>
+// ── زیرردیف رابطهٔ موازی با ورودی لمسی ──
+
+function MobileParallelRow({
+  row,
+  relation,
+  sheet,
+  cycles,
+  prefs,
+  editable,
+  commitOverlap,
+  onCellError,
+  nameOf,
+}: {
+  row: Extract<GridRow, { kind: 'PARALLEL' }>
+  relation: { relationId: string; elementLowId: string; elementHighId: string } | undefined
+  sheet: SessionSheetDto
+  cycles: CycleRowDto[]
+  prefs: Prefs
+  editable: boolean
+  commitOverlap: (relationId: string, cycle: CycleRowDto, state: OverlapCellState) => void
+  onCellError: (key: string, message: string) => void
+  nameOf: (id: string) => string
+}) {
+  if (!relation) return null
+  return (
+    <tr className="t2-subrow">
+      <th scope="row" className="sticky right-0 z-10 border-b border-l bg-surface-2/50 px-2 py-1 text-right backdrop-blur">
+        <div className="flex items-center justify-between gap-1">
+          <div className="flex min-w-0 items-center gap-1">
+            <span className="h-4 w-2 shrink-0 rounded-e border-b-2 border-l-2 border-brand/30" aria-hidden />
+            <p className="truncate text-[10px] font-bold text-muted-foreground" title={`هم‌پوشانی با ${row.otherName}`}>
+              ↳ {row.otherName}
+            </p>
+          </div>
+          {editable && (
+            <ArchiveRelationControl
+              projectId={sheet.activity.projectId}
+              relationId={row.relationId}
+              label={`${row.parentName} ↔ ${row.otherName}`}
+              trigger={
+                <button
+                  type="button"
+                  aria-label={`حذف رابطهٔ ${row.parentName} با ${row.otherName}`}
+                  className="flex size-7 shrink-0 items-center justify-center rounded-lg text-faint transition-colors active:bg-red-soft active:text-red"
+                >
+                  <XCircle className="size-3.5" aria-hidden />
+                </button>
+              }
+            />
+          )}
+        </div>
+      </th>
+      {cycles.map((cycle) => (
+        <MobileOverlapCell
+          key={cycle.id}
+          cycle={cycle}
+          row={row}
+          relation={relation}
+          prefs={prefs}
+          editable={editable}
+          commitOverlap={commitOverlap}
+          onCellError={onCellError}
+          nameOf={nameOf}
+        />
+      ))}
+    </tr>
+  )
+}
+
+function MobileOverlapCell({
+  cycle,
+  row,
+  relation,
+  prefs,
+  editable,
+  commitOverlap,
+  onCellError,
+  nameOf,
+}: {
+  cycle: CycleRowDto
+  row: Extract<GridRow, { kind: 'PARALLEL' }>
+  relation: { elementLowId: string; elementHighId: string }
+  prefs: Prefs
+  editable: boolean
+  commitOverlap: (relationId: string, cycle: CycleRowDto, state: OverlapCellState) => void
+  onCellError: (key: string, message: string) => void
+  nameOf: (id: string) => string
+}) {
+  const cell = overlapCellOf(cycle, row.relationId)
+  const cmp = relationComparability(cycle, relation, nameOf)
+  const computed = computedOverlapFor(cycle, relation)
+  const [value, setValue] = useState(cell.status === 'UNREVIEWED' ? '' : String(cell.overlapDuration ?? ''))
+  const [prevCell, setPrevCell] = useState(cell)
+  if (cell !== prevCell) {
+    setPrevCell(cell)
+    setValue(cell.status === 'UNREVIEWED' ? '' : String(cell.overlapDuration ?? ''))
+  }
+
+  const commit = () => {
+    const parsed = parseOverlapInput(value)
+    if (parsed.kind === 'INVALID') {
+      onCellError(`${row.relationId}:${cycle.id}`, parsed.reason)
+      toast.error(parsed.reason)
+      return
+    }
+    if (parsed.kind === 'EMPTY') {
+      commitOverlap(row.relationId, cycle, { status: 'UNREVIEWED', overlapDuration: null })
+      return
+    }
+    if (parsed.value < 0) {
+      const msg = 'مقدار هم‌پوشانی منفی مجاز نیست'
+      onCellError(`${row.relationId}:${cycle.id}`, msg)
+      toast.error(msg)
+      return
+    }
+    if (parsed.value === 0) {
+      if (computed !== null && computed > 1e-9) {
+        const msg = `بازهٔ واقعی این چرخه هم‌پوشانی ${formatTimeValue(computed, prefs)} دارد؛ ثبت «بدون هم‌پوشانی» ممکن نیست`
+        onCellError(`${row.relationId}:${cycle.id}`, msg)
+        toast.error(msg)
+        return
+      }
+      commitOverlap(row.relationId, cycle, { status: 'NO_OVERLAP', overlapDuration: 0 })
+      return
+    }
+    if (computed !== null && Math.abs(parsed.value - computed) > 1e-6) {
+      const msg = `مقدار واردشده (${parsed.value}) با هم‌پوشانی بازهٔ واقعی (${formatTimeValue(computed, prefs)}) نمی‌خواند`
+      onCellError(`${row.relationId}:${cycle.id}`, msg)
+      toast.error(msg)
+      return
+    }
+    commitOverlap(row.relationId, cycle, { status: 'OVERLAP', overlapDuration: parsed.value })
+  }
+
+  const canEdit = editable && cmp.isComparable
+
+  return (
+    <td
+      className={`border-b border-l p-0.5 text-center last:border-l-0 ${
+        cell.status === 'NO_OVERLAP' ? 'bg-green-soft/30' : ''
+      } ${cell.status === 'OVERLAP' ? 'bg-green-soft/40' : ''}`}
+      title={!cmp.isComparable ? (cmp.notComparableReason ?? undefined) : undefined}
+    >
+      {canEdit ? (
+        <input
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onBlur={commit}
+          aria-label={`هم‌پوشانی ${row.parentName} با ${row.otherName} چرخهٔ ${cycle.cycleNo}`}
+          className="num w-16 rounded-md border-0 bg-transparent px-0.5 py-2 text-center text-xs focus-visible:bg-brand-soft/40 focus-visible:outline-none"
+          inputMode="decimal"
+          dir="ltr"
+          placeholder="—"
+        />
+      ) : cell.status === 'UNREVIEWED' ? (
+        <span className="mx-auto block w-fit rounded border border-dashed border-amber/50 px-1 text-[9px] leading-5 text-amber/70" title={cmp.notComparableReason ?? 'بررسی‌نشده'}>
+          ؟
+        </span>
+      ) : cell.status === 'NO_OVERLAP' ? (
+        <span className="num block py-2 text-xs text-green">۰</span>
+      ) : (
+        <span className="num block py-2 text-xs font-bold">
+          {formatTimeValue(cell.overlapDuration, prefs)}
+          <span className="ms-0.5 text-[9px] font-normal text-faint">s</span>
+        </span>
       )}
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        {excluded && (
-          <button type="button" onClick={onSetValidity} className="text-[10px] font-bold text-green">
-            خارج‌شده از محاسبات — بازگشت به محاسبات
-          </button>
-        )}
-        {obs?.validityStatus === 'SUSPECT' && (
-          // دکمهٔ تشخیص مشاهدهٔ مشکوک — §۱۲.۳
-          <button
-            type="button"
-            onClick={onDiagnose}
-            className="flex items-center gap-1 text-[10px] font-bold text-amber"
-          >
-            <AlertTriangle className="size-3" aria-hidden />
-            مشاهدهٔ مشکوک — نمایش تشخیص
-          </button>
-        )}
-      </div>
-    </div>
+      {computed !== null && cell.status !== 'OVERLAP' && canEdit && (
+        <button
+          type="button"
+          onClick={() => commitOverlap(row.relationId, cycle, { status: 'OVERLAP', overlapDuration: computed })}
+          className="block w-full text-[8px] leading-3 text-brand/80"
+          title={`هم‌پوشانی محاسبه‌شده از بازهٔ واقعی: ${formatTimeValue(computed, prefs)} — برای اعمال لمس کنید`}
+        >
+          ≈ {formatTimeValue(computed, prefs)}
+        </button>
+      )}
+    </td>
   )
 }

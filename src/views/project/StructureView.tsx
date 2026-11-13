@@ -78,11 +78,8 @@ import {
 import { api } from '@/lib/api-client'
 import { qk } from '@/lib/api/keys'
 import {
-  ELEMENT_TYPES,
-  ELEMENT_TYPE_LABELS,
   PROCESS_TYPES,
   PROCESS_TYPE_LABELS,
-  type ElementType,
   type ProcessType,
 } from '@/domain/types'
 import { useAppStore } from '@/store/app-store'
@@ -111,12 +108,11 @@ interface ActivityFormState {
 interface ElementFormState {
   name: string
   description: string
-  elementType: string
 }
 
 const EMPTY_STATION_FORM: StationFormState = { name: '', description: '' }
 const EMPTY_ACTIVITY_FORM: ActivityFormState = { name: '', description: '', processType: 'OPERATION', groupId: '' }
-const EMPTY_ELEMENT_FORM: ElementFormState = { name: '', description: '', elementType: 'MANUAL' }
+const EMPTY_ELEMENT_FORM: ElementFormState = { name: '', description: '' }
 
 /** مقدار Sentinel — Radix Select مقدار رشته خالی قبول نمی‌کند */
 const NO_GROUP = 'none'
@@ -162,13 +158,6 @@ const ELEMENT_NAME_HELP = {
   input: 'نامی کوتاه با نقطه پایانی مشخص؛ ترجیحاً فعل + مفعول.',
   example: '«برداشتن قطعه از گراناق» یا «بستن پیچ با آچار مخفی»',
   note: 'حذف عنصر همه مشاهدات و ارزیابی وستینگهاوس آن را دائمی حذف می‌کند. ترتیب عناصر با Drag & Drop داخل همین فعالیت تغییر می‌کند.',
-} as const
-
-const ELEMENT_TYPE_HELP = {
-  what: 'نوع عنصر کاری تعیین‌کننده رفتار محاسباتی آن است: دستی (تابع مهارت اپراتور)، خودکار ماشین، انتظار یا هم‌زمان/دارای هم‌پوشانی.',
-  input: 'ماهیت غالب عنصر را انتخاب کنید؛ پیش‌فرض «دستی» است.',
-  example: 'بارگذاری قطعه در فیکسچر = دستی؛ سیکل پرس = خودکار ماشین.',
-  note: 'عنصر «هم‌زمان» بازه‌های شروع/پایان می‌پذیرد و جمع ساده زمان استاندارد عناصر برای فعالیت ممنوع می‌شود (نیازمند قاعده تجمیع).',
 } as const
 
 const TREE_HELP = {
@@ -551,7 +540,6 @@ export default function StructureView({ projectId }: { projectId: string }) {
         body: {
           name: elementCreateForm.name.trim(),
           description: elementCreateForm.description.trim() || null,
-          elementType: elementCreateForm.elementType,
         },
       })
     } finally {
@@ -992,27 +980,6 @@ export default function StructureView({ projectId }: { projectId: string }) {
                 placeholder="مثلاً: برداشت با دو دست و قراردادن روی میز کار"
                 className="min-h-16"
               />
-            </div>
-            <div className="space-y-1.5">
-              <div className="flex items-center gap-1">
-                <Label>نوع عنصر کاری</Label>
-                <HelpDot label="نوع عنصر کاری" content={ELEMENT_TYPE_HELP} />
-              </div>
-              <Select
-                value={elementCreateForm.elementType}
-                onValueChange={(v) => setElementCreateForm((s) => ({ ...s, elementType: v }))}
-              >
-                <SelectTrigger aria-label="نوع عنصر کاری">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent dir="rtl">
-                  {ELEMENT_TYPES.map((et) => (
-                    <SelectItem key={et} value={et}>
-                      {ELEMENT_TYPE_LABELS[et]}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
             </div>
           </div>
           <DialogFooter className="gap-2">
@@ -1495,14 +1462,6 @@ interface ActivityNodeProps {
   visibleElements: (a: ActivityDto) => ElementDto[]
 }
 
-/** رنگ badge نوع عنصر کاری */
-const ELEMENT_TYPE_BADGE: Record<string, string> = {
-  MANUAL: 'bg-brand-soft text-brand',
-  MACHINE: 'bg-cyan-soft text-cyan',
-  WAITING: 'bg-amber-soft text-amber',
-  OVERLAP: 'bg-green-soft text-green',
-}
-
 function ActivityNode(p: ActivityNodeProps) {
   const { activity, prefs, parentSelected, isOpen, hasSearch } = p
   const elements = p.visibleElements(activity)
@@ -1607,13 +1566,10 @@ function ActivityNode(p: ActivityNodeProps) {
                       type="button"
                       className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-1 py-0.5 text-right focus-visible:outline-2 focus-visible:outline-ring"
                       aria-label={`ویرایش عنصر کاری ${element.name}`}
-                      title={`${element.name} — ${ELEMENT_TYPE_LABELS[element.elementType as ElementType] ?? ''}${element.rating ? ` · R = ${element.rating.totalFactor}` : ' · ارزیابی نشده'}`}
+                      title={`${element.name}${element.rating ? ` · R = ${element.rating.totalFactor}` : ' · ارزیابی نشده'}`}
                       onClick={() => p.onEditElement(element)}
                     >
-                      <CircleDot
-                        className={cn('size-3 shrink-0', ELEMENT_TYPE_BADGE[element.elementType] ? 'text-brand' : 'text-faint')}
-                        aria-hidden
-                      />
+                      <CircleDot className="size-3 shrink-0 text-brand" aria-hidden />
                       <span className="line-clamp-1 min-w-0 flex-1 text-[11.5px] leading-4">{element.name}</span>
                       {element.rating && (
                         <span className="num shrink-0 rounded bg-green-soft px-1 text-[9px] font-bold text-green" dir="ltr">
@@ -2013,7 +1969,6 @@ function ElementEditDialog({
   const [form, setForm] = useState<ElementFormState>(() => ({
     name: element.name,
     description: element.description ?? '',
-    elementType: element.elementType,
   }))
   const updatedAtRef = useRef(element.updatedAt)
 
@@ -2024,7 +1979,6 @@ function ElementEditDialog({
       const res = await structureApi.updateElement(element.id, {
         name: value.name.trim(),
         description: value.description.trim() || null,
-        elementType: value.elementType,
         expectedUpdatedAt: updatedAtRef.current,
       })
       updatedAtRef.current = res.element.updatedAt
@@ -2064,28 +2018,6 @@ function ElementEditDialog({
               className="min-h-16"
             />
           </div>
-          <div className="space-y-1.5">
-            <div className="flex items-center gap-1">
-              <Label>نوع عنصر کاری</Label>
-              <HelpDot label="نوع عنصر کاری" content={ELEMENT_TYPE_HELP} />
-            </div>
-            <Select value={form.elementType} onValueChange={(v) => setForm((s) => ({ ...s, elementType: v }))}>
-              <SelectTrigger className="w-full" aria-label="نوع عنصر کاری">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent dir="rtl">
-                {ELEMENT_TYPES.map((et) => (
-                  <SelectItem key={et} value={et}>
-                    {ELEMENT_TYPE_LABELS[et]}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <p className="text-[11px] leading-5 text-faint">
-              تغییر نوع عنصر بر مدل محاسباتی اثر دارد و وضعیت محاسبات را «نیازمند محاسبه مجدد» می‌کند.
-            </p>
-          </div>
-
           {/* الونس‌ها و زمان‌های مجاز — سطح عنصر کاری (§۶) */}
           <AllowanceSection projectId={projectId} scopeType="WORK_ELEMENT" scopeId={element.id} compact />
 

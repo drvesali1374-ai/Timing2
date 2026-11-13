@@ -1,12 +1,12 @@
 // ═══════════════════════════════════════════════════════════
-// زمان‌سنجی — انواع و ابزارهای مشترک UI برگه — FR-07
-// پارس اعداد فارسی/لاتین، قالب‌بندی نمایش، مدل ستون عنصر
+// زمان‌سنجی — انواع و ابزارهای مشترک UI برگه — FR-07 / v1.5.0
+// پارس اعداد فارسی/لاتین، قالب‌بندی نمایش، مدل ردیف شبکهٔ جدید:
+// ردیف = عنصر کاری + زیرردیف‌های روابط موازی؛ ستون = چرخه (§۵)
 // ═══════════════════════════════════════════════════════════
 import type { CycleRowDto, ObservationCellDto, SessionSheetDto } from '@/lib/api/endpoints'
 import { parseNumber } from '@/lib/persian'
 import type { DisplayPrefs } from '@/lib/format'
 import { formatTimeValue } from '@/lib/format'
-import { ELEMENT_TYPE_LABELS, type ElementType } from '@/domain/types'
 
 /** نوع مقدار یک سلول پس از پارس ورودی کاربر */
 export type ParsedCellValue =
@@ -50,7 +50,6 @@ export interface ElementColumn {
   index: number
   id: string
   name: string
-  elementType: ElementType
   entryMode: 'SEQ' | 'INT'
 }
 
@@ -59,13 +58,150 @@ export function buildColumns(sheet: SessionSheetDto, overrides: Record<string, '
     index: i,
     id: e.id,
     name: e.name,
-    elementType: e.elementType as ElementType,
     entryMode: overrides[e.id] ?? e.defaultEntry,
   }))
 }
 
 export function findObservation(cycle: CycleRowDto, workElementId: string): ObservationCellDto | undefined {
   return cycle.observations.find((o) => o.workElementId === workElementId)
+}
+
+// ═══════════════ مدل ردیف‌های شبکه — §۵.۲ v1.5.0 ═══════════════
+
+/** ردیف اصلی عنصر کاری */
+export interface ElementRowModel {
+  kind: 'ELEMENT'
+  elementIndex: number
+  elementId: string
+  name: string
+  entryMode: 'SEQ' | 'INT'
+}
+
+/** زیرردیف رابطهٔ موازی — فقط نمایی از رابطه؛ هرگز WorkElement نیست (§۵.۲) */
+export interface ParallelRowModel {
+  kind: 'PARALLEL'
+  parentElementId: string
+  parentElementIndex: number
+  parentName: string
+  relationId: string
+  otherElementId: string
+  otherName: string
+  /** کلید نمایشی §۵.۲: parallel:{relationId}:under:{parentElementId} */
+  displayKey: string
+}
+
+export type GridRow = ElementRowModel | ParallelRowModel
+
+/** ساخت ردیف‌های شبکه: عناصر به ترتیب sortOrder + زیرردیف روابط فعال
+ *  هر عنصر زیر آن (به ترتیب عنصر مقصد) — §۵.۱/§۹.۱ */
+export function buildRows(sheet: SessionSheetDto, columns: ElementColumn[]): GridRow[] {
+  const rows: GridRow[] = []
+  const byId = new Map(columns.map((c) => [c.id, c]))
+  for (const col of columns) {
+    rows.push({ kind: 'ELEMENT', elementIndex: col.index, elementId: col.id, name: col.name, entryMode: col.entryMode })
+    const rels = sheet.parallelRelations
+      .filter((r) => r.elementLowId === col.id || r.elementHighId === col.id)
+      .map((r) => {
+        const otherId = r.elementLowId === col.id ? r.elementHighId : r.elementLowId
+        const otherName = r.elementLowId === col.id ? r.elementHighName : r.elementLowName
+        return { r, otherId, otherName, otherSort: byId.get(otherId)?.index ?? 9999 }
+      })
+      .sort((a, b) => a.otherSort - b.otherSort)
+    for (const { r, otherId, otherName } of rels) {
+      rows.push({
+        kind: 'PARALLEL',
+        parentElementId: col.id,
+        parentElementIndex: col.index,
+        parentName: col.name,
+        relationId: r.relationId,
+        otherElementId: otherId,
+        otherName,
+        displayKey: `parallel:${r.relationId}:under:${col.id}`,
+      })
+    }
+  }
+  return rows
+}
+
+// ═══════════════ مقایسه‌پذیری و بازهٔ واقعی — §۵.۵ (هم‌ارز منطق سرور) ═══════════════
+
+/** شواهد عناصر یک چرخه — همان قرارداد loadCycleContext سرور */
+function cycleEvidence(cycle: CycleRowDto) {
+  const durationOf = new Map<string, number | null>()
+  const intervalOf = new Map<string, { startOffset: number; endOffset: number } | null>()
+  for (const o of cycle.observations) {
+    durationOf.set(o.workElementId, o.derivedDuration ?? o.rawDuration ?? null)
+    intervalOf.set(
+      o.workElementId,
+      o.startOffset != null && o.endOffset != null ? { startOffset: o.startOffset, endOffset: o.endOffset } : null
+    )
+  }
+  return { durationOf, intervalOf }
+}
+
+/** مقایسه‌پذیری یک رابطه در یک چرخه — همان قواعد سرور (isObservedInCycle + hasComparableEvidence) */
+export function relationComparability(
+  cycle: CycleRowDto,
+  rel: { elementLowId: string; elementHighId: string },
+  nameOf: (id: string) => string,
+): { isComparable: boolean; notComparableReason: string | null } {
+  const { durationOf, intervalOf } = cycleEvidence(cycle)
+  const reasons: string[] = []
+  for (const eid of [rel.elementLowId, rel.elementHighId]) {
+    if (!durationOf.has(eid)) {
+      reasons.push(`«${nameOf(eid)}» در این چرخه مشاهده‌ای ندارد`)
+    } else {
+      const iv = intervalOf.get(eid)
+      const hasEvidence = (iv != null && iv.startOffset != null && iv.endOffset != null) || durationOf.get(eid) != null
+      if (!hasEvidence) reasons.push(`«${nameOf(eid)}» در این چرخه مدت یا بازهٔ قابل‌مقایسه ندارد`)
+    }
+  }
+  return reasons.length === 0
+    ? { isComparable: true, notComparableReason: null }
+    : { isComparable: false, notComparableReason: `در این چرخه قابل‌مقایسه نیست: ${reasons.join('؛ ')}` }
+}
+
+/** هم‌پوشانی محاسبه‌شده از بازهٔ واقعی — §۵.۵: O(A,B) = max(0, min(E_A,E_B) − max(S_A,S_B))
+ *  فقط وقتی هر دو عنصر بازهٔ کامل دارند؛ در غیر این صورت null */
+export function computedOverlapFor(
+  cycle: CycleRowDto,
+  rel: { elementLowId: string; elementHighId: string },
+): number | null {
+  const { intervalOf } = cycleEvidence(cycle)
+  const a = intervalOf.get(rel.elementLowId)
+  const b = intervalOf.get(rel.elementHighId)
+  if (!a || !b) return null
+  return Math.max(0, Math.min(a.endOffset, b.endOffset) - Math.max(a.startOffset, b.startOffset))
+}
+
+// ═══════════════ سلول هم‌پوشانی — §۵.۴ (خالی=UNREVIEWED / ۰=NO_OVERLAP / مثبت=OVERLAP) ═══════════════
+
+export type OverlapCellState =
+  | { status: 'UNREVIEWED'; overlapDuration: number | null }
+  | { status: 'NO_OVERLAP'; overlapDuration: number | null }
+  | { status: 'OVERLAP'; overlapDuration: number | null }
+
+/** مقدار فعلی سلول هم‌پوشانی — نبود رکورد = UNREVIEWED (هرگز صفر فرض نمی‌شود) */
+export function overlapCellOf(cycle: CycleRowDto, relationId: string): OverlapCellState & { version: number } {
+  const v = cycle.overlaps?.[relationId]
+  if (!v) return { status: 'UNREVIEWED', overlapDuration: null, version: 0 }
+  return { status: v.status as OverlapCellState['status'], overlapDuration: v.overlapDuration, version: v.version }
+}
+
+/** پارس ورودی سلول هم‌پوشانی — خالی/صفر/مثبت (§۵.۴) */
+export function parseOverlapInput(text: string): { kind: 'EMPTY' } | { kind: 'NUMBER'; value: number } | { kind: 'INVALID'; reason: string } {
+  const t = text.trim()
+  if (t === '' || t === '-' || t === '—' || t === '–') return { kind: 'EMPTY' }
+  const n = parseNumber(t)
+  if (!Number.isFinite(n)) return { kind: 'INVALID', reason: 'مقدار عددی معتبر نیست (ارقام فارسی یا لاتین)' }
+  return { kind: 'NUMBER', value: n }
+}
+
+/** نمایش متنی سلول هم‌پوشانی برای Copy — خالی/۰/مقدار */
+export function overlapCellText(cell: OverlapCellState): string {
+  if (cell.status === 'UNREVIEWED') return ''
+  if (cell.status === 'NO_OVERLAP') return '0'
+  return String(cell.overlapDuration ?? '')
 }
 
 /** متن نمایشی یک سلول بر اساس دادهٔ سرور — دو رقم اعشار پیش‌فرض — FR-07 */
@@ -148,17 +284,6 @@ export function captureBefore(
   p.startOffset = obs.startOffset
   p.endOffset = obs.endOffset
   return p
-}
-
-export const ELEMENT_TYPE_BADGE: Record<ElementType, { label: string; className: string }> = {
-  MANUAL: { label: 'دستی', className: 'bg-brand-soft text-brand' },
-  MACHINE: { label: 'ماشین', className: 'bg-cyan-soft text-cyan' },
-  WAITING: { label: 'انتظار', className: 'bg-amber-soft text-amber' },
-  OVERLAP: { label: 'هم‌پوشان', className: 'bg-green-soft text-green' },
-}
-
-export function elementTypeLabel(t: string): string {
-  return ELEMENT_TYPE_LABELS[t as ElementType] ?? t
 }
 
 /** دلایل استاندارد خروج از محاسبه — FR-11 */

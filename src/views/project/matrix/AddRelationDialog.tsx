@@ -18,12 +18,15 @@ function ElementPicker({
   catalog,
   excludeId,
   label,
+  /** v1.5.0 §۴.۳ — محدود کردن فهرست به عناصر همین فعالیت */
+  restrictToActivityId,
 }: {
   value: string | null
   onChange: (id: string | null) => void
   catalog: OverlapMatrixDto['elementsCatalog']
   excludeId: string | null
   label: string
+  restrictToActivityId?: string | null
 }) {
   const [open, setOpen] = useState(false)
   const selected = catalog.find((c) => c.elementId === value) ?? null
@@ -32,6 +35,7 @@ function ElementPicker({
     const byStation = new Map<string, Map<string, typeof catalog>>()
     for (const e of catalog) {
       if (excludeId && e.elementId === excludeId) continue
+      if (restrictToActivityId && e.activityId !== restrictToActivityId) continue
       const acts = byStation.get(e.stationName) ?? new Map()
       const list = acts.get(e.activityName) ?? []
       list.push(e)
@@ -39,7 +43,7 @@ function ElementPicker({
       byStation.set(e.stationName, acts)
     }
     return byStation
-  }, [catalog, excludeId])
+  }, [catalog, excludeId, restrictToActivityId])
 
   return (
     <div className="space-y-1.5">
@@ -133,6 +137,8 @@ export default function AddRelationDialog({
   })
 
   const nameOf = (id: string | null) => catalog.find((c) => c.elementId === id)?.name ?? '؟'
+  // v1.5.0 §۴.۳ — عنصر دوم فقط از همان فعالیت عنصر اول selectable است
+  const aActivityId = aId ? catalog.find((c) => c.elementId === aId)?.activityId ?? null : null
   const canSubmit = aId && bId && aId !== bId
 
   return (
@@ -151,7 +157,17 @@ export default function AddRelationDialog({
           </DialogHeader>
           <div className="space-y-3">
             <ElementPicker value={aId} onChange={setAId} catalog={catalog} excludeId={bId} label="عنصر اول" />
-            <ElementPicker value={bId} onChange={setBId} catalog={catalog} excludeId={aId} label="عنصر دوم" />
+            <ElementPicker
+              value={bId}
+              onChange={setBId}
+              catalog={catalog}
+              excludeId={aId}
+              label={aId ? `عنصر دوم (فقط عناصر فعالیت «${catalog.find((c) => c.elementId === aId)?.activityName ?? '؟'}»)` : 'عنصر دوم'}
+              restrictToActivityId={aActivityId}
+            />
+            <p className="text-[11px] leading-5 text-muted-foreground">
+              رابطهٔ موازی فقط بین عناصر «یک فعالیت» ممکن است؛ زیرردیف‌های برگهٔ زمان‌سنجی باید قابل‌مقایسه باشند.
+            </p>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => onOpenChange(false)}>
@@ -170,8 +186,8 @@ export default function AddRelationDialog({
           <DialogHeader>
             <DialogTitle>تأیید افزودن رابطهٔ موازی</DialogTitle>
             <DialogDescription className="leading-6">
-              با افزودن رابطهٔ موازی «{nameOf(aId)}» و «{nameOf(bId)}»، این رابطه در ماتریس مرکزی و فرم
-              زمان‌سنجی هر دو عنصر نمایش داده می‌شود. ادامه می‌دهید؟
+              با افزودن رابطهٔ موازی «{nameOf(aId)}» و «{nameOf(bId)}»، زیرردیف این رابطه در برگهٔ زمان‌سنجی
+              (برای همهٔ اپراتورهای همین فعالیت)، فرم هر دو عنصر و ماتریس مرکزی نمایش داده می‌شود. ادامه می‌دهید؟
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

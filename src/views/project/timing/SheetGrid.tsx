@@ -1,21 +1,23 @@
 'use client'
 
 // ═══════════════════════════════════════════════════════════
-// برگهٔ زمان‌سنجی دسکتاپ — جدول اکسل‌مانند — FR-07 / ۷.۴
-// هر ردیف یک چرخه، هر ستون یک عنصر کاری.
-// حرکت با کلیدهای جهت‌دار (RTL)، Tab/Enter، ویرایش مستقیم،
-// کپی محدوده، Paste با پیش‌نمایش، Undo/Redo، ستون چرخه و
-// سربرگ ثابت، وضعیت مشاهده با رنگ/آیکون/متن قابل دسترسی.
+// برگهٔ زمان‌سنجی دسکتاپ — جدول اکسل‌مانند — FR-07 / v1.5.0 §۵
+// محور جدید: ردیف = عنصر کاری + زیرردیف‌های روابط موازی؛
+// ستون = چرخه. ستون نام عنصر/رابطه چسبان راست، سربرگ چرخه‌ها
+// چسبان بالا، پانوشت «سپری‌شده» چسبان پایین.
+// زیرردیف A-B زیر A و زیر B از «یک» رکورد ObservationOverlap
+// خوانده می‌شود (§۵.۳)؛ ویرایش هر طرف طرف مقابل را به‌روز می‌کند.
+// کلیدهای جهت‌دار (بالا/پایین=عنصر، چپ/راست=چرخه RTL)،
+// Tab/Enter، ویرایش مستقیم، کپی محدوده، Paste با پیش‌نمایش،
+// Undo/Redo و افزودن رابطه از خود جدول (§۶).
 // ═══════════════════════════════════════════════════════════
-import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   AlertTriangle,
   Check,
-  ChevronDown,
-  ChevronLeft,
+  CornerDownRight,
   Eraser,
   StickyNote,
-  Trash2,
   XCircle,
 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -23,24 +25,39 @@ import type { CycleRowDto, ObservationCellDto, SessionSheetDto } from '@/lib/api
 import type { DisplayPrefs as Prefs } from '@/lib/format'
 import { formatTimeValue, formatInt } from '@/lib/format'
 import {
+  buildRows,
   cellDisplayValue,
   cellEditValue,
-  ELEMENT_TYPE_BADGE,
+  computedOverlapFor,
   findObservation,
+  overlapCellOf,
+  overlapCellText,
   parseCellInput,
+  parseOverlapInput,
   payloadFromParsed,
+  relationComparability,
   type CellPayload,
   type ElementColumn,
+  type GridRow,
+  type OverlapCellState,
 } from './shared'
 import { CycleTimeline } from './CycleTimeline'
-import ElementParallelPopover from '../matrix/ElementParallelPopover'
+import { AddRelationControl, ArchiveRelationControl } from '../matrix/RelationControls'
 import type { SheetHistory } from './useSheetHistory'
 import { SuspectDiagnosticDialog, type SuspectDiagTarget } from './SuspectDiagnosticDialog'
 import { DeleteCycleConfirm } from './DeleteCycleConfirm'
+import { CycleDetailDialog } from './CycleDetailDialog'
 
 export interface GridSelection {
   rowIdx: number
   colIdx: number
+}
+
+/** لنگر Paste — بر اساس شناسهٔ ردیف و شمارهٔ چرخه (§۸.۳) */
+export interface GridPasteAnchor {
+  cycleNo: number
+  elementId: string
+  relationId: string | null
 }
 
 interface SheetGridProps {
@@ -50,11 +67,13 @@ interface SheetGridProps {
   editable: boolean
   onToggleEntryMode: (elementId: string) => void
   commitCell: (cycle: CycleRowDto, column: ElementColumn, payload: CellPayload) => void
+  /** §۵.۳/§۵.۵ — ثبت مقدار هم‌پوشانی از مسیر مرکزی setCycleOverlaps */
+  commitOverlap: (relationId: string, cycle: CycleRowDto, state: OverlapCellState) => void
   onCellError: (key: string, message: string) => void
   onDeleteCycle: (cycle: CycleRowDto) => void
   onSetValidity: (cycle: CycleRowDto, obs: ObservationCellDto) => void
   onUpdateNotes: (cycle: CycleRowDto, notes: string) => void
-  onOpenPaste: (anchor: { cycleNo: number; colIndex: number }, text?: string) => void
+  onOpenPaste: (anchor: GridPasteAnchor, text?: string) => void
   history: SheetHistory
   cellErrors: Record<string, string>
 }
@@ -66,6 +85,7 @@ export function SheetGrid({
   editable,
   onToggleEntryMode,
   commitCell,
+  commitOverlap,
   onCellError,
   onDeleteCycle,
   onSetValidity,
@@ -76,8 +96,13 @@ export function SheetGrid({
 }: SheetGridProps) {
   const [active, setActive] = useState<GridSelection>({ rowIdx: 0, colIdx: 0 })
   const [rangeEnd, setRangeEnd] = useState<GridSelection | null>(null)
-  const [editing, setEditing] = useState<{ rowIdx: number; colIdx: number; seq: string; start: string; end: string } | null>(null)
-  const [expanded, setExpanded] = useState<string | null>(null)
+  const [editing, setEditing] = useState<
+    | { kind: 'ELEMENT'; rowIdx: number; colIdx: number; seq: string; start: string; end: string }
+    | { kind: 'OVERLAP'; rowIdx: number; colIdx: number; value: string }
+    | null
+  >(null)
+  // چرخهٔ باز‌شده در دیالوگ جزئیات — §۸.۱
+  const [detailTarget, setDetailTarget] = useState<CycleRowDto | null>(null)
   // هدف دیالوگ تشخیص مشاهدهٔ مشکوک — §۱۲.۳
   const [diagTarget, setDiagTarget] = useState<SuspectDiagTarget | null>(null)
   // چرخهٔ در انتظار تأیید حذف — §۱۲.۴
@@ -87,11 +112,38 @@ export function SheetGrid({
   const seqInputRef = useRef<HTMLInputElement>(null)
   const startInputRef = useRef<HTMLInputElement>(null)
   const endInputRef = useRef<HTMLInputElement>(null)
+  const overlapInputRef = useRef<HTMLInputElement>(null)
   // فاصلهٔ کوتاه برای تفکیک کلیک از دابل‌کلیک روی سلول مشکوک — §۱۲.۳
   const diagTimerRef = useRef<number | null>(null)
 
   const cycles = sheet.cycles
   const method = sheet.session.timingMethod
+  // §۵.۲ — مدل ردیف‌های شبکه: عنصر + زیرردیف روابط
+  const rows: GridRow[] = useMemo(() => buildRows(sheet, columns), [sheet, columns])
+  const relationById = useMemo(
+    () => new Map(sheet.parallelRelations.map((r) => [r.relationId, r])),
+    [sheet.parallelRelations]
+  )
+  // نامزدهای «+ موازی»: عناصر همین Activity بدون خود و بدون رابطهٔ فعال تکراری (§۴.۳)
+  const relationCandidates = useMemo(() => {
+    return (elementId: string) =>
+      columns
+        .filter(
+          (c) =>
+            c.id !== elementId &&
+            !sheet.parallelRelations.some(
+              (r) =>
+                (r.elementLowId === elementId && r.elementHighId === c.id) ||
+                (r.elementHighId === elementId && r.elementLowId === c.id)
+            )
+        )
+        .map((c) => ({
+          elementId: c.id,
+          name: c.name,
+          activityName: sheet.activity.name,
+          stationName: sheet.activity.stationName,
+        }))
+  }, [columns, sheet.parallelRelations, sheet.activity])
 
   // ── دیالوگ تشخیص: بازکردن فوری/زمان‌بندی‌شده و لغو ──
   const cancelDiag = useCallback(() => {
@@ -123,39 +175,66 @@ export function SheetGrid({
   // لغو تایمر معلق هنگام خروج از جدول
   useEffect(() => cancelDiag, [cancelDiag])
 
-  // ── ناوبری ──
+  useEffect(() => {
+    if (editing) {
+      if (editing.kind === 'OVERLAP') overlapInputRef.current?.focus()
+      else {
+        const row = rows[editing.rowIdx]
+        const column = row?.kind === 'ELEMENT' ? columns[row.elementIndex] : undefined
+        if (column?.entryMode === 'INT') startInputRef.current?.focus()
+        else seqInputRef.current?.focus()
+      }
+    }
+  }, [editing, rows, columns])
+
+  // ── ناوبری — §۸.۴: بالا/پایین=عناصر، چپ/راست=چرخه‌ها (RTL) ──
   const focusCell = useCallback(
     (rowIdx: number, colIdx: number) => {
       cancelDiag()
-      const r = Math.max(0, Math.min(rowIdx, cycles.length - 1))
-      const c = Math.max(0, Math.min(colIdx, columns.length - 1))
+      const r = Math.max(0, Math.min(rowIdx, rows.length - 1))
+      const c = Math.max(0, Math.min(colIdx, cycles.length - 1))
       setActive({ rowIdx: r, colIdx: c })
       setRangeEnd(null)
       const el = cellRefs.current.get(`${r}:${c}`)
       el?.focus()
       el?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
     },
-    [cycles.length, columns.length, cancelDiag]
+    [rows.length, cycles.length, cancelDiag]
   )
-
-  useEffect(() => {
-    if (editing) {
-      const column = columns[editing.colIdx]
-      if (column?.entryMode === 'INT') startInputRef.current?.focus()
-      else seqInputRef.current?.focus()
-    }
-  }, [editing, columns])
 
   const startEdit = useCallback(
     (rowIdx: number, colIdx: number, initial?: string) => {
       if (!editable) return
       cancelDiag()
-      const cycle = cycles[rowIdx]
-      const column = columns[colIdx]
-      if (!cycle || !column) return
+      const row = rows[rowIdx]
+      const cycle = cycles[colIdx]
+      if (!row || !cycle) return
+      if (row.kind === 'PARALLEL') {
+        // زیرردیف هم‌پوشانی — خالی/صفر/مثبت (§۵.۴)
+        const rel = relationById.get(row.relationId)
+        if (!rel) return
+        const cmp = relationComparability(cycle, rel, (id) =>
+          id === row.parentElementId ? row.parentName : row.otherName
+        )
+        if (!cmp.isComparable) {
+          toast.error(cmp.notComparableReason ?? 'این زوج در این چرخه قابل‌مقایسه نیست')
+          return
+        }
+        const cell = overlapCellOf(cycle, row.relationId)
+        setEditing({
+          kind: 'OVERLAP',
+          rowIdx,
+          colIdx,
+          value: initial ?? (cell.status === 'UNREVIEWED' ? '' : String(cell.overlapDuration ?? '')),
+        })
+        return
+      }
+      const column = columns[row.elementIndex]
+      if (!column) return
       const obs = findObservation(cycle, column.id)
       const v = cellEditValue(obs, method)
       setEditing({
+        kind: 'ELEMENT',
         rowIdx,
         colIdx,
         seq: initial ?? v.seq,
@@ -163,62 +242,119 @@ export function SheetGrid({
         end: initial ? '' : v.end,
       })
     },
-    [cycles, columns, editable, method, cancelDiag]
+    [editable, rows, cycles, columns, method, relationById, cancelDiag]
   )
 
   const finishEdit = useCallback(
     (move: 'down' | 'next' | 'none' = 'down') => {
       if (!editing) return
       const current = editing
-      const cycle = cycles[current.rowIdx]
-      const column = columns[current.colIdx]
-      if (cycle && column) {
-        let parsed
-        if (column.entryMode === 'INT') {
-          const s = current.start.trim()
-          const e = current.end.trim()
-          parsed = s === '' && e === '' ? ({ kind: 'EMPTY' } as const) : parseCellInput(s === '' || e === '' ? (s || e) : `${s}-${e}`)
-        } else {
-          parsed = parseCellInput(current.seq)
+      const cycle = cycles[current.colIdx]
+      if (current.kind === 'OVERLAP') {
+        const row = rows[current.rowIdx]
+        const rel = row && row.kind === 'PARALLEL' ? relationById.get(row.relationId) : undefined
+        if (row && row.kind === 'PARALLEL' && rel && cycle) {
+          const parsed = parseOverlapInput(current.value)
+          if (parsed.kind === 'INVALID') {
+            onCellError(`${row.relationId}:${cycle.id}`, parsed.reason)
+            toast.error(parsed.reason)
+          } else if (parsed.kind === 'EMPTY') {
+            commitOverlap(row.relationId, cycle, { status: 'UNREVIEWED', overlapDuration: null })
+          } else if (parsed.value < 0) {
+            const msg = 'مقدار هم‌پوشانی منفی مجاز نیست'
+            onCellError(`${row.relationId}:${cycle.id}`, msg)
+            toast.error(msg)
+          } else if (parsed.value === 0) {
+            // صفر = تأیید «بدون هم‌پوشانی» — §۵.۴؛ اما با بازهٔ واقعی نمی‌خواند؟
+            const computed = computedOverlapFor(cycle, rel)
+            if (computed !== null && computed > 1e-9) {
+              const msg = `بازهٔ واقعی این چرخه هم‌پوشانی ${formatTimeValue(computed, prefs)} دارد؛ ثبت «بدون هم‌پوشانی» با بازهٔ واقعی نمی‌خواند`
+              onCellError(`${row.relationId}:${cycle.id}`, msg)
+              toast.error(msg)
+            } else {
+              commitOverlap(row.relationId, cycle, { status: 'NO_OVERLAP', overlapDuration: 0 })
+            }
+          } else {
+            const computed = computedOverlapFor(cycle, rel)
+            if (computed !== null && Math.abs(parsed.value - computed) > 1e-6) {
+              const msg = `مقدار واردشده (${parsed.value}) با هم‌پوشانی بازهٔ واقعی (${formatTimeValue(computed, prefs)}) نمی‌خواند`
+              onCellError(`${row.relationId}:${cycle.id}`, msg)
+              toast.error(msg)
+            } else {
+              commitOverlap(row.relationId, cycle, { status: 'OVERLAP', overlapDuration: parsed.value })
+            }
+          }
         }
-        const result = payloadFromParsed(parsed, column, method)
-        if ('error' in result) {
-          onCellError(`${current.rowIdx}:${current.colIdx}`, result.error)
-          toast.error(result.error)
-        } else {
-          commitCell(cycle, column, result)
+      } else {
+        const row = rows[current.rowIdx]
+        const cycleEl = cycles[current.colIdx]
+        const column = row && row.kind === 'ELEMENT' ? columns[row.elementIndex] : undefined
+        if (row && row.kind === 'ELEMENT' && cycleEl && column) {
+          let parsed
+          if (column.entryMode === 'INT') {
+            const s = current.start.trim()
+            const e = current.end.trim()
+            parsed = s === '' && e === '' ? ({ kind: 'EMPTY' } as const) : parseCellInput(s === '' || e === '' ? (s || e) : `${s}-${e}`)
+          } else {
+            parsed = parseCellInput(current.seq)
+          }
+          const result = payloadFromParsed(parsed, column, method)
+          if ('error' in result) {
+            onCellError(`${column.id}:${cycleEl.id}`, result.error)
+            toast.error(result.error)
+          } else {
+            commitCell(cycleEl, column, result)
+          }
         }
       }
       setEditing(null)
-      // جابه‌جایی پس از ثبت
+      // جابه‌جایی پس از ثبت — Enter=ردیف بعدی (عنصر)، Tab=چرخهٔ بعدی
       if (move === 'down') focusCell(current.rowIdx + 1, current.colIdx)
       else if (move === 'next') focusCell(current.rowIdx, current.colIdx + 1)
       else focusCell(current.rowIdx, current.colIdx)
     },
-    [editing, cycles, columns, method, commitCell, focusCell, onCellError]
+    [editing, cycles, rows, columns, method, relationById, commitCell, commitOverlap, focusCell, onCellError, prefs]
   )
 
   const clearActiveCell = useCallback(() => {
-    const cycle = cycles[active.rowIdx]
-    const column = columns[active.colIdx]
-    if (!cycle || !column || !editable) return
+    const row = rows[active.rowIdx]
+    const cycle = cycles[active.colIdx]
+    if (!row || !cycle || !editable) return
+    if (row.kind === 'PARALLEL') {
+      // خالی کردن = بررسی‌نشده (§۵.۴) — پاک‌کردن همیشه مجاز است
+      commitOverlap(row.relationId, cycle, { status: 'UNREVIEWED', overlapDuration: null })
+      return
+    }
+    const column = columns[row.elementIndex]
+    if (!column) return
     const parsed = parseCellInput('')
     const result = payloadFromParsed(parsed, column, method)
     if (!('error' in result)) commitCell(cycle, column, result)
-  }, [active, cycles, columns, editable, method, commitCell])
+  }, [active, rows, cycles, columns, editable, method, commitCell, commitOverlap])
 
-  // ── کپی محدوده — FR-07 ──
+  // ── کپی محدوده — FR-07 / §۸.۳ (TSV مطابق ظاهر جدید) ──
+  const cellTextFor = useCallback(
+    (row: GridRow, cycle: CycleRowDto): string => {
+      if (row.kind === 'PARALLEL') {
+        return overlapCellText(overlapCellOf(cycle, row.relationId))
+      }
+      const column = columns[row.elementIndex]
+      const obs = column ? findObservation(cycle, column.id) : undefined
+      return obs?.startOffset != null && obs?.endOffset != null
+        ? `${obs.startOffset}-${obs.endOffset}`
+        : String(method === 'CONTINUOUS' ? (obs?.cumulativeReading ?? '') : (obs?.rawDuration ?? ''))
+    },
+    [columns, method]
+  )
+
   const copySelection = useCallback(async () => {
-    if (!rangeEnd || !columns.length) {
+    if (!rows.length || !cycles.length) return
+    if (!rangeEnd) {
       // تک‌سلول فعال
-      const cycle = cycles[active.rowIdx]
-      const column = columns[active.colIdx]
-      if (cycle && column) {
-        const obs = findObservation(cycle, column.id)
-        const t =
-          obs?.startOffset != null && obs?.endOffset != null
-            ? `${obs.startOffset}-${obs.endOffset}`
-            : String(method === 'CONTINUOUS' ? (obs?.cumulativeReading ?? '') : (obs?.rawDuration ?? ''))
+      const row = rows[active.rowIdx]
+      const cycle = cycles[active.colIdx]
+      if (row && cycle) {
+        const t = cellTextFor(row, cycle)
         try {
           await navigator.clipboard.writeText(t)
           toast.success('سلول کپی شد')
@@ -234,18 +370,13 @@ export function SheetGrid({
     const c2 = Math.max(active.colIdx, rangeEnd.colIdx)
     const lines: string[] = []
     for (let r = r1; r <= r2; r++) {
-      const cycle = cycles[r]
-      if (!cycle) continue
+      const row = rows[r]
+      if (!row) continue
       const parts: string[] = []
       for (let c = c1; c <= c2; c++) {
-        const column = columns[c]
-        if (!column) continue
-        const obs = findObservation(cycle, column.id)
-        parts.push(
-          obs?.startOffset != null && obs?.endOffset != null
-            ? `${obs.startOffset}-${obs.endOffset}`
-            : String(method === 'CONTINUOUS' ? (obs?.cumulativeReading ?? '') : (obs?.rawDuration ?? ''))
-        )
+        const cycle = cycles[c]
+        if (!cycle) continue
+        parts.push(cellTextFor(row, cycle))
       }
       lines.push(parts.join('\t'))
     }
@@ -255,9 +386,9 @@ export function SheetGrid({
     } catch {
       toast.error('کپی توسط مرورگر مسدود شد')
     }
-  }, [rangeEnd, active, cycles, columns, method])
+  }, [rangeEnd, active, rows, cycles, cellTextFor])
 
-  // ── کیبورد سراسری برگه ──
+  // ── کیبورد سراسری برگه — §۸.۴ ──
   const onKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLDivElement>) => {
       if (editing) return // ورودی در حال ویرایش، کلیدها را خودش مدیریت می‌کند
@@ -281,16 +412,18 @@ export function SheetGrid({
       switch (e.key) {
         case 'ArrowUp':
           e.preventDefault()
-          focusCell(active.rowIdx - 1, active.colIdx)
+          if (e.shiftKey) setRangeEnd({ rowIdx: Math.max(active.rowIdx - 1, 0), colIdx: active.colIdx })
+          else focusCell(active.rowIdx - 1, active.colIdx)
           break
         case 'ArrowDown':
           e.preventDefault()
-          focusCell(active.rowIdx + 1, active.colIdx)
+          if (e.shiftKey) setRangeEnd({ rowIdx: Math.min(active.rowIdx + 1, rows.length - 1), colIdx: active.colIdx })
+          else focusCell(active.rowIdx + 1, active.colIdx)
           break
-        // RTL: عنصر بعدی بصورت چپ است
+        // RTL: چرخهٔ بعدی بصورت چپ است — §۸.۴
         case 'ArrowLeft':
           e.preventDefault()
-          if (e.shiftKey) setRangeEnd({ rowIdx: active.rowIdx, colIdx: Math.min(active.colIdx + 1, columns.length - 1) })
+          if (e.shiftKey) setRangeEnd({ rowIdx: active.rowIdx, colIdx: Math.min(active.colIdx + 1, cycles.length - 1) })
           else focusCell(active.rowIdx, active.colIdx + 1)
           break
         case 'ArrowRight':
@@ -303,9 +436,6 @@ export function SheetGrid({
           focusCell(active.rowIdx, e.shiftKey ? active.colIdx - 1 : active.colIdx + 1)
           break
         case 'Enter':
-          e.preventDefault()
-          startEdit(active.rowIdx, active.colIdx)
-          break
         case 'F2':
           e.preventDefault()
           startEdit(active.rowIdx, active.colIdx)
@@ -322,7 +452,7 @@ export function SheetGrid({
           }
       }
     },
-    [editing, history, copySelection, focusCell, active, columns.length, startEdit, clearActiveCell]
+    [editing, history, copySelection, focusCell, active, rows.length, cycles.length, startEdit, clearActiveCell]
   )
 
   const onPasteEvent = useCallback(
@@ -331,10 +461,20 @@ export function SheetGrid({
       const text = e.clipboardData.getData('text')
       if (!text) return
       e.preventDefault()
-      const cycle = cycles[active.rowIdx]
-      onOpenPaste({ cycleNo: cycle?.cycleNo ?? 1, colIndex: active.colIdx }, text)
+      // §۸.۳ — لنگر بر اساس شناسهٔ ردیف و شمارهٔ چرخه
+      const row = rows[active.rowIdx]
+      const cycle = cycles[active.colIdx]
+      if (!row || !cycle) return
+      onOpenPaste(
+        {
+          cycleNo: cycle.cycleNo,
+          elementId: row.kind === 'ELEMENT' ? row.elementId : row.parentElementId,
+          relationId: row.kind === 'PARALLEL' ? row.relationId : null,
+        },
+        text
+      )
     },
-    [editable, editing, cycles, active, onOpenPaste]
+    [editable, editing, rows, cycles, active, onOpenPaste]
   )
 
   const inRange = (r: number, c: number) => {
@@ -347,13 +487,16 @@ export function SheetGrid({
     )
   }
 
-  const maxCols = columns.length
+  const nameOf = useCallback(
+    (id: string) => sheet.elements.find((e) => e.id === id)?.name ?? '؟',
+    [sheet.elements]
+  )
 
   return (
     <div
       ref={gridRef}
       role="grid"
-      aria-label="برگه زمان‌سنجی"
+      aria-label="برگه زمان‌سنجی — عناصر در ردیف‌ها و چرخه‌ها در ستون‌ها"
       tabIndex={-1}
       onKeyDown={onKeyDown}
       onPaste={onPasteEvent}
@@ -361,132 +504,147 @@ export function SheetGrid({
       dir="rtl"
     >
       <table className="w-full border-collapse text-sm">
+        {/* سربرگ چرخه‌ها — چسبان بالا (§۹.۲) */}
         <thead className="sticky top-0 z-20">
           <tr className="bg-surface-2/95 backdrop-blur">
-            <th className="sticky right-0 z-30 min-w-24 border-b border-l bg-surface-2/95 px-2 py-2 text-center text-xs font-bold backdrop-blur">
-              چرخه
+            <th className="sticky right-0 z-30 min-w-44 border-b border-l bg-surface-2/95 px-2 py-2 text-center text-xs font-bold backdrop-blur">
+              عنصر کاری / رابطه
             </th>
-            {columns.map((col) => {
-              const stats = sheet.stats.perElement[col.id]
-              return (
-                <th key={col.id} className="min-w-28 border-b border-l px-2 py-1.5 text-right align-top last:border-l-0">
-                  <div className="flex items-start justify-between gap-1">
-                    <div className="min-w-0">
-                      <p className="truncate text-xs font-bold" title={col.name}>
-                        {col.name}
-                      </p>
-                      <div className="mt-0.5 flex items-center gap-1">
-                        <span className={`rounded-full px-1.5 py-px text-[10px] font-bold ${ELEMENT_TYPE_BADGE[col.elementType].className}`}>
-                          {ELEMENT_TYPE_BADGE[col.elementType].label}
-                        </span>
-                        {editable && (
-                          <button
-                            type="button"
-                            onClick={() => onToggleEntryMode(col.id)}
-                            className={`rounded-full border px-1.5 py-px text-[10px] font-bold transition-colors ${
-                              col.entryMode === 'INT'
-                                ? 'border-brand/40 bg-brand-soft text-brand'
-                                : 'border-border bg-muted text-muted-foreground hover:border-brand/40 hover:bg-brand-soft hover:text-brand'
-                            }`}
-                            title={
-                              col.entryMode === 'SEQ'
-                                ? 'ورودی ترتیبی — برای ورودی بازه‌ای (از/تا) کلیک کنید'
-                                : 'ورودی بازه‌ای (از/تا) — برای ترتیبی کلیک کنید'
-                            }
-                            aria-label={`حالت ورود عنصر ${col.name}: ${col.entryMode === 'SEQ' ? 'ترتیبی' : 'بازه‌ای'}`}
-                          >
-                            {col.entryMode === 'SEQ' ? (method === 'CONTINUOUS' ? 'قرائت' : 'مدت') : 'از/تا'}
-                          </button>
-                        )}
-                        <ElementParallelPopover
-                          projectId={sheet.activity.projectId}
-                          elementId={col.id}
-                          elementName={col.name}
-                          cycleOptions={sheet.cycles.map((c) => ({
-                            cycleId: c.id,
-                            cycleNo: c.cycleNo,
-                            label: `چرخهٔ ${c.cycleNo}`,
-                          }))}
-                          defaultCycleId={sheet.cycles.at(-1)?.id ?? null}
-                          sessionId={sheet.session.id ?? null}
-                        />
-                      </div>
-                    </div>
-                    {stats && stats.calcCount > 0 && (
-                      <span className="num shrink-0 text-[10px] text-faint" title="مشاهدات وارد محاسبه">
-                        {formatInt(stats.calcCount, prefs)}
-                      </span>
+            {cycles.length === 0 && (
+              <th className="border-b px-2 py-2 text-center text-xs font-bold text-muted-foreground">
+                هنوز چرخه‌ای ثبت نشده است
+              </th>
+            )}
+            {cycles.map((cycle, colIdx) => (
+              <th key={cycle.id} className="min-w-24 border-b border-l px-1.5 py-1.5 text-center align-top last:border-l-0">
+                <button
+                  type="button"
+                  onClick={() => setDetailTarget(cycle)}
+                  aria-label={`جزئیات چرخهٔ ${cycle.cycleNo}`}
+                  title="جزئیات چرخه: خط زمانی، وضعیت مشاهدات، یادداشت و حذف"
+                  className="group flex w-full flex-col items-center gap-0.5 rounded-lg px-1 py-0.5 transition-colors hover:bg-brand-soft/60"
+                >
+                  <span className="num text-sm font-extrabold">{formatInt(cycle.cycleNo, prefs)}</span>
+                  <span className="flex items-center gap-0.5" title={cycle.isComplete ? 'چرخهٔ کامل' : 'چرخهٔ ناقص'}>
+                    {cycle.isComplete ? (
+                      <Check className="size-3.5 text-green" aria-hidden />
+                    ) : (
+                      <AlertTriangle className="size-3.5 text-amber" aria-hidden />
                     )}
-                  </div>
-                </th>
-              )
-            })}
-            <th className="min-w-24 border-b px-2 py-2 text-center text-xs font-bold">سپری‌شده</th>
+                    {cycle.notes && <StickyNote className="size-3 text-faint" aria-hidden />}
+                  </span>
+                </button>
+                {colIdx === active.colIdx && !rangeEnd && <span className="sr-only">ستون فعال</span>}
+              </th>
+            ))}
           </tr>
         </thead>
         <tbody>
-          {cycles.length === 0 && (
+          {rows.length === 0 && (
             <tr>
-              <td colSpan={maxCols + 2} className="px-4 py-10 text-center text-sm text-muted-foreground">
+              <td colSpan={Math.max(cycles.length + 1, 2)} className="px-4 py-10 text-center text-sm text-muted-foreground">
+                این فعالیت عنصر کاری ندارد؛ ابتدا عناصر را در ساختار تولید تعریف کنید.
+              </td>
+            </tr>
+          )}
+          {cycles.length === 0 && rows.length > 0 && (
+            <tr>
+              <td colSpan={rows.length > 0 ? 2 : 1} className="px-4 py-8 text-center text-sm text-muted-foreground">
                 هنوز چرخه‌ای ثبت نشده است. با دکمهٔ «افزودن چرخه» شروع کنید یا داده را از Excel بچسبانید.
               </td>
             </tr>
           )}
-          {cycles.map((cycle, rowIdx) => {
-            const isExpanded = expanded === cycle.id
-            return (
-              <Fragment key={cycle.id}>
-                <tr className="group">
-                  {/* ستون چرخه — ثابت راست */}
-                  <td className="sticky right-0 z-10 border-b border-l bg-card/95 px-1 py-1 backdrop-blur group-hover:bg-surface-2/60">
-                    <div className="flex items-center justify-center gap-0.5">
-                      <button
-                        type="button"
-                        onClick={() => setExpanded(isExpanded ? null : cycle.id)}
-                        aria-expanded={isExpanded}
-                        aria-label={`جزئیات چرخهٔ ${cycle.cycleNo}`}
-                        className="flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-brand-soft hover:text-brand"
-                      >
-                        <ChevronDown className={`size-4 transition-transform ${isExpanded ? 'rotate-180' : ''}`} aria-hidden />
-                      </button>
-                      <span className="num w-6 text-center text-sm font-extrabold">{formatInt(cycle.cycleNo, prefs)}</span>
-                      <span className="flex w-4 justify-center" title={cycle.isComplete ? 'چرخهٔ کامل' : 'چرخهٔ ناقص'}>
-                        {cycle.isComplete ? (
-                          <Check className="size-3.5 text-green" aria-hidden />
-                        ) : (
-                          <AlertTriangle className="size-3.5 text-amber" aria-hidden />
-                        )}
-                      </span>
-                      {cycle.notes && <StickyNote className="size-3 text-faint" aria-hidden />}
+          {rows.map((row, rowIdx) => {
+            if (row.kind === 'ELEMENT') {
+              // ── ردیف اصلی عنصر — §۹.۱ گروه بصری ──
+              const column = columns[row.elementIndex]
+              if (!column) return null
+              const stats = sheet.stats.perElement[column.id]
+              return (
+                <tr key={`el:${row.elementId}`} className="group border-t-2 border-border/70 first:border-t-0">
+                  {/* سربرگ ردیف عنصر — چسبان راست (§۹.۲) */}
+                  <th
+                    scope="row"
+                    className="sticky right-0 z-10 border-b border-l bg-card/95 px-2 py-1.5 text-right align-top backdrop-blur group-hover:bg-surface-2/60"
+                  >
+                    <div className="flex items-start justify-between gap-1">
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-xs font-extrabold" title={row.name}>
+                          {row.name}
+                        </p>
+                        <div className="mt-0.5 flex flex-wrap items-center gap-1">
+                          {editable && (
+                            <button
+                              type="button"
+                              onClick={() => onToggleEntryMode(column.id)}
+                              className={`rounded-full border px-1.5 py-px text-[10px] font-bold transition-colors ${
+                                column.entryMode === 'INT'
+                                  ? 'border-brand/40 bg-brand-soft text-brand'
+                                  : 'border-border bg-muted text-muted-foreground hover:border-brand/40 hover:bg-brand-soft hover:text-brand'
+                              }`}
+                              title={
+                                column.entryMode === 'SEQ'
+                                  ? 'ورودی ترتیبی — برای ورودی بازه‌ای (از/تا) کلیک کنید'
+                                  : 'ورودی بازه‌ای (از/تا) — برای ترتیبی کلیک کنید'
+                              }
+                              aria-label={`حالت ورود عنصر ${row.name}: ${column.entryMode === 'SEQ' ? 'ترتیبی' : 'بازه‌ای'}`}
+                            >
+                              {column.entryMode === 'SEQ' ? (method === 'CONTINUOUS' ? 'قرائت' : 'مدت') : 'از/تا'}
+                            </button>
+                          )}
+                          {stats && stats.calcCount > 0 && (
+                            <span className="num text-[10px] text-faint" title="مشاهدات وارد محاسبه">
+                              {formatInt(stats.calcCount, prefs)}/{formatInt(stats.totalCount, prefs)}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      {/* §۶ — میانبر افزودن رابطهٔ موازی از خود جدول */}
+                      {editable && (
+                        <AddRelationControl
+                          projectId={sheet.activity.projectId}
+                          elementId={row.elementId}
+                          elementName={row.name}
+                          candidates={relationCandidates(row.elementId)}
+                          trigger={
+                            <button
+                              type="button"
+                              aria-label={`افزودن عنصر موازی برای ${row.name}`}
+                              title="افزودن رابطهٔ موازی — فقط عناصر همین فعالیت"
+                              className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-brand-soft hover:text-brand"
+                            >
+                              <CornerDownRight className="size-3.5 rotate-90" aria-hidden />
+                            </button>
+                          }
+                        />
+                      )}
                     </div>
-                  </td>
-
-                  {/* سلول‌های عناصر */}
-                  {columns.map((col, colIdx) => {
-                    const obs = findObservation(cycle, col.id)
+                  </th>
+                  {cycles.map((cycle, colIdx) => {
+                    const obs = findObservation(cycle, column.id)
                     const isActive = active.rowIdx === rowIdx && active.colIdx === colIdx
-                    const isEditing = editing?.rowIdx === rowIdx && editing?.colIdx === colIdx
-                    const err = cellErrors[`${rowIdx}:${colIdx}`]
+                    const isEditing =
+                      editing?.kind === 'ELEMENT' && editing.rowIdx === rowIdx && editing.colIdx === colIdx
+                    const err = cellErrors[`${column.id}:${cycle.id}`]
                     const excluded = obs?.validityStatus === 'EXCLUDED'
                     const suspect = obs?.validityStatus === 'SUSPECT'
                     const invalid = obs?.validityStatus === 'INVALID'
                     const partialInterval = obs && (obs.startOffset !== null) !== (obs.endOffset !== null)
                     return (
-                      <td key={col.id} className="relative border-b border-l p-0 last:border-l-0">
+                      <td key={cycle.id} className="relative border-b border-l p-0 last:border-l-0">
                         <div
                           ref={(el) => {
                             if (el) cellRefs.current.set(`${rowIdx}:${colIdx}`, el)
                             else cellRefs.current.delete(`${rowIdx}:${colIdx}`)
                           }}
                           role="gridcell"
-                          aria-label={`چرخهٔ ${cycle.cycleNo}، ${col.name}${obs?.derivedDuration != null ? `، مدت ${obs.derivedDuration}` : ''}${suspect ? '، مشاهدهٔ مشکوک' : ''}${excluded ? '، خارج‌شده از محاسبات' : ''}`}
+                          aria-label={`${row.name}، چرخهٔ ${cycle.cycleNo}${obs?.derivedDuration != null ? `، مدت ${obs.derivedDuration}` : ''}${suspect ? '، مشاهدهٔ مشکوک' : ''}${excluded ? '، خارج‌شده از محاسبات' : ''}`}
                           tabIndex={isActive ? 0 : -1}
                           onClick={(e) => {
                             if (e.shiftKey) setRangeEnd({ rowIdx, colIdx })
                             else focusCell(rowIdx, colIdx)
                             // کلیک روی سلول مشکوک → دیالوگ تشخیص — §۱۲.۳
-                            // (با تأخیر کوتاه تا دابل‌کلیک برای ویرایش ممکن بماند)
-                            if (suspect && obs && !e.shiftKey && !excluded) scheduleDiag(cycle, obs, col.name)
+                            if (suspect && obs && !e.shiftKey && !excluded) scheduleDiag(cycle, obs, row.name)
                           }}
                           onDoubleClick={() => {
                             cancelDiag()
@@ -496,8 +654,8 @@ export function SheetGrid({
                             isActive ? 'bg-brand-soft/70 ring-2 ring-brand' : inRange(rowIdx, colIdx) ? 'bg-brand-soft/30' : 'hover:bg-muted/40'
                           } ${excluded ? 'text-faint line-through' : ''} ${suspect ? 'bg-amber-soft/50' : ''} ${invalid || err ? 'bg-red-soft/60' : ''} ${partialInterval ? 'ring-1 ring-inset ring-amber/60' : ''}`}
                         >
-                          {isEditing ? (
-                            col.entryMode === 'INT' ? (
+                          {isEditing && editing.kind === 'ELEMENT' ? (
+                            column.entryMode === 'INT' ? (
                               // گروه بصری «از/تا» برای ورودی بازه‌ای — §۱۲.۲
                               <span
                                 dir="ltr"
@@ -522,7 +680,7 @@ export function SheetGrid({
                                         finishEdit('down')
                                       }
                                     }}
-                                    aria-label={`شروع بازهٔ ${col.name}`}
+                                    aria-label={`شروع بازهٔ ${row.name}`}
                                     className="num w-12 rounded-sm border-0 bg-transparent px-0.5 py-0.5 text-center text-xs focus-visible:bg-brand-soft/40 focus-visible:outline-none"
                                     inputMode="decimal"
                                     dir="ltr"
@@ -550,7 +708,7 @@ export function SheetGrid({
                                         finishEdit('down')
                                       }
                                     }}
-                                    aria-label={`پایان بازهٔ ${col.name}`}
+                                    aria-label={`پایان بازهٔ ${row.name}`}
                                     className="num w-12 rounded-sm border-0 bg-transparent px-0.5 py-0.5 text-center text-xs focus-visible:bg-brand-soft/40 focus-visible:outline-none"
                                     inputMode="decimal"
                                     dir="ltr"
@@ -574,7 +732,7 @@ export function SheetGrid({
                                   }
                                 }}
                                 onBlur={() => finishEdit('none')}
-                                aria-label={`مقدار ${col.name} چرخهٔ ${cycle.cycleNo}`}
+                                aria-label={`مقدار ${row.name} چرخهٔ ${cycle.cycleNo}`}
                                 className="num w-20 rounded-md border bg-background px-1 py-0.5 text-center text-xs focus-visible:outline-2 focus-visible:outline-ring"
                                 inputMode="decimal"
                                 dir="ltr"
@@ -602,7 +760,7 @@ export function SheetGrid({
                                   type="button"
                                   onClick={(e) => {
                                     e.stopPropagation()
-                                    openDiag(cycle, obs, col.name)
+                                    openDiag(cycle, obs, row.name)
                                   }}
                                   className="absolute left-1 top-1 flex size-4 items-center justify-center rounded-sm text-amber transition-colors hover:bg-amber-soft focus-visible:outline-2 focus-visible:outline-ring"
                                   aria-label="تشخیص مشاهدهٔ مشکوک"
@@ -623,70 +781,195 @@ export function SheetGrid({
                       </td>
                     )
                   })}
-
-                  {/* سپری‌شده — FR-10 */}
-                  <td className="border-b px-2 py-1.5 text-center">
-                    {cycle.elapsed === null ? (
-                      <span className="text-[10px] text-faint">نیازمند تکمیل</span>
-                    ) : (
-                      <span className="num inline-flex items-center gap-1 text-xs font-bold">
-                        {formatTimeValue(cycle.elapsed, prefs)}
-                        {cycle.elapsedExcludesSequential && (
-                          <AlertTriangle className="size-3 text-amber" aria-hidden />
-                        )}
-                      </span>
-                    )}
-                  </td>
                 </tr>
-
-                {/* ردیف گسترش: خط زمانی + جزئیات + کنترل وضعیت — ۷.۴ */}
-                {isExpanded && (
-                  <tr className="bg-surface-2/30">
-                    <td colSpan={maxCols + 2} className="border-b px-4 py-4">
-                      <ExpandedRow
-                        cycle={cycle}
-                        sheet={sheet}
-                        columns={columns}
-                        prefs={prefs}
-                        editable={editable}
-                        onDelete={() => setDeleteTarget(cycle)}
-                        onSetValidity={(obs) => onSetValidity(cycle, obs)}
-                        onDiagnose={(obs) => openDiag(cycle, obs, columns.find((c) => c.id === obs.workElementId)?.name ?? '')}
-                        onUpdateNotes={(notes) => onUpdateNotes(cycle, notes)}
+              )
+            }
+            // ── زیرردیف رابطهٔ موازی — §۵.۳ نمایش دوطرفه از یک منبع داده ──
+            const rel = relationById.get(row.relationId)
+            if (!rel) return null
+            return (
+              <tr key={row.displayKey} className="group t2-subrow">
+                {/* سربرگ زیرردیف — چسبان راست */}
+                <th
+                  scope="row"
+                  className="sticky right-0 z-10 border-b border-l bg-surface-2/50 px-2 py-1 text-right backdrop-blur"
+                >
+                  <div className="flex items-center justify-between gap-1">
+                    <div className="flex min-w-0 items-center gap-1">
+                      {/* اتصال بصری ظریف به عنصر والد — §۹.۱ */}
+                      <span className="h-4 w-2 shrink-0 rounded-e border-b-2 border-l-2 border-brand/30" aria-hidden />
+                      <p className="truncate text-[11px] font-bold text-muted-foreground" title={`هم‌پوشانی با ${row.otherName}`}>
+                        ↳ هم‌پوشانی با {row.otherName}
+                      </p>
+                    </div>
+                    {editable && (
+                      <ArchiveRelationControl
+                        projectId={sheet.activity.projectId}
+                        relationId={row.relationId}
+                        label={`${row.parentName} ↔ ${row.otherName}`}
+                        trigger={
+                          <button
+                            type="button"
+                            aria-label={`حذف رابطهٔ ${row.parentName} با ${row.otherName}`}
+                            title="حذف رابطهٔ موازی (آرشیو — مقادیر تاریخی حفظ می‌شود)"
+                            className="flex size-5 shrink-0 items-center justify-center rounded-md text-faint transition-colors hover:bg-red-soft hover:text-red"
+                          >
+                            <XCircle className="size-3" aria-hidden />
+                          </button>
+                        }
                       />
+                    )}
+                  </div>
+                </th>
+                {cycles.map((cycle, colIdx) => {
+                  const cell = overlapCellOf(cycle, row.relationId)
+                  const cmp = relationComparability(cycle, rel, nameOf)
+                  const computed = computedOverlapFor(cycle, rel)
+                  const isActive = active.rowIdx === rowIdx && active.colIdx === colIdx
+                  const isEditing =
+                    editing?.kind === 'OVERLAP' && editing.rowIdx === rowIdx && editing.colIdx === colIdx
+                  const err = cellErrors[`${row.relationId}:${cycle.id}`]
+                  const canEdit = editable && cmp.isComparable
+                  return (
+                    <td key={cycle.id} className="relative border-b border-l p-0 last:border-l-0">
+                      <div
+                        ref={(el) => {
+                          if (el) cellRefs.current.set(`${rowIdx}:${colIdx}`, el)
+                          else cellRefs.current.delete(`${rowIdx}:${colIdx}`)
+                        }}
+                        role="gridcell"
+                        aria-label={`هم‌پوشانی ${row.parentName} با ${row.otherName}، چرخهٔ ${cycle.cycleNo}${
+                          cell.status === 'UNREVIEWED' ? '، بررسی‌نشده' : cell.status === 'NO_OVERLAP' ? '، بدون هم‌پوشانی' : `، ${cell.overlapDuration} ثانیه`
+                        }${!cmp.isComparable ? '، غیرقابل‌مقایسه در این چرخه' : ''}`}
+                        tabIndex={isActive ? 0 : -1}
+                        onClick={(e) => {
+                          if (e.shiftKey) setRangeEnd({ rowIdx, colIdx })
+                          else focusCell(rowIdx, colIdx)
+                        }}
+                        onDoubleClick={() => {
+                          if (canEdit) startEdit(rowIdx, colIdx)
+                        }}
+                        title={!cmp.isComparable ? (cmp.notComparableReason ?? undefined) : undefined}
+                        className={`num relative min-h-9 px-2 py-1 text-center outline-none transition-colors focus-visible:z-10 focus-visible:ring-2 focus-visible:ring-brand ${
+                          isActive ? 'bg-brand-soft/70 ring-2 ring-brand' : inRange(rowIdx, colIdx) ? 'bg-brand-soft/30' : 'hover:bg-muted/40'
+                        } ${cell.status === 'NO_OVERLAP' ? 'bg-green-soft/30' : ''} ${cell.status === 'OVERLAP' ? 'bg-green-soft/40 font-bold' : ''} ${err ? 'bg-red-soft/60' : ''} ${!cmp.isComparable ? 'cursor-not-allowed opacity-60' : ''}`}
+                      >
+                        {isEditing && editing.kind === 'OVERLAP' ? (
+                          <input
+                            ref={overlapInputRef}
+                            value={editing.value}
+                            onChange={(e) => setEditing({ ...editing, value: e.target.value })}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Escape') setEditing(null)
+                              if (e.key === 'Tab') {
+                                e.preventDefault()
+                                finishEdit('next')
+                              }
+                              if (e.key === 'Enter') {
+                                e.preventDefault()
+                                finishEdit('down')
+                              }
+                            }}
+                            onBlur={() => finishEdit('none')}
+                            aria-label={`مقدار هم‌پوشانی ${row.parentName} با ${row.otherName} در چرخهٔ ${cycle.cycleNo}`}
+                            className="num w-16 rounded-md border bg-background px-1 py-0.5 text-center text-xs focus-visible:outline-2 focus-visible:outline-ring"
+                            inputMode="decimal"
+                            dir="ltr"
+                            placeholder="خالی/۰/مقدار"
+                          />
+                        ) : (
+                          <>
+                            {cell.status === 'UNREVIEWED' ? (
+                              // نشانهٔ بسیار ظریف بررسی‌نشده — §۵.۴ (خالی ≠ صفر)
+                              <span className="mx-auto block w-fit rounded border border-dashed border-amber/50 px-1 text-[9px] leading-4 text-amber/70" title="بررسی‌نشده — خالی به معنی صفر نیست">
+                                ؟
+                              </span>
+                            ) : cell.status === 'NO_OVERLAP' ? (
+                              <span className="text-xs text-green" title="بدون هم‌پوشانی — تأییدشده">
+                                ۰
+                              </span>
+                            ) : (
+                              <span className="text-xs">
+                                {formatTimeValue(cell.overlapDuration, prefs)}
+                                <span className="ms-0.5 text-[9px] font-normal text-faint">s</span>
+                              </span>
+                            )}
+                            {/* پیشنهاد مقدار محاسبه‌شده از بازهٔ واقعی — §۵.۵ */}
+                            {computed !== null && cell.status !== 'OVERLAP' && canEdit && (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  commitOverlap(row.relationId, cycle, { status: 'OVERLAP', overlapDuration: computed })
+                                }}
+                                className="absolute inset-x-0 -bottom-0.5 z-10 truncate text-[8px] leading-3 text-brand/80 hover:text-brand"
+                                title={`هم‌پوشانی محاسبه‌شده از بازهٔ واقعی: ${formatTimeValue(computed, prefs)} — برای اعمال کلیک کنید`}
+                              >
+                                ≈ {formatTimeValue(computed, prefs)}
+                              </button>
+                            )}
+                          </>
+                        )}
+                      </div>
+                      {err && (
+                        <p className="absolute inset-x-0 -bottom-0.5 z-20 truncate rounded-b-md bg-red px-1 text-right text-[9px] leading-4 text-white" title={err}>
+                          {err}
+                        </p>
+                      )}
                     </td>
-                  </tr>
-                )}
-              </Fragment>
+                  )
+                })}
+              </tr>
             )
           })}
         </tbody>
-        {/* پانوشت: مشاهدات معتبر هر عنصر — FR-12 */}
-        {cycles.length > 0 && (
+        {/* پانوشت: زمان سپری‌شدهٔ هر چرخه — FR-10 / §۸.۱ */}
+        {cycles.length > 0 && rows.length > 0 && (
           <tfoot className="sticky bottom-0 bg-surface-2/95 backdrop-blur">
             <tr>
-              <td className="sticky right-0 z-10 border-t bg-surface-2/95 px-2 py-1.5 text-center text-[10px] font-bold text-muted-foreground backdrop-blur">
-                معتبر
-              </td>
-              {columns.map((col) => {
-                const st = sheet.stats.perElement[col.id]
-                return (
-                  <td key={col.id} className="num border-t border-l px-2 py-1.5 text-center text-xs font-bold text-muted-foreground last:border-l-0">
-                    {st ? `${formatInt(st.calcCount, prefs)}/${formatInt(st.totalCount, prefs)}` : '—'}
-                  </td>
-                )
-              })}
-              <td className="border-t px-2 py-1.5 text-center text-[10px] text-muted-foreground">
-                <span className="num">
-                  {formatInt(sheet.stats.sessionValidCycles, prefs)} چرخهٔ معتبر
-                </span>
-              </td>
+              <th scope="row" className="sticky right-0 z-10 border-t bg-surface-2/95 px-2 py-1.5 text-right text-[10px] font-bold text-muted-foreground backdrop-blur">
+                سپری‌شده
+              </th>
+              {cycles.map((cycle) => (
+                <td key={cycle.id} className="border-t border-l px-2 py-1.5 text-center last:border-l-0">
+                  {cycle.elapsed === null ? (
+                    <span className="text-[10px] text-faint">نیازمند تکمیل</span>
+                  ) : (
+                    <span className="num inline-flex items-center gap-1 text-xs font-bold">
+                      {formatTimeValue(cycle.elapsed, prefs)}
+                      {cycle.elapsedExcludesSequential && (
+                        <AlertTriangle className="size-3 text-amber" aria-hidden />
+                      )}
+                    </span>
+                  )}
+                </td>
+              ))}
             </tr>
           </tfoot>
         )}
       </table>
 
-      {/* دیالوگ تشخیص مشاهدهٔ مشکوک — §۱۲.۳ (فقط خواندنی؛ خروج از محاسبات به دیالوگ وضعیت زنجیر می‌شود) */}
+      {/* دیالوگ جزئیات چرخه — §۸.۱ (خط زمانی + وضعیت + یادداشت + حذف) */}
+      <CycleDetailDialog
+        cycle={detailTarget}
+        sheet={sheet}
+        columns={columns}
+        prefs={prefs}
+        editable={editable}
+        onClose={() => setDetailTarget(null)}
+        onDelete={(c) => {
+          setDetailTarget(null)
+          setDeleteTarget(c)
+        }}
+        onSetValidity={onSetValidity}
+        onDiagnose={(obs) => {
+          const cycle = detailTarget
+          if (cycle) openDiag(cycle, obs, columns.find((c) => c.id === obs.workElementId)?.name ?? '')
+        }}
+        onUpdateNotes={onUpdateNotes}
+      />
+
+      {/* دیالوگ تشخیص مشاهدهٔ مشکوک — §۱۲.۳ */}
       <SuspectDiagnosticDialog
         target={diagTarget}
         prefs={prefs}
@@ -711,170 +994,6 @@ export function SheetGrid({
           if (c) onDeleteCycle(c)
         }}
       />
-    </div>
-  )
-}
-
-// ═══════════════ ردیف گسترش‌یافته ═══════════════
-
-function ExpandedRow({
-  cycle,
-  sheet,
-  columns,
-  prefs,
-  editable,
-  onDelete,
-  onSetValidity,
-  onDiagnose,
-  onUpdateNotes,
-}: {
-  cycle: CycleRowDto
-  sheet: SessionSheetDto
-  columns: ElementColumn[]
-  prefs: Prefs
-  editable: boolean
-  onDelete: () => void
-  onSetValidity: (obs: ObservationCellDto) => void
-  /** بازکردن دیالوگ تشخیص برای مشاهدهٔ مشکوک — §۱۲.۳ */
-  onDiagnose: (obs: ObservationCellDto) => void
-  onUpdateNotes: (notes: string) => void
-}) {
-  const [notes, setNotes] = useState(cycle.notes ?? '')
-  const [notesDirty, setNotesDirty] = useState(false)
-
-  // همگام‌سازی با تغییر سرور (Undo/Redo) — تنظیم حالت در رندر
-  const [prevServerNotes, setPrevServerNotes] = useState(cycle.notes ?? '')
-  if ((cycle.notes ?? '') !== prevServerNotes) {
-    setPrevServerNotes(cycle.notes ?? '')
-    if (!notesDirty) setNotes(cycle.notes ?? '')
-  }
-
-  return (
-    <div className="space-y-4">
-      {/* شناسه و زمان ثبت — ۷.۴ */}
-      <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-muted-foreground">
-        <span className="flex flex-wrap items-center gap-2">
-          <span dir="ltr" className="num rounded bg-muted px-1.5 py-0.5 font-mono">
-            {cycle.id.slice(0, 8)}
-          </span>
-          <span>شناسهٔ چرخه</span>
-          <ChevronLeft className="size-3" aria-hidden />
-          <span>ثبت: {new Date(cycle.createdAt).toLocaleString('fa-IR')}</span>
-        </span>
-        {editable && (
-          <button
-            type="button"
-            onClick={onDelete}
-            className="flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-bold text-red transition-colors hover:bg-red-soft"
-          >
-            <Trash2 className="size-3.5" aria-hidden />
-            حذف چرخه…
-          </button>
-        )}
-      </div>
-
-      {/* خط زمانی — FR-10 */}
-      <CycleTimeline cycle={cycle} sheet={sheet} prefs={prefs} />
-
-      {/* جزئیات مشاهدات + کنترل وضعیت — FR-11 */}
-      <div className="overflow-x-auto rounded-xl border">
-        <table className="w-full text-xs">
-          <thead>
-            <tr className="border-b bg-surface-2/70 text-right">
-              <th className="px-3 py-2 font-bold">عنصر</th>
-              <th className="px-3 py-2 font-bold">مقدار خام</th>
-              <th className="px-3 py-2 font-bold">مدت</th>
-              <th className="px-3 py-2 font-bold">وضعیت</th>
-              <th className="px-3 py-2 font-bold">اقدام</th>
-            </tr>
-          </thead>
-          <tbody>
-            {columns.map((col) => {
-              const obs = cycle.observations.find((o) => o.workElementId === col.id)
-              const rawText = !obs
-                ? '—'
-                : obs.startOffset != null || obs.endOffset != null
-                  ? `${obs.startOffset ?? '؟'} تا ${obs.endOffset ?? '؟'}`
-                  : sheet.session.timingMethod === 'CONTINUOUS'
-                    ? `قرائت ${obs.cumulativeReading ?? '—'}`
-                    : `${obs.rawDuration ?? '—'}`
-              return (
-                <tr key={col.id} className="border-b last:border-0">
-                  <td className="px-3 py-2">
-                    <span className="font-bold">{col.name}</span>
-                    <span className="mr-1 text-[10px] text-faint">({ELEMENT_TYPE_BADGE[col.elementType].label})</span>
-                  </td>
-                  <td className="num px-3 py-2">{rawText}</td>
-                  <td className="num px-3 py-2">{obs?.derivedDuration != null ? formatTimeValue(obs.derivedDuration, prefs) : '—'}</td>
-                  <td className="px-3 py-2">
-                    {obs?.validityStatus === 'EXCLUDED' ? (
-                      <span className="flex items-center gap-1 text-faint">
-                        <Eraser className="size-3.5" aria-hidden /> خارج‌شده
-                        {obs.exclusionReason && <span className="text-[10px]">({obs.exclusionReason})</span>}
-                      </span>
-                    ) : obs?.validityStatus === 'SUSPECT' ? (
-                      // دکمهٔ تشخیص مشاهدهٔ مشکوک — §۱۲.۳
-                      <button
-                        type="button"
-                        onClick={() => onDiagnose(obs)}
-                        className="flex items-center gap-1 rounded-lg px-1.5 py-0.5 text-amber transition-colors hover:bg-amber-soft"
-                        title="نمایش جزئیات تشخیص مشاهدهٔ مشکوک"
-                      >
-                        <AlertTriangle className="size-3.5" aria-hidden /> مشکوک — تشخیص
-                      </button>
-                    ) : obs?.validityStatus === 'INVALID' ? (
-                      <span className="flex items-center gap-1 text-red">
-                        <XCircle className="size-3.5" aria-hidden /> نامعتبر
-                      </span>
-                    ) : (
-                      <span className="flex items-center gap-1 text-green">
-                        <Check className="size-3.5" aria-hidden /> معتبر
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-3 py-2">
-                    {obs && obs.validityStatus !== 'INVALID' && (
-                      <button
-                        type="button"
-                        onClick={() => onSetValidity(obs)}
-                        className={`rounded-lg px-2 py-1 text-[11px] font-bold transition-colors ${
-                          obs.validityStatus === 'EXCLUDED'
-                            ? 'text-green hover:bg-green-soft'
-                            : 'text-red hover:bg-red-soft'
-                        }`}
-                      >
-                        {obs.validityStatus === 'EXCLUDED' ? 'بازگشت به محاسبات' : 'خروج از محاسبه'}
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
-      </div>
-
-      {/* یادداشت چرخه */}
-      <div className="space-y-1">
-        <p className="text-[11px] font-bold text-muted-foreground">یادداشت چرخه (رویدادهای ویژه، وقفه‌ها و …)</p>
-        <textarea
-          value={notes}
-          onChange={(e) => {
-            setNotes(e.target.value)
-            setNotesDirty(true)
-          }}
-          onBlur={() => {
-            if (notesDirty) {
-              onUpdateNotes(notes)
-              setNotesDirty(false)
-            }
-          }}
-          disabled={!editable}
-          rows={2}
-          className="w-full rounded-xl border bg-background p-2 text-xs focus-visible:outline-2 focus-visible:outline-ring"
-          placeholder="مثلاً: اپراتور در ثانیهٔ ۱۲ برای دریافت قطعه متوقف شد"
-        />
-      </div>
     </div>
   )
 }

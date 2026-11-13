@@ -12,7 +12,19 @@ export function GET(req: NextRequest, ctx: Ctx) {
     const { activity, elements } = await listElements(id)
     return ok({
       activity: { id: activity.id, name: activity.name, stationId: activity.stationId },
-      elements,
+      // v1.5.0 §۳ — elementType legacy در DTO عرضه نمی‌شود
+      elements: elements.map((e) => ({
+        id: e.id,
+        activityId: e.activityId,
+        name: e.name,
+        description: e.description,
+        sortOrder: e.sortOrder,
+        createdAt: e.createdAt.toISOString(),
+        updatedAt: e.updatedAt.toISOString(),
+        rating: e.rating
+          ? { totalFactor: e.rating.totalFactor }
+          : null,
+      })),
     })
   })
 }

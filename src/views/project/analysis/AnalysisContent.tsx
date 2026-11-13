@@ -52,7 +52,6 @@ import { EmptyState } from '@/components/common/Feedback'
 import { HelpDot } from '@/components/common/HelpDot'
 import { analysisApi, reportsApi, timingApi, type ElementAnalysisItemDto } from '@/lib/api/endpoints'
 import { qk } from '@/lib/api/keys'
-import { ELEMENT_TYPE_LABELS, type ElementType } from '@/domain/types'
 import { useDisplayPrefs } from '@/store/display-store'
 import { useAppStore } from '@/store/app-store'
 import { formatDateTime, formatInt, formatPercent, formatTimeValue } from '@/lib/format'
@@ -450,7 +449,6 @@ export default function AnalysisContent({ activityId }: { activityId: string }) 
                   <TableHeader>
                     <TableRow>
                       <TableHead className="tbl-text">عنصر</TableHead>
-                      <TableHead>نوع</TableHead>
                       <TableHead>در محاسبات</TableHead>
                       <TableHead>مشکوک / خارج</TableHead>
                       <TableHead>OT (ثانیه)</TableHead>
@@ -472,9 +470,6 @@ export default function AnalysisContent({ activityId }: { activityId: string }) 
                   <div key={el.id} className="rounded-xl border p-3">
                     <div className="flex items-center justify-between gap-2">
                       <p className="font-bold">{el.name}</p>
-                      <Badge variant="outline" className="shrink-0">
-                        {ELEMENT_TYPE_LABELS[el.elementType as ElementType] ?? el.elementType}
-                      </Badge>
                     </div>
                     <div className="mt-2 grid grid-cols-2 gap-2 text-sm">
                       <Metric label="در محاسبات" value={formatInt(el.counts.calcBasis, prefs)} />
@@ -532,32 +527,8 @@ export default function AnalysisContent({ activityId }: { activityId: string }) 
         </CardContent>
       </Card>
 
-      {/* ── شاخص‌های نوع زمان + آمار چرخه ── */}
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Card className="rounded-2xl">
-          <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Timer className="size-5 text-brand" aria-hidden />
-              شاخص‌های نوع زمان (از OT)
-              <HelpDot
-              label="شاخص‌های نوع زمان"
-              content={{
-                what: 'جمع زمان مشاهده‌شدهٔ عناصر بر اساس نوع آن‌ها — جداگانه گزارش می‌شود.',
-                input: 'مجموع OT عناصر دستی، ماشینی و انتظار به‌صورت مستقل محاسبه می‌شود.',
-                example: 'اگر عنصر دستی OT=۱۰ و دو عنصر ماشینی OT=۵ و ۷ داشته باشید: کار دستی ۱۰ و کار ماشینی ۱۲ ثانیه.',
-                note: 'جمع عناصر هم‌زمان فقط یک شاخص است و زمان سپری‌شدهٔ چرخه محسوب نمی‌شود.',
-              }}
-            />
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
-            <Metric label="کار دستی" value={formatTimeValue(analysis.elementTypeTotals.manual, prefs)} muted={analysis.elementTypeTotals.manual === null} />
-            <Metric label="خودکار ماشین" value={formatTimeValue(analysis.elementTypeTotals.machine, prefs)} muted={analysis.elementTypeTotals.machine === null} />
-            <Metric label="انتظار" value={formatTimeValue(analysis.elementTypeTotals.waiting, prefs)} muted={analysis.elementTypeTotals.waiting === null} />
-            <Metric label="جمع هم‌زمان (شاخص)" value={formatTimeValue(analysis.elementTypeTotals.overlapSum, prefs)} muted={analysis.elementTypeTotals.overlapSum === null} />
-          </CardContent>
-        </Card>
-
+      {/* ── آمار چرخه ── */}
+      <div className="grid gap-4">
         <Card className="rounded-2xl">
           <CardHeader className="pb-3">
             <CardTitle className="flex flex-wrap items-center gap-2 text-base">
@@ -1055,9 +1026,6 @@ function ElementRow({ el, prefs }: { el: ElementAnalysisItemDto; prefs: ReturnTy
     <TableRow>
       <TableCell className="tbl-text max-w-48 font-bold">
         <span className="line-clamp-1">{el.name}</span>
-      </TableCell>
-      <TableCell>
-        <Badge variant="outline">{ELEMENT_TYPE_LABELS[el.elementType as ElementType] ?? el.elementType}</Badge>
       </TableCell>
       <TableCell className="tbl-num">{formatInt(el.counts.calcBasis, prefs)}</TableCell>
       <TableCell>

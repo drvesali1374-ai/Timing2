@@ -402,7 +402,6 @@ function ReportPaper({
                 <thead>
                   <tr className="border-b border-slate-300 text-right">
                     <th className="long py-1 pl-1 font-bold">عنصر</th>
-                    <th className="py-1 font-bold">نوع</th>
                     <th className="py-1 font-bold">n</th>
                     <th className="py-1 font-bold">میانگین</th>
                     <th className="py-1 font-bold">SD</th>
@@ -417,7 +416,7 @@ function ReportPaper({
                 <tbody>
                   {sec.elements.length === 0 ? (
                     <tr>
-                      <td colSpan={11} className="py-2 text-center text-slate-500">
+                      <td colSpan={10} className="py-2 text-center text-slate-500">
                         عنصری تعریف نشده است.
                       </td>
                     </tr>
@@ -425,7 +424,6 @@ function ReportPaper({
                     sec.elements.map((el, i) => (
                       <tr key={`${sec.activity.id}-${i}`} className="border-b border-slate-100">
                         <td className="long py-1 pl-1">{el.name}</td>
-                        <td className="py-1 text-center">{el.elementTypeLabel}</td>
                         <td className="py-1 text-center tabular-nums">{formatInt(el.stats.count, prefs)}</td>
                         <td className="py-1 text-center tabular-nums">
                           {el.stats.mean === null ? '—' : formatTimeValue(el.stats.mean, prefs)}

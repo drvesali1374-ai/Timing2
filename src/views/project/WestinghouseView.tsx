@@ -54,10 +54,8 @@ import {
 } from '@/lib/api/endpoints'
 import { qk } from '@/lib/api/keys'
 import {
-  ELEMENT_TYPE_LABELS,
   RATING_FACTORS,
   RATING_FACTOR_LABELS,
-  type ElementType,
   type RatingFactor,
 } from '@/domain/types'
 import { computeRatingFactor } from '@/calculation/westinghouse'
@@ -83,14 +81,6 @@ const EMPTY_GRADES: Record<RatingFactor, string | null> = {
   EFFORT: null,
   CONDITIONS: null,
   CONSISTENCY: null,
-}
-
-/** رنگ Badge نوع عنصر — MANUAL بنفش (رنگ برند)، MACHINE فیروزه‌ای، WAITING خاکستری، OVERLAP کهربایی */
-const ELEMENT_TYPE_BADGE_CLASS: Record<string, string> = {
-  MANUAL: 'border-brand/30 bg-brand-soft text-brand',
-  MACHINE: 'border-cyan/30 bg-cyan-soft text-cyan',
-  WAITING: 'border-border bg-muted text-muted-foreground',
-  OVERLAP: 'border-amber/30 bg-amber-soft text-amber',
 }
 
 /** راهنمای واقعی هر عامل — FR-13 */
@@ -126,14 +116,6 @@ function formatSigned(v: number | null | undefined, prefs: Prefs): string {
   if (v === null || v === undefined || !Number.isFinite(v)) return '—'
   if (Math.abs(v) < 1e-9) return formatTimeValue(0, prefs, 2)
   return (v > 0 ? '+' : '−') + formatTimeValue(Math.abs(v), prefs, 2)
-}
-
-function ElementTypeBadge({ type }: { type: string }) {
-  return (
-    <Badge variant="outline" className={ELEMENT_TYPE_BADGE_CLASS[type] ?? ''}>
-      {ELEMENT_TYPE_LABELS[type as ElementType] ?? type}
-    </Badge>
-  )
 }
 
 export default function WestinghouseView({ projectId }: { projectId: string }) {
@@ -553,7 +535,6 @@ function ActivityElements({
           <thead>
             <tr className="border-b bg-surface-2/70 text-right text-xs text-muted-foreground">
               <th className="px-4 py-2.5 font-bold">عنصر کاری</th>
-              <th className="px-4 py-2.5 font-bold">نوع</th>
               <th className="px-4 py-2.5 font-bold">وضعیت ارزیابی</th>
               <th className="px-4 py-2.5" aria-label="عملیات" />
             </tr>
@@ -562,9 +543,6 @@ function ActivityElements({
             {activity.elements.map((el) => (
               <tr key={el.id} className="border-b transition-colors last:border-0 hover:bg-muted/50">
                 <td className="px-4 py-2.5 font-medium">{el.name}</td>
-                <td className="px-4 py-2.5">
-                  <ElementTypeBadge type={el.elementType} />
-                </td>
                 <td className="px-4 py-2.5">
                   {el.rating ? (
                     <Badge
@@ -628,7 +606,6 @@ function ElementCard({
     <div className="rounded-xl border p-3">
       <p className="text-sm font-bold">{el.name}</p>
       <div className="mt-2 flex flex-wrap items-center gap-1.5">
-        <ElementTypeBadge type={el.elementType} />
         {el.rating ? (
           <Badge
             className="num bg-green-soft text-green"

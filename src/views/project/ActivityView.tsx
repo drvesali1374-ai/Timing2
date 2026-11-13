@@ -68,11 +68,8 @@ import {
 } from '@/lib/api/endpoints'
 import { qk } from '@/lib/api/keys'
 import {
-  ELEMENT_TYPES,
-  ELEMENT_TYPE_LABELS,
   PROCESS_TYPES,
   PROCESS_TYPE_LABELS,
-  type ElementType,
   type ProcessType,
 } from '@/domain/types'
 import { useAppStore } from '@/store/app-store'
@@ -106,10 +103,9 @@ interface ActivityInfoFormState {
 interface ElementFormState {
   name: string
   description: string
-  elementType: string
 }
 
-const EMPTY_ELEMENT_FORM: ElementFormState = { name: '', description: '', elementType: 'MANUAL' }
+const EMPTY_ELEMENT_FORM: ElementFormState = { name: '', description: '' }
 
 /** پاسخ GET /api/elements/{id} — فقط برای شمارش وابستگی‌های حذف */
 interface ElementDepsDto {
@@ -117,14 +113,6 @@ interface ElementDepsDto {
 }
 
 const elementDepsKey = (id: string) => ['element-depends', id] as const
-
-// ── نگاشت رنگ Badge نوع عنصر — FR-02 ──
-const ELEMENT_TYPE_BADGE: Record<ElementType, string> = {
-  MANUAL: 'border-0 bg-brand-soft text-brand',
-  MACHINE: 'border-0 bg-cyan-soft text-cyan',
-  WAITING: 'border-0 bg-muted text-muted-foreground',
-  OVERLAP: 'border-0 bg-amber-soft text-amber',
-}
 
 // ── محتوای راهنمای آیکونی — FR-28 / ۷.۵ ──
 const TARGET_SAMPLE_HELP = {
@@ -161,20 +149,9 @@ const ELEMENT_NAME_HELP = {
   note: 'عناصر با کشیدن‌ورها کردن مرتب می‌شوند؛ ترتیب همان ترتیب اجرای کار در چرخه است.',
 } as const
 
-const ELEMENT_TYPE_HELP = {
-  what: 'نوع عنصر تعیین می‌کند زمان آن چگونه در محاسبات رفتار می‌کند: دستی، خودکار ماشین، انتظار، یا هم‌زمان/دارای هم‌پوشانی.',
-  input: 'ماهیت غالب عنصر را انتخاب کنید؛ پیش‌فرض «دستی» است.',
-  example: '«پرس اتوماتیک» → خودکار ماشین؛ «انتظار برای خشک‌شدن رنگ» → انتظار.',
-  note: 'عنصر هم‌زمان/دارای هم‌پوشانی برای کار هم‌زمان اپراتور و ماشین است؛ با بازه شروع/پایان ثبت می‌شود (فاز ۳) و زمان سپری‌شده چرخه از گستره بازه‌ها محاسبه می‌شود نه جمع مدت‌ها.',
-} as const
-
 // ── کمک‌تابع‌ها ──
 function processLabelOf(pt: string): string {
   return PROCESS_TYPE_LABELS[pt as ProcessType] ?? pt
-}
-
-function elementTypeLabelOf(et: string): string {
-  return ELEMENT_TYPE_LABELS[et as ElementType] ?? et
 }
 
 function removedCountsText(prefs: Prefs, parts: Array<[string, number]>): string | undefined {
@@ -712,7 +689,6 @@ function ElementsSection({
       structureApi.createElement(activityId, {
         name: createForm.name.trim(),
         description: createForm.description.trim() || null,
-        elementType: createForm.elementType,
       }),
     onSuccess: () => {
       invalidateElements()
@@ -800,7 +776,6 @@ function ElementsSection({
           <Badge variant="secondary" className="num border-0 bg-surface-2">
             {formatInt(elements.length, prefs)}
           </Badge>
-          <HelpDot label="عناصر کاری" content={ELEMENT_TYPE_HELP} />
         </h3>
         <Button onClick={openCreate} className="btn-brand gap-1.5 border-0">
           <Plus className="size-4" aria-hidden />
@@ -870,27 +845,6 @@ function ElementsSection({
                 className="min-h-16"
               />
             </div>
-            <div className="space-y-1.5">
-              <div className="flex items-center gap-1">
-                <Label>نوع عنصر کاری</Label>
-                <HelpDot label="نوع عنصر کاری" content={ELEMENT_TYPE_HELP} />
-              </div>
-              <Select
-                value={createForm.elementType}
-                onValueChange={(v) => setCreateForm((s) => ({ ...s, elementType: v }))}
-              >
-                <SelectTrigger className="w-full" aria-label="نوع عنصر کاری">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {ELEMENT_TYPES.map((et) => (
-                    <SelectItem key={et} value={et}>
-                      {ELEMENT_TYPE_LABELS[et]}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
           </div>
           <DialogFooter className="gap-2">
             <Button variant="outline" onClick={() => setCreateOpen(false)}>
@@ -949,17 +903,6 @@ function ElementRow({
   onEdit: () => void
   onDelete: () => void
 }) {
-  const typeLabel = elementTypeLabelOf(element.elementType)
-
-  const typeBadge = (
-    <Badge
-      className={cn('shrink-0', ELEMENT_TYPE_BADGE[element.elementType as ElementType] ?? '')}
-      title={`نوع عنصر: ${typeLabel}`}
-    >
-      {typeLabel}
-    </Badge>
-  )
-
   const ratingBadge = element.rating ? (
     <Badge className="num border-0 bg-green-soft text-green" dir="ltr" title="ضریب ارزیابی وستینگهاوس">
       R = {formatTimeValue(element.rating.totalFactor, prefs)}
@@ -992,7 +935,6 @@ function ElementRow({
       <div className="space-y-2.5 rounded-xl border border-border/60 bg-surface-2/50 py-3 pe-3 ps-9">
         <div className="flex items-start justify-between gap-2">
           <div className="flex min-w-0 items-center gap-2">
-            {typeBadge}
             <p className="min-w-0 flex-1 truncate text-sm font-bold">{element.name}</p>
           </div>
           {actions}
@@ -1011,7 +953,6 @@ function ElementRow({
   return (
     <div className="flex items-center gap-2.5 rounded-xl border border-border/60 bg-surface-2/50 py-2 pe-1.5 ps-8 transition-colors hover:border-brand/40 hover:bg-brand-soft/30">
       <span className="num w-4 shrink-0 text-[11px] text-faint">{formatInt(index + 1, prefs)}</span>
-      {typeBadge}
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-bold">{element.name}</p>
         {element.description && (
@@ -1041,7 +982,6 @@ function ElementEditForm({
   const [form, setForm] = useState<ElementFormState>(() => ({
     name: element.name,
     description: element.description ?? '',
-    elementType: element.elementType,
   }))
   const updatedAtRef = useRef(element.updatedAt)
 
@@ -1052,7 +992,6 @@ function ElementEditForm({
       const res = await structureApi.updateElement(element.id, {
         name: value.name.trim(),
         description: value.description.trim() || null,
-        elementType: value.elementType,
         expectedUpdatedAt: updatedAtRef.current,
       })
       updatedAtRef.current = res.element.updatedAt
@@ -1089,28 +1028,6 @@ function ElementEditForm({
             className="min-h-16"
           />
         </div>
-        <div className="space-y-1.5">
-          <div className="flex items-center gap-1">
-            <Label>نوع عنصر کاری</Label>
-            <HelpDot label="نوع عنصر کاری" content={ELEMENT_TYPE_HELP} />
-          </div>
-          <Select value={form.elementType} onValueChange={(v) => setForm((s) => ({ ...s, elementType: v }))}>
-            <SelectTrigger className="w-full" aria-label="نوع عنصر کاری">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {ELEMENT_TYPES.map((et) => (
-                <SelectItem key={et} value={et}>
-                  {ELEMENT_TYPE_LABELS[et]}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <p className="text-[11px] leading-5 text-faint">
-            تغییر نوع عنصر بر مدل محاسباتی اثر دارد و وضعیت محاسبات را «نیازمند محاسبه مجدد» می‌کند.
-          </p>
-        </div>
-
         {/* الونس‌ها و زمان‌های مجاز — سطح عنصر کاری (§۶) */}
         <AllowanceSection projectId={projectId} scopeType="WORK_ELEMENT" scopeId={element.id} compact />
 

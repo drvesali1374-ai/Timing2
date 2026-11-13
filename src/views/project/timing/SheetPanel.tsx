@@ -1,10 +1,13 @@
 'use client'
 
 // ═══════════════════════════════════════════════════════════
-// پنل برگهٔ زمان‌سنجی — ارکستراتور فاز ۳ — FR-06…FR-12
+// پنل برگهٔ زمان‌سنجی — ارکستراتور فاز ۳ — FR-06…FR-12 — v1.5.0
 // نوار ابزار (Undo/Redo، افزودن چرخه، Paste، بستن جلسه،
 // نشانگر ذخیره)، پیشرفت نمونه، دیالوگ وضعیت مشاهده و
-// اتصال جدول دسکتاپ/کارت موبایل به API.
+// اتصال جدول دسکتاپ/موبایل به API.
+// v1.5.0: ثبت مقدار هم‌پوشانی زیرردیف‌ها از مسیر مرکزی
+// setCycleOverlaps با کنترل نسخه و Undo/Redo (§۵.۵/§۸.۵)؛
+// Paste با لنگر شناسه‌محور و Undo شامل مقادیر هم‌پوشانی.
 // ═══════════════════════════════════════════════════════════
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
@@ -51,18 +54,27 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Input } from '@/components/ui/input'
 import { HelpDot } from '@/components/common/HelpDot'
 import { SaveIndicator } from '@/components/common/SaveIndicator'
-import { timingApi, type CycleRowDto, type ObservationCellDto, type RemovedCycleDataDto, type SessionSheetDto } from '@/lib/api/endpoints'
+import { timingApi, overlapApi, type CycleRowDto, type ObservationCellDto, type RemovedCycleDataDto, type SessionSheetDto } from '@/lib/api/endpoints'
 import { qk } from '@/lib/api/keys'
 import type { DisplayPrefs as Prefs } from '@/lib/format'
 import { formatInt, formatTimeValue } from '@/lib/format'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { TIMING_METHOD_LABELS } from '@/domain/types'
-import { buildColumns, captureBefore, findObservation, type CellPayload, type ElementColumn } from './shared'
+import {
+  buildColumns,
+  buildRows,
+  captureBefore,
+  findObservation,
+  type CellPayload,
+  type ElementColumn,
+  type GridRow,
+  type OverlapCellState,
+} from './shared'
 import { useCellSaver } from './useCellSaver'
 import { useSheetHistory } from './useSheetHistory'
-import { SheetGrid } from './SheetGrid'
+import { SheetGrid, type GridPasteAnchor } from './SheetGrid'
 import { MobileSheet } from './MobileSheet'
-import { PasteDialog, type PasteAnchor } from './PasteDialog'
+import { PasteDialog } from './PasteDialog'
 import { EXCLUSION_REASONS } from './shared'
 
 export function SheetPanel({
@@ -79,7 +91,7 @@ export function SheetPanel({
   const [entryOverrides, setEntryOverrides] = useState<Record<string, 'SEQ' | 'INT'>>({})
   const [cellErrors, setCellErrors] = useState<Record<string, string>>({})
   const [pasteOpen, setPasteOpen] = useState(false)
-  const [pasteAnchor, setPasteAnchor] = useState<PasteAnchor>({ cycleNo: 1, colIndex: 0 })
+  const [pasteAnchor, setPasteAnchor] = useState<GridPasteAnchor>({ cycleNo: 1, elementId: '', relationId: null })
   const [pasteText, setPasteText] = useState<string | undefined>(undefined)
   const [validityTarget, setValidityTarget] = useState<{ cycle: CycleRowDto; obs: ObservationCellDto } | null>(null)
   const [closeConfirm, setCloseConfirm] = useState(false)
@@ -101,6 +113,12 @@ export function SheetPanel({
     },
     [qc, sessionId]
   )
+
+  // خواندن تازهٔ برگه (برای پاسخ‌هایی که sheet برنمی‌گردانند — مثلاً setCycleOverlaps)
+  const refreshSheet = useCallback(async () => {
+    const res = await timingApi.sheet(sessionId)
+    onSheet(res.sheet)
+  }, [sessionId, onSheet])
 
   const saver = useCellSaver(onSheet)
   const history = useSheetHistory(saver.flush)
@@ -148,8 +166,7 @@ export function SheetPanel({
       saver.schedule(cycleId, payload)
       setCellErrors((s) => {
         const next = { ...s }
-        const rowIdx = sheet.cycles.findIndex((c) => c.id === cycleId)
-        delete next[`${rowIdx}:${column.index}`]
+        delete next[`${column.id}:${cycleId}`]
         return next
       })
       history.push({
@@ -159,6 +176,61 @@ export function SheetPanel({
       })
     },
     [sheet, saver, history, applyCells]
+  )
+
+  // ── ثبت مقدار هم‌پوشانی زیرردیف — §۵.۳/§۵.۵ از مسیر مرکزی ──
+  // مقدار هر دو زیرردیف آینه‌ای از یک رکورد ObservationOverlap است؛
+  // undo/redo در زمان اجرا نسخهٔ فعلی را از کش می‌خواند (بدون بازنویسی
+  // بی‌صدا در صورت Conflict — §۸.۵).
+  const commitOverlap = useCallback(
+    (relationId: string, cycle: CycleRowDto, state: OverlapCellState) => {
+      if (!sheet) return
+      const rel = sheet.parallelRelations.find((r) => r.relationId === relationId)
+      const beforeCell = cycle.overlaps?.[relationId]
+      const before: OverlapCellState = beforeCell
+        ? { status: beforeCell.status as OverlapCellState['status'], overlapDuration: beforeCell.overlapDuration }
+        : { status: 'UNREVIEWED', overlapDuration: null }
+      const after = state
+      const cycleId = cycle.id
+      const cycleNo = cycle.cycleNo
+      const pairLabel = rel ? `${rel.elementLowName} ↔ ${rel.elementHighName}` : 'رابطه'
+      const apply = async (target: OverlapCellState) => {
+        // نسخهٔ فعلی از آخرین وضعیت معتبر
+        const sheetNow = qc.getQueryData<{ sheet: SessionSheetDto }>(qk.sessionSheet(sessionId))?.sheet
+        const cycleNow = sheetNow?.cycles.find((c) => c.id === cycleId)
+        const currentVersion = cycleNow?.overlaps?.[relationId]?.version
+        const currentRevision = cycleNow?.overlapRevision
+        const res = await overlapApi.setCycleOverlaps(cycleId, {
+          updates: [
+            {
+              relationId,
+              status: target.status,
+              overlapDuration: target.status === 'OVERLAP' ? target.overlapDuration : target.status === 'NO_OVERLAP' ? 0 : null,
+              expectedVersion: currentVersion,
+            },
+          ],
+          expectedOverlapRevision: currentRevision,
+        })
+        await refreshSheet()
+        void qc.invalidateQueries({ queryKey: ['overlap-matrix'] })
+        void qc.invalidateQueries({ queryKey: ['element-relations'] })
+        for (const w of res.warnings) toast.warning('هشدار — نتیجه موقتی است', { description: w })
+      }
+      setCellErrors((s) => {
+        const next = { ...s }
+        delete next[`${relationId}:${cycleId}`]
+        return next
+      })
+      void apply(after).catch((err) => {
+        toast.error(err instanceof Error ? err.message : 'ثبت مقدار هم‌پوشانی ناموفق بود')
+      })
+      history.push({
+        label: `هم‌پوشانی ${pairLabel} در چرخهٔ ${cycleNo}`,
+        undo: () => apply(before),
+        redo: () => apply(after),
+      })
+    },
+    [sheet, qc, sessionId, refreshSheet, history]
   )
 
   const onCellError = useCallback((key: string, message: string) => {
@@ -237,36 +309,61 @@ export function SheetPanel({
     [sessionId, onSheet, saver, history, prefs]
   )
 
-  // ── Paste — FR-07 ──
+  // ── Paste — FR-07 / §۸.۳ محور جدید ──
   const doPaste = useCallback(
     async (data: string[][], mode: 'ALL_OR_NOTHING' | 'SKIP_INVALID') => {
       if (!sheet) return
       await saver.flush()
-      // تصویر «قبل» برای Undo: چرخه‌های موجود در محدودهٔ هدف
+      // تصویر «قبل» برای Undo — بر اساس مدل ردیف شبکه (§۸.۳)
+      const gridRows: GridRow[] = buildRows(sheet, columns)
+      const anchorIdx = pasteAnchor.relationId
+        ? gridRows.findIndex(
+            (g) => g.kind === 'PARALLEL' && g.relationId === pasteAnchor.relationId && g.parentElementId === pasteAnchor.elementId
+          )
+        : gridRows.findIndex((g) => g.kind === 'ELEMENT' && g.elementId === pasteAnchor.elementId)
+      const width = data.reduce((m, row) => Math.max(m, row.length), 0)
       const startNo = pasteAnchor.cycleNo
-      const endNo = startNo + data.length - 1
+      const endNo = startNo + width - 1
       const beforeCells: { cycleId: string; cells: CellPayload[] }[] = []
+      const beforeOverlaps: { cycleId: string; cycleNo: number; updates: Array<{ relationId: string; status: OverlapCellState['status']; overlapDuration: number | null }> }[] = []
       const beforeIds = new Set(sheet.cycles.map((c) => c.id))
-      for (const c of sheet.cycles) {
-        if (c.cycleNo < startNo || c.cycleNo > endNo) continue
-        const cells: CellPayload[] = []
-        const rowLen = data[0]?.length ?? 0
-        for (let ci = 0; ci < rowLen; ci++) {
-          const col = columns[pasteAnchor.colIndex + ci]
+      for (let ri = 0; ri < data.length; ri++) {
+        const grow = gridRows[anchorIdx + ri]
+        if (!grow) continue
+        if (grow.kind === 'ELEMENT') {
+          const col = columns[grow.elementIndex]
           if (!col) continue
-          const obs = findObservation(c, col.id)
-          cells.push(
-            obs
+          for (const c of sheet.cycles) {
+            if (c.cycleNo < startNo || c.cycleNo > endNo) continue
+            const obs = findObservation(c, col.id)
+            const cell: CellPayload = obs
               ? captureBefore(obs, col.id)
               : { workElementId: col.id, rawDuration: null, cumulativeReading: null, startOffset: null, endOffset: null }
-          )
+            const existing = beforeCells.find((b) => b.cycleId === c.id)
+            if (existing) existing.cells.push(cell)
+            else beforeCells.push({ cycleId: c.id, cells: [cell] })
+          }
+        } else {
+          // زیرردیف رابطه — مقدار قبلی برای Undo (§۱۳.۹)
+          for (const c of sheet.cycles) {
+            if (c.cycleNo < startNo || c.cycleNo > endNo) continue
+            const v = c.overlaps?.[grow.relationId]
+            const update = {
+              relationId: grow.relationId,
+              status: (v?.status ?? 'UNREVIEWED') as OverlapCellState['status'],
+              overlapDuration: v?.overlapDuration ?? null,
+            }
+            const existing = beforeOverlaps.find((b) => b.cycleId === c.id)
+            if (existing) existing.updates.push(update)
+            else beforeOverlaps.push({ cycleId: c.id, cycleNo: c.cycleNo, updates: [update] })
+          }
         }
-        if (cells.length > 0) beforeCells.push({ cycleId: c.id, cells })
       }
 
       const res = await timingApi.pasteCommit(sessionId, {
         startCycleNo: pasteAnchor.cycleNo,
-        startColIndex: pasteAnchor.colIndex,
+        startElementId: pasteAnchor.elementId,
+        startRelationId: pasteAnchor.relationId ?? undefined,
         data,
         mode,
       })
@@ -280,6 +377,11 @@ export function SheetPanel({
           for (const b of beforeCells) {
             await applyCells(b.cycleId, b.cells)
           }
+          for (const b of beforeOverlaps) {
+            if (b.updates.length === 0) continue
+            await overlapApi.setCycleOverlaps(b.cycleId, { updates: b.updates.map((u) => ({ relationId: u.relationId, status: u.status, overlapDuration: u.overlapDuration })) })
+          }
+          if (beforeOverlaps.length > 0) await refreshSheet()
           for (const id of [...currentCreatedIds].reverse()) {
             const del = await timingApi.deleteCycle(id)
             onSheet(del.sheet)
@@ -288,7 +390,8 @@ export function SheetPanel({
         redo: async () => {
           const res2 = await timingApi.pasteCommit(sessionId, {
             startCycleNo: pasteAnchor.cycleNo,
-            startColIndex: pasteAnchor.colIndex,
+            startElementId: pasteAnchor.elementId,
+            startRelationId: pasteAnchor.relationId ?? undefined,
             data,
             mode,
           })
@@ -301,7 +404,7 @@ export function SheetPanel({
       )
       for (const w of res.warnings) toast.warning(w)
     },
-    [sheet, saver, pasteAnchor, columns, sessionId, onSheet, history, applyCells, prefs]
+    [sheet, saver, pasteAnchor, columns, sessionId, onSheet, history, applyCells, refreshSheet, prefs]
   )
 
   // ── وضعیت مشاهده — FR-11 ──
@@ -366,7 +469,7 @@ export function SheetPanel({
     [sessionId, onSheet]
   )
 
-  const openPaste = (anchor: PasteAnchor, text?: string) => {
+  const openPaste = (anchor: GridPasteAnchor, text?: string) => {
     if (!editable) {
       toast.error('جلسه بسته است؛ برای ثبت داده، جلسهٔ جدید ایجاد کنید')
       return
@@ -402,20 +505,19 @@ export function SheetPanel({
 
   // راهنمای برگه — نزدیک عنوان برگه — §۱۲.۲
   const sheetHelp = {
-    what: 'جدول چرخه‌محور زمان‌سنجی: هر ردیف یک چرخهٔ کامل فعالیت و هر ستون یک عنصر کاری.',
+    what: 'جدول زمان‌سنجی: هر ردیف یک عنصر کاری و هر ستون یک چرخه؛ زیر هر عنصر، رابطه‌های موازی آن به‌صورت زیرردیف نمایش داده می‌شود.',
     input:
       sheet.session.timingMethod === 'CONTINUOUS'
         ? 'در روش پیوسته، قرائت تجمعی کرنومتر را در پایان هر عنصر وارد کنید؛ مدت هر عنصر به‌صورت خودکار از تفاضل قرائت‌ها محاسبه و زیر سلول نمایش داده می‌شود. قرائت‌ها باید نزولی نباشند.'
-        : 'در روش برگشت به صفر، مدت سپری‌شدهٔ هر عنصر را مستقیم وارد کنید. برای عناصر هم‌زمان، مقدار را به‌صورت «از تا» (مثل ۳ تا ۹) نسبت به مبدأ چرخه وارد کنید.',
+        : 'در روش برگشت به صفر، مدت سپسی‌شدهٔ هر عنصر را مستقیم وارد کنید. برای عناصر هم‌زمان، مقدار را به‌صورت «از تا» (مثل ۳ تا ۹) نسبت به مبدأ چرخه وارد کنید.',
     example:
-      'ورودی «۱۲٫۵» یا «12.5» — بازهٔ «۳ تا ۹» یا «3-9» — حرکت با Tab/Enter و جهت‌نما؛ کپی محدوده با Shift+جهت‌نما و Ctrl+C.',
-    note: 'زمان سپری‌شدهٔ چرخه در کارهای هم‌زمان، گستره (دیرترین پایان − زودترین شروع) است نه جمع مدت‌ها. دادهٔ خام هرگز حذف نمی‌شود؛ خروج از محاسبه فقط وضعیت را عوض می‌کند.',
+      'ورودی «۱۲٫۵» یا «12.5» — بازهٔ «۳ تا ۹» یا «3-9» — زیرردیف هم‌پوشانی: خالی (بررسی‌نشده)، ۰ (بدون هم‌پوشانی) یا مقدار مثبت — حرکت با Tab/Enter و جهت‌نما؛ کپی محدوده با Shift+جهت‌نما و Ctrl+C.',
+    note: 'زمان سپری‌شدهٔ چرخه در کارهای هم‌زمان، گستره (دیرترین پایان − زودترین شروع) است نه جمع مدت‌ها. زیرردیف‌های هم‌پوشانی در هر دو سمت از یک رکورد واحد خوانده می‌شوند؛ دادهٔ خام هرگز حذف نمی‌شود.',
   }
 
   return (
     <div className="animate-view-in space-y-4">
-      {/* سربرگ لاغر برگه + نوار ابزار — §۱۲.۱: عنوان فعالیت/ایستگاه و اپراتور
-          فقط در زیرهدر چسبان بالای صفحه نمایش داده می‌شوند */}
+      {/* سربرگ لاغر برگه + نوار ابزار — §۱۲.۱ */}
       <div className="card-premium overflow-hidden">
         <div className="card-head flex flex-wrap items-center justify-between gap-x-3 gap-y-2 px-3 py-2">
           <div className="flex min-w-0 flex-wrap items-center gap-2">
@@ -502,7 +604,13 @@ export function SheetPanel({
                 variant="outline"
                 size="sm"
                 className="gap-1.5"
-                onClick={() => openPaste({ cycleNo: sheet.cycles[0]?.cycleNo ?? 1, colIndex: 0 })}
+                onClick={() =>
+                  openPaste({
+                    cycleNo: sheet.cycles[0]?.cycleNo ?? 1,
+                    elementId: columns[0]?.id ?? '',
+                    relationId: null,
+                  })
+                }
               >
                 <ClipboardPaste className="size-4" aria-hidden />
                 Paste از Excel
@@ -551,7 +659,7 @@ export function SheetPanel({
         )}
       </div>
 
-      {/* برگه — دسکتاپ/موبایل — FR-07 */}
+      {/* برگه — دسکتاپ/موبایل — FR-07 / §۹.۳ */}
       {isMobile ? (
         <MobileSheet
           sheet={sheet}
@@ -559,6 +667,8 @@ export function SheetPanel({
           prefs={prefs}
           editable={editable}
           commitCell={commitCell}
+          commitOverlap={commitOverlap}
+          onCellError={onCellError}
           onDeleteCycle={(c) => void deleteCycle(c)}
           onSetValidity={(c, obs) => setValidityTarget({ cycle: c, obs })}
           onUpdateNotes={(c, notes) => void updateNotes(c, notes)}
@@ -578,6 +688,7 @@ export function SheetPanel({
             }))
           }
           commitCell={commitCell}
+          commitOverlap={commitOverlap}
           onCellError={onCellError}
           onDeleteCycle={(c) => void deleteCycle(c)}
           onSetValidity={(c, obs) => setValidityTarget({ cycle: c, obs })}
@@ -595,7 +706,7 @@ export function SheetPanel({
         </p>
       )}
 
-      {/* دیالوگ Paste — FR-07 */}
+      {/* دیالوگ Paste — FR-07 / §۸.۳ */}
       <PasteDialog
         open={pasteOpen}
         onOpenChange={(open) => {
@@ -604,7 +715,8 @@ export function SheetPanel({
         }}
         sessionId={sessionId}
         anchor={pasteAnchor}
-        elementNames={columns.map((c) => c.name)}
+        sheet={sheet}
+        columns={columns}
         prefs={prefs}
         initialText={pasteText}
         onCommit={(data, mode) => doPaste(data, mode)}
@@ -613,7 +725,6 @@ export function SheetPanel({
       {/* دیالوگ وضعیت مشاهده — FR-11 */}
       <ValidityDialog
         target={validityTarget}
-        prefs={prefs}
         onClose={() => setValidityTarget(null)}
         onConfirm={(status, reason) => {
           if (validityTarget) void setValidity(validityTarget.obs, status, reason)
@@ -621,34 +732,19 @@ export function SheetPanel({
         }}
       />
 
-      {/* تأیید بستن جلسه — FR-06 */}
+      {/* تأیید بستن جلسه */}
       <AlertDialog open={closeConfirm} onOpenChange={setCloseConfirm}>
         <AlertDialogContent dir="rtl">
           <AlertDialogHeader>
             <AlertDialogTitle>بستن جلسهٔ زمان‌سنجی؟</AlertDialogTitle>
-            <AlertDialogDescription asChild>
-              <div className="space-y-2 text-right">
-                <p>
-                  پس از بستن، برگهٔ این جلسه <b>فقط‌خواندنی</b> می‌شود. برای ادامهٔ ثبت داده (یا تغییر روش اندازه‌گیری)
-                  باید جلسهٔ جدیدی ایجاد کنید؛ جلسهٔ جدید مستقل است و مبنای قرائت پیوسته از نو آغاز می‌شود.
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  می‌توانید جلسه را بعداً بازگشایی کنید؛ روش اندازه‌گیری هرگز تغییر نمی‌کند.
-                </p>
-              </div>
+            <AlertDialogDescription>
+              پس از بستن، برگه فقط‌خواندنی می‌شود. برای ادامهٔ ثبت داده در همین فعالیت، جلسهٔ جدیدی (با همین روش یا
+              روش دیگر) ایجاد کنید. روش اندازه‌گیری هر جلسه پس از ایجاد تغییر نمی‌کند.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>انصراف</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={(e) => {
-                e.preventDefault()
-                setCloseConfirm(false)
-                void setSessionStatus('CLOSED')
-              }}
-            >
-              بستن جلسه
-            </AlertDialogAction>
+            <AlertDialogAction onClick={() => void setSessionStatus('CLOSED')}>بستن جلسه</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
@@ -660,99 +756,88 @@ export function SheetPanel({
 
 function ValidityDialog({
   target,
-  prefs,
   onClose,
   onConfirm,
 }: {
   target: { cycle: CycleRowDto; obs: ObservationCellDto } | null
-  prefs: Prefs
   onClose: () => void
   onConfirm: (status: 'VALID' | 'EXCLUDED', reason: string | null) => void
 }) {
-  const [preset, setPreset] = useState('')
-  const [custom, setCustom] = useState('')
-
-  // بازنشانی با تغییر هدف — تنظیم حالت در رندر
-  const [prevTarget, setPrevTarget] = useState(target)
-  if (target !== prevTarget) {
-    setPrevTarget(target)
-    setPreset('')
-    setCustom('')
+  const [status, setStatus] = useState<'VALID' | 'EXCLUDED'>('EXCLUDED')
+  const [reason, setReason] = useState<string>(EXCLUSION_REASONS[0])
+  const [customReason, setCustomReason] = useState('')
+  const [prevId, setPrevId] = useState<string | null>(null)
+  if (target && target.obs.id !== prevId) {
+    setPrevId(target.obs.id)
+    setStatus(target.obs.validityStatus === 'EXCLUDED' ? 'VALID' : 'EXCLUDED')
+    setReason(EXCLUSION_REASONS[0])
+    setCustomReason('')
   }
-
-  if (!target) return null
-  const isExcluded = target.obs.validityStatus === 'EXCLUDED'
-
   return (
-    <Dialog open={target !== null} onOpenChange={(open) => !open && onClose()}>
+    <Dialog open={!!target} onOpenChange={(open) => { if (!open) onClose() }}>
       <DialogContent dir="rtl" className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>{isExcluded ? 'بازگشت مشاهده به محاسبات' : 'خروج مشاهده از محاسبات'}</DialogTitle>
-          <DialogDescription asChild>
-            <div className="space-y-1 text-right">
-              <p>
-                چرخهٔ <b className="num">{formatInt(target.cycle.cycleNo, prefs)}</b> — مقدار ثبت‌شده:{' '}
-                <b className="num" dir="ltr">
-                  {target.obs.startOffset != null
-                    ? `${target.obs.startOffset}–${target.obs.endOffset ?? '؟'}`
-                    : (target.obs.rawDuration ?? target.obs.cumulativeReading ?? '—')}
-                </b>
-              </p>
-              <p className="text-xs text-muted-foreground">
-                {isExcluded
-                  ? 'این مشاهده دوباره در محاسبات وارد می‌شود.'
-                  : 'دادهٔ خام هرگز حذف نمی‌شود؛ فقط از محاسبات خارج می‌شود و در گزارش‌ها با برچسب «خارج‌شده» می‌آید.'}
-              </p>
-            </div>
+          <DialogTitle>وضعیت محاسباتی مشاهده</DialogTitle>
+          <DialogDescription>
+            {target
+              ? `چرخهٔ ${target.cycle.cycleNo.toLocaleString('fa-IR')} — تغییر وضعیت فقط مبنای محاسبات را عوض می‌کند؛ دادهٔ خام هرگز حذف یا تغییر نمی‌کند.`
+              : ''}
           </DialogDescription>
         </DialogHeader>
-
-        {!isExcluded && (
-          <div className="space-y-2">
-            <div className="flex items-center gap-1">
-              <Label>دلیل خروج (توصیه می‌شود)</Label>
-              <HelpDot
-                label="دلیل خروج"
-                content={{
-                  what: 'مستندسازی چرایی خارج‌کردن مشاهده از محاسبات.',
-                  input: 'یک دلیل استاندارد را انتخاب کنید یا دلیل دلخواه بنویسید.',
-                  example: '«اپراتور کار را در میانهٔ چرخه متوقف کرد»',
-                  note: 'هشدار آماری مساوی حذف نیست؛ تصمیم نهایی همیشه با شماست و مشاهده را می‌توانید برگردانید.',
-                }}
-              />
+        <div className="space-y-3">
+          <RadioGroup value={status} onValueChange={(v) => setStatus(v as 'VALID' | 'EXCLUDED')} className="gap-1.5">
+            <Label className="flex items-center gap-2 text-sm font-normal">
+              <RadioGroupItem value="VALID" /> بازگشت به محاسبات (معتبر)
+            </Label>
+            <Label className="flex items-center gap-2 text-sm font-normal">
+              <RadioGroupItem value="EXCLUDED" /> خروج از محاسبه
+            </Label>
+          </RadioGroup>
+          {status === 'EXCLUDED' && (
+            <div className="space-y-2">
+              <Label className="text-xs">دلیل خروج (الزامی)</Label>
+              <RadioGroup value={reason} onValueChange={setReason} className="gap-1">
+                {EXCLUSION_REASONS.map((r) => (
+                  <Label key={r} className="flex items-start gap-2 text-xs font-normal leading-5">
+                    <RadioGroupItem value={r} className="mt-0.5" />
+                    {r}
+                  </Label>
+                ))}
+                <Label className="flex items-start gap-2 text-xs font-normal leading-5">
+                  <RadioGroupItem value="__custom__" className="mt-0.5" />
+                  <span className="flex-1">
+                    دلیل دیگر:
+                    <Input
+                      value={customReason}
+                      onChange={(e) => {
+                        setCustomReason(e.target.value)
+                        setReason('__custom__')
+                      }}
+                      placeholder="شرح کوتاه…"
+                      className="mt-1 h-8 text-xs"
+                      dir="rtl"
+                    />
+                  </span>
+                </Label>
+              </RadioGroup>
             </div>
-            <RadioGroup value={preset} onValueChange={(v) => { setPreset(v); setCustom('') }} className="gap-1.5">
-              {EXCLUSION_REASONS.map((r) => (
-                <label key={r} className="flex cursor-pointer items-center gap-2 rounded-lg p-1.5 text-xs hover:bg-muted/50">
-                  <RadioGroupItem value={r} />
-                  {r}
-                </label>
-              ))}
-            </RadioGroup>
-            <Input
-              value={custom}
-              onChange={(e) => {
-                setCustom(e.target.value)
-                if (e.target.value) setPreset('')
-              }}
-              placeholder="یا دلیل دلخواه…"
-              className="text-xs"
-            />
-          </div>
-        )}
-
+          )}
+        </div>
         <DialogFooter>
-          <Button variant="outline" onClick={onClose}>
+          <Button variant="ghost" size="sm" onClick={onClose}>
             انصراف
           </Button>
           <Button
-            className={isExcluded ? 'btn-brand border-0' : 'border-0 bg-red text-white hover:bg-red/90'}
-            onClick={() => {
-              const finalReason = custom.trim() !== '' ? custom.trim() : preset || null
-              onConfirm(isExcluded ? 'VALID' : 'EXCLUDED', isExcluded ? null : finalReason)
-            }}
+            size="sm"
+            disabled={status === 'EXCLUDED' && reason === '__custom__' && customReason.trim() === ''}
+            onClick={() =>
+              onConfirm(
+                status,
+                status === 'EXCLUDED' ? (reason === '__custom__' ? customReason.trim() : reason) : null
+              )
+            }
           >
-            {isExcluded ? 'بازگشت به محاسبات' : 'خروج از محاسبه'}
+            ثبت وضعیت
           </Button>
         </DialogFooter>
       </DialogContent>
