@@ -502,8 +502,10 @@
         expectedVersion: cell ? cell.version : undefined,
       };
     });
+    // §۱۰ ممیزی جلسه ۲ — همان نسخهٔ آنلاین: کنترل هم‌زمانی در سطح مجموعهٔ مقادیر چرخه
+    var overlapRevision = matrix.selectedCycle ? matrix.selectedCycle.overlapRevision : undefined;
     try {
-      var res = DB.setCycleOverlaps(cycleId, updates);
+      var res = DB.setCycleOverlaps(cycleId, updates, { expectedOverlapRevision: overlapRevision });
       resetInteractionState();
       UI.toast('تغییرات هم‌پوشانی ثبت شد',
         res.warnings.length > 0 ? {} : { description: 'فرم هر دو عنصر و ماتریس از همان منبع به‌روز شد.' });
