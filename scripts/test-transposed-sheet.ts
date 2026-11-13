@@ -42,6 +42,8 @@ async function main() {
   console.log('── آماده‌سازی fixture')
   const proj = await req('POST', '/api/projects', { name: 'تست v1.5.0 آنلاین', lineName: 'خط آزمون v1.5.0', productName: 'محصول T', studyDate: '2026-01-01' })
   const projectId = proj.data.project.id
+  // پاک‌سازی کامل: شناسهٔ همهٔ پروژه‌های import‌شده در طول آزمون ثبت می‌شود تا در پایان حذف شوند
+  const importedPids: string[] = []
   const st = await req('POST', `/api/projects/${projectId}/stations`, { name: 'ایستگاه ۱' })
   const act = await req('POST', `/api/stations/${st.data.station.id}/activities`, { name: 'فعالیت مونتاژ', processType: 'OPERATION' })
   const activityId = act.data.activity.id
@@ -81,6 +83,7 @@ async function main() {
         const newPid = imp.data.projectId ?? imp.data.project?.id
         const impSheet = (await req('GET', `/api/projects/${newPid}/summary`)).data
         check('پروژهٔ ورودی ساخته شد', !!impSheet)
+        importedPids.push(newPid)
       }
     }
 
@@ -545,6 +548,11 @@ async function main() {
   console.log('── پاک‌سازی')
   const del = await req('DELETE', `/api/projects/${projectId}`)
   check('حذف پروژهٔ آزمون', del.status === 200)
+  // حذف پروژه‌های import‌شدهٔ حاصل از آزمون (بدون باقی‌گذاشتن residue در دیتابیس)
+  for (const pid of importedPids) {
+    const delImp = await req('DELETE', `/api/projects/${pid}`)
+    check(`حذف پروژهٔ import‌شده (${pid.slice(0, 8)}…)`, delImp.status === 200, `status=${delImp.status}`)
+  }
 
   console.log(`\n═══ نتیجهٔ v1.5.0 (آنلاین): ${pass} پاس / ${fail} خطا ═══`)
   if (fail > 0) process.exit(1)
