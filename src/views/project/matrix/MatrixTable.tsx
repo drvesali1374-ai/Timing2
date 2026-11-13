@@ -171,6 +171,7 @@ function MatrixCell({
     return (
       <span
         className="flex w-full min-h-[38px] cursor-not-allowed items-center justify-center rounded-lg px-1.5 py-1 opacity-80"
+        aria-disabled="true"
         title={
           !cycleSelected
             ? 'برای ویرایش مقدار، ابتدا یک چرخه انتخاب کنید'
