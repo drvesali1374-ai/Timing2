@@ -1,10 +1,11 @@
 'use client'
 
 // ═══════════════════════════════════════════════════════════
-// بخش «عناصر موازی» در فرم ویرایش عنصر کاری — v1.5.0 §۴ / v1.5.1 §۲
+// بخش «عناصر موازی» در فرم ویرایش عنصر کاری — v1.5.0 §۴ / v1.5.1 §۲ / v1.5.2 §۲
 // این فرم فقط تعریف‌کنندهٔ رابطه است؛ نه محل اندازه‌گیری.
-// ثبت/ویرایش مقدار هم‌پوشانی فقط در برگهٔ زمان‌سنجی (زیرردیف‌ها)
-// انجام می‌شود — QuickValueEditor و هرگونه ورودی مقدار حذف شد.
+// ثبت زمان عادی عنصر موازی در برگهٔ زمان‌سنجی (زیرردیف، به‌صورت بازهٔ از/تا)
+// انجام می‌شود. v1.5.2 §۲-۶ — ساده‌سازی پس از حذف ماتریس هم‌پوشانی:
+// بدون وضعیت/مقدار هم‌پوشانی و بدون لینک ماتریس.
 // v1.5.1 — نامزدها: تمام عناصر «همان پروژه» (هر Activity/Station)؛
 // هویت فقط با شناسه‌های واقعی (elementId/activityId/stationId) تعیین می‌شود.
 // ═══════════════════════════════════════════════════════════
@@ -12,51 +13,37 @@ import { useQuery } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { Network } from 'lucide-react'
 import { qk } from '@/lib/api/keys'
-import { overlapApi, type OverlapStatusValue } from '@/lib/api/endpoints'
-import { formatTimeValue } from '@/lib/format'
-import { useDisplayPrefs } from '@/store/display-store'
+import { parallelApi } from '@/lib/api/endpoints'
 import { useAppStore } from '@/store/app-store'
 import { cn } from '@/lib/utils'
 import { AddRelationControl, ArchiveRelationControl, RestoreRelationControl } from './RelationControls'
-
-const STATUS_LABEL: Record<OverlapStatusValue, string> = {
-  UNREVIEWED: 'بررسی‌نشده',
-  NO_OVERLAP: 'بدون هم‌پوشانی',
-  OVERLAP: 'دارای هم‌پوشانی',
-}
 
 export default function ParallelRelationsSection({
   projectId,
   elementId,
   elementName,
   compact,
-  /** §۶ ممیزی جلسه ۲ — در زمینهٔ زمان‌سنجی: شناسهٔ جلسهٔ جاری؛ دادهٔ جلسه/اپراتور دیگر نمایش داده نمی‌شود */
-  sessionId,
 }: {
   projectId: string
   elementId: string
   elementName: string
   compact?: boolean
-  sessionId?: string | null
 }) {
-  const prefs = useDisplayPrefs()
   const openProject = useAppStore((s) => s.openProject)
 
   const rowsQ = useQuery({
     queryKey: qk.elementRelations(elementId),
-    queryFn: () => overlapApi.elementRelations(elementId, sessionId ?? undefined),
+    queryFn: () => parallelApi.elementRelations(elementId),
   })
-  // کاتالوگ عناصر برای افزودن — از ماتریس بدون چرخه (سبک)
+  // کاتالوگ عناصر برای افزودن — منبع مستقل از ساختار تولید (v1.5.2 §۲-۵)
   const catalogQ = useQuery({
-    queryKey: qk.overlapMatrix(projectId, null),
-    queryFn: () => overlapApi.matrix(projectId, null),
+    queryKey: qk.elementsCatalog(projectId),
+    queryFn: () => parallelApi.catalog(projectId),
   })
 
   const allRows = rowsQ.data?.rows ?? []
   const rows = allRows.filter((r) => r.isActive)
   const archivedRows = allRows.filter((r) => !r.isActive)
-  // §۶ ممیزی جلسه ۲ — برچسب صریح دامنهٔ «آخرین ثبت»
-  const latestScopeLabel = sessionId ? 'آخرین ثبت در این جلسه' : 'آخرین ثبت در کل پروژه'
 
   // v1.5.1 §۲ — نامزدها: تمام عناصر «همان پروژه» (هر Activity و هر Station)؛
   // بدون خود عنصر و بدون رابطهٔ فعال تکراری. هویت فقط بر اساس شناسهٔ واقعی —
@@ -75,30 +62,25 @@ export default function ParallelRelationsSection({
           <Network className="size-4 text-brand" aria-hidden />
           عناصر موازی
         </p>
-        <div className="flex gap-1.5">
-          <Button size="sm" variant="outline" onClick={() => openProject(projectId, 'matrix')}>
-            مشاهده در ماتریس
-          </Button>
-          <AddRelationControl
-            projectId={projectId}
-            elementId={elementId}
-            elementName={elementName}
-            currentActivityId={ownActivityId}
-            candidates={candidates.map((c) => ({
-              elementId: c.elementId,
-              name: c.name,
-              activityId: c.activityId,
-              activityName: c.activityName,
-              stationId: c.stationId,
-              stationName: c.stationName,
-            }))}
-          />
-        </div>
+        <AddRelationControl
+          projectId={projectId}
+          elementId={elementId}
+          elementName={elementName}
+          currentActivityId={ownActivityId}
+          candidates={candidates.map((c) => ({
+            elementId: c.elementId,
+            name: c.name,
+            activityId: c.activityId,
+            activityName: c.activityName,
+            stationId: c.stationId,
+            stationName: c.stationName,
+          }))}
+        />
       </div>
 
       <p className="text-[11px] leading-5 text-muted-foreground">
-        اینجا فقط رابطه‌های موازی تعریف یا حذف می‌شوند؛ ثبت مقدار هم‌پوشانی هر چرخه در برگهٔ زمان‌سنجی و در
-        زیرردیف همین رابطه انجام می‌شود.
+        اینجا فقط رابطه‌های موازی تعریف یا حذف می‌شوند؛ ثبت زمان عادی عنصر موازی (به‌صورت بازهٔ از/تا) در
+        زیرردیف همین رابطه در برگهٔ زمان‌سنجی انجام می‌شود.
       </p>
 
       {rowsQ.isLoading ? (
@@ -129,50 +111,21 @@ export default function ParallelRelationsSection({
                     {r.otherActivityName} / {r.otherStationName}
                   </p>
                 </div>
-                <div className="flex shrink-0 flex-col items-end gap-1">
-                  {r.latest ? (
-                    <>
-                      <span className="flex items-center gap-1.5">
-                        {r.latest.status === 'UNREVIEWED' ? (
-                          <span className="rounded-md border border-dashed border-amber/70 bg-amber-soft/40 px-1.5 py-0.5 text-[10px]">
-                            {STATUS_LABEL.UNREVIEWED}
-                          </span>
-                        ) : r.latest.status === 'NO_OVERLAP' ? (
-                          <span className="rounded-md border border-green/40 bg-green-soft/50 px-1.5 py-0.5 text-[10px]">
-                            {STATUS_LABEL.NO_OVERLAP}
-                          </span>
-                        ) : (
-                          <span className="num text-xs font-bold" dir="ltr">
-                            {formatTimeValue(r.latest.overlapDuration, prefs)} s
-                          </span>
-                        )}
-                      </span>
-                      <span className="text-[10px] text-muted-foreground">
-                        {latestScopeLabel}: چرخهٔ {r.latest.cycleNo.toLocaleString('fa-IR')}
-                        {sessionId ? '' : ` — ${r.latest.operatorName} — ${r.latest.activityName}`}
-                      </span>
-                    </>
-                  ) : (
-                    <span className="text-[10px] text-muted-foreground">
-                      {sessionId ? 'در این جلسه هنوز مقداری ثبت نشده است' : 'هنوز مقداری ثبت نشده است'}
-                    </span>
-                  )}
+                <div className="flex shrink-0 items-center gap-1.5">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => openProject(projectId, 'timing')}
+                    title="ثبت زمان عنصر موازی در برگهٔ زمان‌سنجی انجام می‌شود"
+                  >
+                    ورود به زمان‌سنجی
+                  </Button>
+                  <ArchiveRelationControl
+                    projectId={projectId}
+                    relationId={r.relationId}
+                    label={`${elementName} ↔ ${r.otherElementName}`}
+                  />
                 </div>
-              </div>
-              <div className="mt-2 flex flex-wrap gap-1.5">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => openProject(projectId, 'timing')}
-                  title="ثبت مقدار هم‌پوشانی فقط در برگهٔ زمان‌سنجی انجام می‌شود"
-                >
-                  ورود به برگهٔ زمان‌سنجی
-                </Button>
-                <ArchiveRelationControl
-                  projectId={projectId}
-                  relationId={r.relationId}
-                  label={`${elementName} ↔ ${r.otherElementName}`}
-                />
               </div>
             </li>
           ))}

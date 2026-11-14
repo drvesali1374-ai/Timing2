@@ -89,8 +89,8 @@ async function main() {
   for (const s of [sA, sB]) await req('POST', `/api/sessions/${s}/cycles`, { count: 3 })
 
   // رابطهٔ موازی هم‌فعالیتی برای ماتریس
-  await req('POST', `/api/projects/${projectId}/overlap/relations`, { elementAId: els.e1, elementBId: els.e2 })
-  await req('POST', `/api/projects/${projectId}/overlap/relations`, { elementAId: els.e5, elementBId: els.e6 })
+  await req('POST', `/api/projects/${projectId}/parallel-relations`, { elementAId: els.e1, elementBId: els.e2 })
+  await req('POST', `/api/projects/${projectId}/parallel-relations`, { elementAId: els.e5, elementBId: els.e6 })
 
   // دادهٔ چرخه‌ها برای e1/e2
   const shA = (await req('GET', `/api/sessions/${sA}`)).data.sheet

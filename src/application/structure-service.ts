@@ -119,7 +119,7 @@ export async function deleteStation(stationId: string) {
   const { station, counts } = await getStationDependencyCounts(stationId)
   // §۹ ممیزی جلسه ۲ — پیش از حذف، روابط موازی تمام عناصر کاری همهٔ فعالیت‌های
   // زیرمجموعه آرشیو می‌شوند تا هیچ رابطهٔ فعالی با endpoint حذف‌شده باقی نماند.
-  const { archiveRelationsForElement } = await import('./overlap-service')
+  const { archiveRelationsForElement } = await import('./parallel-relation-service')
   const stationElements = await db.workElement.findMany({
     where: { activity: { stationId } },
     select: { id: true },
@@ -250,7 +250,7 @@ export async function getActivityDependencyCounts(activityId: string) {
 export async function deleteActivity(activityId: string) {
   const { activity, counts } = await getActivityDependencyCounts(activityId)
   // §۹ ممیزی جلسه ۲ — پیش از حذف، روابط موازی تمام عناصر کاری زیرمجموعه آرشیو می‌شوند
-  const { archiveRelationsForElement } = await import('./overlap-service')
+  const { archiveRelationsForElement } = await import('./parallel-relation-service')
   const activityElements = await db.workElement.findMany({
     where: { activityId },
     select: { id: true },
@@ -357,7 +357,7 @@ export async function getElementDependencyCounts(elementId: string) {
 export async function deleteElement(elementId: string) {
   const { element, counts } = await getElementDependencyCounts(elementId)
   // جلسه ۲ — روابط موازی مرجع به این عنصر آرشیو می‌شوند (تاریخچهٔ مقادیر حفظ می‌شود)
-  const { archiveRelationsForElement } = await import('./overlap-service')
+  const { archiveRelationsForElement } = await import('./parallel-relation-service')
   const archivedRelations = await archiveRelationsForElement(elementId)
   await db.$transaction(async (tx) => {
     await markDeleted(tx, 'WorkElement', [elementId])

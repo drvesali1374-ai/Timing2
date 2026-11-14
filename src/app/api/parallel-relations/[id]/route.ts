@@ -1,7 +1,7 @@
-// رابطهٔ موازی — آرشیو/بازگردانی (Soft Delete با حفظ تاریخچه) — جلسه ۲ §۴.۴
+// رابطهٔ موازی — آرشیو/بازگردانی (Soft Delete) — v1.5.2 §۲-۹
 import { NextRequest } from 'next/server'
 import { handle, ok, readJson } from '@/lib/api-helpers'
-import { archiveRelation, restoreRelation } from '@/application/overlap-service'
+import { archiveRelation, restoreRelation } from '@/application/parallel-relation-service'
 import { z } from 'zod'
 
 type Ctx = { params: Promise<{ id: string }> }

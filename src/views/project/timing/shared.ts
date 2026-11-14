@@ -147,86 +147,8 @@ export function buildRows(sheet: SessionSheetDto, columns: ElementColumn[]): Gri
   return rows
 }
 
-// ═══════════════ مقایسه‌پذیری و بازهٔ واقعی — §۵.۵ (هم‌ارز منطق سرور) ═══════════════
-
-/** شواهد عناصر یک چرخه — همان قرارداد loadCycleContext سرور */
-function cycleEvidence(cycle: CycleRowDto) {
-  const durationOf = new Map<string, number | null>()
-  const intervalOf = new Map<string, { startOffset: number; endOffset: number } | null>()
-  for (const o of cycle.observations) {
-    durationOf.set(o.workElementId, o.derivedDuration ?? o.rawDuration ?? null)
-    intervalOf.set(
-      o.workElementId,
-      o.startOffset != null && o.endOffset != null ? { startOffset: o.startOffset, endOffset: o.endOffset } : null
-    )
-  }
-  return { durationOf, intervalOf }
-}
-
-/** مقایسه‌پذیری یک رابطه در یک چرخه — همان قواعد سرور (isObservedInCycle + hasComparableEvidence) */
-export function relationComparability(
-  cycle: CycleRowDto,
-  rel: { elementLowId: string; elementHighId: string },
-  nameOf: (id: string) => string,
-): { isComparable: boolean; notComparableReason: string | null } {
-  const { durationOf, intervalOf } = cycleEvidence(cycle)
-  const reasons: string[] = []
-  for (const eid of [rel.elementLowId, rel.elementHighId]) {
-    if (!durationOf.has(eid)) {
-      reasons.push(`«${nameOf(eid)}» در این چرخه مشاهده‌ای ندارد`)
-    } else {
-      const iv = intervalOf.get(eid)
-      const hasEvidence = (iv != null && iv.startOffset != null && iv.endOffset != null) || durationOf.get(eid) != null
-      if (!hasEvidence) reasons.push(`«${nameOf(eid)}» در این چرخه مدت یا بازهٔ قابل‌مقایسه ندارد`)
-    }
-  }
-  return reasons.length === 0
-    ? { isComparable: true, notComparableReason: null }
-    : { isComparable: false, notComparableReason: `در این چرخه قابل‌مقایسه نیست: ${reasons.join('؛ ')}` }
-}
-
-/** هم‌پوشانی محاسبه‌شده از بازهٔ واقعی — §۵.۵: O(A,B) = max(0, min(E_A,E_B) − max(S_A,S_B))
- *  فقط وقتی هر دو عنصر بازهٔ کامل دارند؛ در غیر این صورت null */
-export function computedOverlapFor(
-  cycle: CycleRowDto,
-  rel: { elementLowId: string; elementHighId: string },
-): number | null {
-  const { intervalOf } = cycleEvidence(cycle)
-  const a = intervalOf.get(rel.elementLowId)
-  const b = intervalOf.get(rel.elementHighId)
-  if (!a || !b) return null
-  return Math.max(0, Math.min(a.endOffset, b.endOffset) - Math.max(a.startOffset, b.startOffset))
-}
-
-// ═══════════════ سلول هم‌پوشانی — §۵.۴ (خالی=UNREVIEWED / ۰=NO_OVERLAP / مثبت=OVERLAP) ═══════════════
-
-export type OverlapCellState =
-  | { status: 'UNREVIEWED'; overlapDuration: number | null }
-  | { status: 'NO_OVERLAP'; overlapDuration: number | null }
-  | { status: 'OVERLAP'; overlapDuration: number | null }
-
-/** مقدار فعلی سلول هم‌پوشانی — نبود رکورد = UNREVIEWED (هرگز صفر فرض نمی‌شود) */
-export function overlapCellOf(cycle: CycleRowDto, relationId: string): OverlapCellState & { version: number } {
-  const v = cycle.overlaps?.[relationId]
-  if (!v) return { status: 'UNREVIEWED', overlapDuration: null, version: 0 }
-  return { status: v.status as OverlapCellState['status'], overlapDuration: v.overlapDuration, version: v.version }
-}
-
-/** پارس ورودی سلول هم‌پوشانی — خالی/صفر/مثبت (§۵.۴) */
-export function parseOverlapInput(text: string): { kind: 'EMPTY' } | { kind: 'NUMBER'; value: number } | { kind: 'INVALID'; reason: string } {
-  const t = text.trim()
-  if (t === '' || t === '-' || t === '—' || t === '–') return { kind: 'EMPTY' }
-  const n = parseNumber(t)
-  if (!Number.isFinite(n)) return { kind: 'INVALID', reason: 'مقدار عددی معتبر نیست (ارقام فارسی یا لاتین)' }
-  return { kind: 'NUMBER', value: n }
-}
-
-/** نمایش متنی سلول هم‌پوشانی برای Copy — خالی/۰/مقدار */
-export function overlapCellText(cell: OverlapCellState): string {
-  if (cell.status === 'UNREVIEWED') return ''
-  if (cell.status === 'NO_OVERLAP') return '0'
-  return String(cell.overlapDuration ?? '')
-}
+// v1.5.2 §۲-۸ — سلول وضعیت/مقدار هم‌پوشانی حذف شد؛ زیرردیف موازی
+// زمان عادی عنصر مقابل را از همان observations چرخه می‌خواند (بازهٔ از/تا).
 
 /** متن نمایشی یک سلول بر اساس دادهٔ سرور — دو رقم اعشار پیش‌فرض — FR-07 */
 export function cellDisplayValue(

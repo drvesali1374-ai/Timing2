@@ -47,8 +47,8 @@ export const SECTION_TABLES: Record<string, DomainTable[]> = {
   // ارزیابی‌های ثبت‌شدهٔ عناصر نیز بخشی از دادهٔ وستینگهاوس‌اند — FR-25
   ratingTables: ['ratingTable', 'ratingTableGrade', 'ratingAssessment'],
   rawObservations: ['studySession', 'cycleObservation', 'timelineLane', 'elementObservation'],
-  // جلسه ۲ — روابط موازی و مقادیر هم‌پوشانی هر چرخه (بخشی از دادهٔ خام)
-  overlaps: ['overlapRelation', 'observationOverlap'],
+  // v1.5.2 §۲ — فقط روابط موازی (بخشی از دادهٔ خام)؛ مقادیر عددی حذف شد
+  parallelRelations: ['parallelElementRelation'],
   charts: ['chartNode', 'chartEdge'],
   calculations: ['calculationRun'],
 }
@@ -60,7 +60,7 @@ export interface ExportSections {
   groupsAndAllowances: boolean
   ratingTables: boolean
   rawObservations: boolean
-  overlaps: boolean
+  parallelRelations: boolean
   charts: boolean
   calculations: boolean
 }
@@ -72,7 +72,7 @@ export const DEFAULT_EXPORT_SECTIONS: ExportSections = {
   groupsAndAllowances: true,
   ratingTables: true,
   rawObservations: true,
-  overlaps: true,
+  parallelRelations: true,
   charts: true,
   calculations: true,
 }
@@ -173,9 +173,8 @@ const FK_MAP: Record<string, string[]> = {
   cycleObservation: ['sessionId'],
   timelineLane: ['cycleId'],
   elementObservation: ['cycleId', 'workElementId', 'laneId'],
-  // جلسه ۲ — روابط موازی: عنصرها با FK نرم (بدون Cascade)؛ در نبود عنصر، سطر حذف می‌شود
-  overlapRelation: ['projectId', 'elementLowId', 'elementHighId'],
-  observationOverlap: ['relationId', 'cycleId'],
+  // روابط موازی: عنصرها با FK نرم (بدون Cascade)؛ در نبود عنصر، سطر حذف می‌شود
+  parallelElementRelation: ['projectId', 'elementLowId', 'elementHighId'],
   chartNode: ['projectId', 'activityId'],
   chartEdge: ['projectId', 'sourceNodeId', 'targetNodeId'],
   calculationRun: ['projectId'],
@@ -275,10 +274,24 @@ function reverseFkTable(table: string, fk: string): string {
   if (fk === 'cycleId') return 'cycleObservation'
   if (fk === 'laneId') return 'timelineLane'
   if (fk === 'sourceNodeId' || fk === 'targetNodeId') return 'chartNode'
-  // جلسه ۲ — روابط موازی (رفع باگ نگاشت import بسته‌های دارای هم‌پوشانی)
-  if (fk === 'relationId') return 'overlapRelation'
+  // روابط موازی (FK نرم به عناصر)
   if (fk === 'elementLowId' || fk === 'elementHighId') return 'workElement'
   throw new Error(`نگاشت ناشناخته: ${table}.${fk}`)
+}
+
+/** سازگاری بسته‌های قدیمی (schema ≤ v۳) با ساختار v۱.۵.۲ §۲:
+ *  overlapRelation → parallelElementRelation؛ observationOverlap حذف
+ *  (مقادیر عددی ماتریس دیگر جایی در ساختار ندارند). */
+function normalizeLegacyPackageData(
+  data: Record<string, Record<string, unknown>[]>
+): Record<string, Record<string, unknown>[]> {
+  const out = { ...data }
+  if (out.overlapRelation && !out.parallelElementRelation) {
+    out.parallelElementRelation = out.overlapRelation
+  }
+  delete out.overlapRelation
+  delete out.observationOverlap
+  return out
 }
 
 /** ورود بسته به‌صورت پروژه جدید — با بازتولید شناسه‌ها */
@@ -287,7 +300,10 @@ export async function importProjectPackage(jsonText: string): Promise<{ projectI
   const newName = `${String(parsed.project.name)} (ورودی)`
 
   const result = await db.$transaction(async (tx) => {
-    const data = remapProjectData(parsed.data as Record<string, Record<string, unknown>[]>, randomUUID())
+    const data = remapProjectData(
+      normalizeLegacyPackageData(parsed.data as Record<string, Record<string, unknown>[]>),
+      randomUUID(),
+    )
     if (data.project?.[0]) {
       data.project[0].name = newName
       data.project[0].createdAt = new Date()
@@ -368,7 +384,7 @@ export async function duplicateProject(
     groupsAndAllowances: sections.groupsAndAllowances,
     ratingTables: sections.ratingTables,
     rawObservations: sections.rawObservations,
-    overlaps: sections.rawObservations, // روابط موازی همراه دادهٔ خام معنا دارد
+    parallelRelations: sections.rawObservations, // روابط موازی همراه دادهٔ خام معنا دارد
     charts: sections.structure, // نمودار فقط همراه ساختار معنا دارد
     calculations: false, // نتایج محاسبه‌شده هرگز بدون انتخاب صریح کپی نمی‌شوند
   }

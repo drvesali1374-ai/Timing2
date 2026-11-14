@@ -98,22 +98,12 @@ export async function buildTimingExcelTemplate(sessionId: string): Promise<{ buf
   })
   const elementById = new Map(elements.map((e) => [e.id, e]))
 
-  // چرخه‌های جلسه + مشاهدات + مقادیر هم‌پوشانی
+  // چرخه‌های جلسه + مشاهدات (شامل مشاهدات عناصر موازی ثبت‌شده در زیرردیف‌ها)
   const cycles = await db.cycleObservation.findMany({
     where: { sessionId },
     orderBy: { cycleNo: 'asc' },
     include: { observations: true },
   })
-  const overlaps = await db.observationOverlap.findMany({ where: { cycle: { sessionId } } })
-  const overlapByCycle = new Map<string, Map<string, { status: string; overlapDuration: number | null }>>()
-  for (const ov of overlaps) {
-    let m = overlapByCycle.get(ov.cycleId)
-    if (!m) {
-      m = new Map()
-      overlapByCycle.set(ov.cycleId, m)
-    }
-    m.set(ov.relationId, { status: ov.status, overlapDuration: ov.overlapDuration })
-  }
 
   const maxCycleNo = cycles.length > 0 ? cycles[cycles.length - 1].cycleNo : 0
   const totalCols = maxCycleNo + EXTRA_CYCLE_COLS
@@ -171,7 +161,7 @@ export async function buildTimingExcelTemplate(sessionId: string): Promise<{ buf
       labelCell.value = grow.elementName
       labelCell.font = { bold: true, size: 11 }
     } else {
-      labelCell.value = `↲ هم‌پوشانی با ${grow.otherElementName}`
+      labelCell.value = `↲ موازی: ${grow.otherElementName}`
       labelCell.font = { size: 10, color: { argb: 'FF71717A' } }
       labelCell.alignment = { horizontal: 'right', vertical: 'middle', readingOrder: 'rtl', indent: 2 }
     }
@@ -189,7 +179,7 @@ export async function buildTimingExcelTemplate(sessionId: string): Promise<{ buf
       cell.alignment = { horizontal: 'center', vertical: 'middle' }
       cell.font = { size: 11 }
 
-      const text = cellTextFor(grow, c, cycleByNo, elementById, overlapByCycle, session.timingMethod)
+      const text = cellTextFor(grow, c, cycleByNo, elementById, session.timingMethod)
       if (text !== '') cell.value = text
     }
   })
@@ -207,7 +197,7 @@ export async function buildTimingExcelTemplate(sessionId: string): Promise<{ buf
     ['۱. این قالب مخصوص «همین جلسهٔ زمان‌سنجی» است (شناسهٔ جلسه در شیت مخفی Metadata). برای جلسهٔ دیگری، قالب جدید دانلود کنید.', {}],
     ['۲. فقط سلول‌های سبز روشن را تکمیل کنید (ستون‌های چرخه). نام عناصر، ستون اول و سربرگ‌ها را تغییر ندهید و سطری را جابه‌جا یا حذف نکنید.', {}],
     ['۳. مقدار هر عنصر: یک عدد (مثل 12.5 یا ۱۲٫۵) یا برای عناصر هم‌زمان بازهٔ «شروع-پایان» (مثل 3-9).', {}],
-    ['۴. زیرردیف «هم‌پوشانی با …»: خالی = بررسی‌نشده، ۰ = بدون هم‌پوشانی، عدد مثبت = مدت هم‌پوشانی (ثانیه).', {}],
+    ['۴. زیرردیف «↲ موازی: …» زمان همان عنصر موازی است: بازهٔ «شروع-پایان» نسبت به مبدأ چرخه وارد کنید (مثل 3-9).', {}],
     ['۵. ستون‌های خالی انتهایی برای چرخه‌های جدیدند؛ در صورت نیاز می‌توانید در سمت چپ ستون‌های بیشتری اضافه کنید (عنوان ستون جدید را هم «چرخهٔ N» بگذارید).', {}],
     ['۶. سلول خالی به معنی «بدون تغییر» است — دادهٔ موجود حذف نمی‌شود.', {}],
     ['', {}],
@@ -266,27 +256,21 @@ export async function buildTimingExcelTemplate(sessionId: string): Promise<{ buf
   return { buffer, filename }
 }
 
-/** مقدار متنی فعلی یک سلول قالب — فرمت پذیرفته‌شدهٔ Paste */
+/** مقدار متنی فعلی یک سلول قالب — فرمت پذیرفته‌شدهٔ Paste
+ *  v1.5.2 §۲-۸ — زیرردیف موازی: بازهٔ از/تا مشاهدهٔ «عنصر مقابل» در همان چرخه */
 function cellTextFor(
-  grow: { kind: 'ELEMENT' | 'RELATION'; elementId: string; relationId: string | null },
+  grow: { kind: 'ELEMENT' | 'RELATION'; elementId: string; relationId: string | null; otherElementId: string | null },
   cycleNo: number,
   cycleByNo: Map<number, { id: string; observations: { workElementId: string; rawDuration: number | null; cumulativeReading: number | null; startOffset: number | null; endOffset: number | null }[] }>,
   elementById: Map<string, { defaultEntryMode: string }>,
-  overlapByCycle: Map<string, Map<string, { status: string; overlapDuration: number | null }>>,
   method: string,
 ): string {
   const cycle = cycleByNo.get(cycleNo)
   if (!cycle) return ''
 
-  if (grow.kind === 'RELATION') {
-    const ov = overlapByCycle.get(cycle.id)?.get(grow.relationId!)
-    if (!ov) return ''
-    if (ov.status === 'NO_OVERLAP') return '0'
-    if (ov.status === 'OVERLAP' && ov.overlapDuration != null) return String(round6(ov.overlapDuration))
-    return ''
-  }
-
-  const obs = cycle.observations.find((o) => o.workElementId === grow.elementId)
+  // زیرردیف موازی — زمان همان عنصر مقابل (بازهٔ کامل)
+  const targetId = grow.kind === 'RELATION' ? grow.otherElementId : grow.elementId
+  const obs = cycle.observations.find((o) => o.workElementId === targetId)
   if (!obs) return ''
   // بازهٔ کامل — فرمت «شروع-پایان» (§۹-۳)
   if (obs.startOffset != null && obs.endOffset != null) {
@@ -395,7 +379,7 @@ export async function parseTimingExcelTemplate(sessionId: string, file: File): P
   const cellText = (value: ExcelJS.CellValue, rowIdx: number, colIdx: number): string => {
     if (value == null) return ''
     const grow = gridRows[rowIdx]
-    const where = `ردیف ${rowIdx + 1} (${grow.kind === 'ELEMENT' ? grow.elementName : `هم‌پوشانی ${grow.elementName}↔${grow.otherElementName}`})، چرخهٔ ${startCycleNo + colIdx}`
+    const where = `ردیف ${rowIdx + 1} (${grow.kind === 'ELEMENT' ? grow.elementName : `موازی: ${grow.otherElementName}`})، چرخهٔ ${startCycleNo + colIdx}`
     if (typeof value === 'string') return value.trim()
     if (typeof value === 'number') {
       if (!Number.isFinite(value)) {

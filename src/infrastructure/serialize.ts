@@ -7,8 +7,10 @@
 import { db } from '@/lib/db'
 import type { Prisma } from '@prisma/client'
 
-/** نسخه ساختار داده بسته/پشتیبان — v۳: روابط موازی و مقادیر هم‌پوشانی چرخه‌ای (جلسه دوم) */
-export const SCHEMA_VERSION = 3
+/** نسخه ساختار داده بسته/پشتیبان — v۴ (v1.5.2 §۲): فقط روابط موازی؛
+ *  مقادیر عددی هم‌پوشانی چرخه‌ای حذف شد. بسته‌های v۳ قدیمی هنگام
+ *  ورود، سازگار می‌شوند (remap کلید legacy در package-io/backup). */
+export const SCHEMA_VERSION = 4
 
 /** نام جداول دامنه به ترتیب درج (والد قبل از فرزند) */
 export const DOMAIN_TABLES_INSERT_ORDER = [
@@ -31,8 +33,7 @@ export const DOMAIN_TABLES_INSERT_ORDER = [
   'cycleObservation',
   'timelineLane',
   'elementObservation',
-  'overlapRelation',
-  'observationOverlap',
+  'parallelElementRelation',
   'chartNode',
   'chartEdge',
   'calculationRun',
@@ -104,6 +105,8 @@ function whereForProject(table: DomainTable, projectId: string): Record<string, 
       return { cycle: { session: { activity: { station: { projectId } } } } }
     case 'elementObservation':
       return { cycle: { session: { activity: { station: { projectId } } } } }
+    case 'parallelElementRelation':
+      return { projectId }
     default:
       return undefined
   }

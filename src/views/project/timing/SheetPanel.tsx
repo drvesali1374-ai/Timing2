@@ -1,13 +1,12 @@
 'use client'
 
 // ═══════════════════════════════════════════════════════════
-// پنل برگهٔ زمان‌سنجی — ارکستراتور فاز ۳ — FR-06…FR-12 — v1.5.0
+// پنل برگهٔ زمان‌سنجی — ارکستراتور فاز ۳ — FR-06…FR-12 — v1.5.0 / v1.5.2 §۲
 // نوار ابزار (Undo/Redo، افزودن چرخه، Paste، بستن جلسه،
 // نشانگر ذخیره)، پیشرفت نمونه، دیالوگ وضعیت مشاهده و
 // اتصال جدول دسکتاپ/موبایل به API.
-// v1.5.0: ثبت مقدار هم‌پوشانی زیرردیف‌ها از مسیر مرکزی
-// setCycleOverlaps با کنترل نسخه و Undo/Redo (§۵.۵/§۸.۵)؛
-// Paste با لنگر شناسه‌محور و Undo شامل مقادیر هم‌پوشانی.
+// v1.5.2 §۲-۸: زیرردیف موازی زمان عادی عنصر مقابل را از همان مسیر
+// commitCell می‌نویسد (بازهٔ از/تا)؛ کاتالوگ نامزدها از elements-catalog.
 // ═══════════════════════════════════════════════════════════
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
@@ -57,7 +56,7 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Input } from '@/components/ui/input'
 import { HelpDot } from '@/components/common/HelpDot'
 import { SaveIndicator } from '@/components/common/SaveIndicator'
-import { timingApi, overlapApi, type CycleRowDto, type ObservationCellDto, type RemovedCycleDataDto, type SessionSheetDto } from '@/lib/api/endpoints'
+import { timingApi, parallelApi, type CycleRowDto, type ObservationCellDto, type RemovedCycleDataDto, type SessionSheetDto } from '@/lib/api/endpoints'
 import { qk } from '@/lib/api/keys'
 import type { DisplayPrefs as Prefs } from '@/lib/format'
 import { formatInt, formatTimeValue } from '@/lib/format'
@@ -71,7 +70,6 @@ import {
   type CellPayload,
   type ElementColumn,
   type GridRow,
-  type OverlapCellState,
 } from './shared'
 import { useCellSaver } from './useCellSaver'
 import { useSheetHistory } from './useSheetHistory'
@@ -118,8 +116,8 @@ export function SheetPanel({
   // با هر تغییر رابطه (useRelationInvalidation) این کش هم باطل می‌شود.
   const projectId = sheet?.activity.projectId ?? null
   const catalogQ = useQuery({
-    queryKey: projectId ? qk.overlapMatrix(projectId, null) : ['overlap-matrix', 'none'],
-    queryFn: () => overlapApi.matrix(projectId as string, null),
+    queryKey: projectId ? qk.elementsCatalog(projectId) : ['elements-catalog', 'none'],
+    queryFn: () => parallelApi.catalog(projectId as string),
     enabled: !!projectId,
   })
   const projectCatalog = useMemo(
@@ -136,12 +134,6 @@ export function SheetPanel({
     },
     [qc, sessionId]
   )
-
-  // خواندن تازهٔ برگه (برای پاسخ‌هایی که sheet برنمی‌گردانند — مثلاً setCycleOverlaps)
-  const refreshSheet = useCallback(async () => {
-    const res = await timingApi.sheet(sessionId)
-    onSheet(res.sheet)
-  }, [sessionId, onSheet])
 
   const saver = useCellSaver(onSheet)
   const history = useSheetHistory(saver.flush)
@@ -199,61 +191,6 @@ export function SheetPanel({
       })
     },
     [sheet, saver, history, applyCells]
-  )
-
-  // ── ثبت مقدار هم‌پوشانی زیرردیف — §۵.۳/§۵.۵ از مسیر مرکزی ──
-  // مقدار هر دو زیرردیف آینه‌ای از یک رکورد ObservationOverlap است؛
-  // undo/redo در زمان اجرا نسخهٔ فعلی را از کش می‌خواند (بدون بازنویسی
-  // بی‌صدا در صورت Conflict — §۸.۵).
-  const commitOverlap = useCallback(
-    (relationId: string, cycle: CycleRowDto, state: OverlapCellState) => {
-      if (!sheet) return
-      const rel = sheet.parallelRelations.find((r) => r.relationId === relationId)
-      const beforeCell = cycle.overlaps?.[relationId]
-      const before: OverlapCellState = beforeCell
-        ? { status: beforeCell.status as OverlapCellState['status'], overlapDuration: beforeCell.overlapDuration }
-        : { status: 'UNREVIEWED', overlapDuration: null }
-      const after = state
-      const cycleId = cycle.id
-      const cycleNo = cycle.cycleNo
-      const pairLabel = rel ? `${rel.elementLowName} ↔ ${rel.elementHighName}` : 'رابطه'
-      const apply = async (target: OverlapCellState) => {
-        // نسخهٔ فعلی از آخرین وضعیت معتبر
-        const sheetNow = qc.getQueryData<{ sheet: SessionSheetDto }>(qk.sessionSheet(sessionId))?.sheet
-        const cycleNow = sheetNow?.cycles.find((c) => c.id === cycleId)
-        const currentVersion = cycleNow?.overlaps?.[relationId]?.version
-        const currentRevision = cycleNow?.overlapRevision
-        const res = await overlapApi.setCycleOverlaps(cycleId, {
-          updates: [
-            {
-              relationId,
-              status: target.status,
-              overlapDuration: target.status === 'OVERLAP' ? target.overlapDuration : target.status === 'NO_OVERLAP' ? 0 : null,
-              expectedVersion: currentVersion,
-            },
-          ],
-          expectedOverlapRevision: currentRevision,
-        })
-        await refreshSheet()
-        void qc.invalidateQueries({ queryKey: ['overlap-matrix'] })
-        void qc.invalidateQueries({ queryKey: ['element-relations'] })
-        for (const w of res.warnings) toast.warning('هشدار — نتیجه موقتی است', { description: w })
-      }
-      setCellErrors((s) => {
-        const next = { ...s }
-        delete next[`${relationId}:${cycleId}`]
-        return next
-      })
-      void apply(after).catch((err) => {
-        toast.error(err instanceof Error ? err.message : 'ثبت مقدار هم‌پوشانی ناموفق بود')
-      })
-      history.push({
-        label: `هم‌پوشانی ${pairLabel} در چرخهٔ ${cycleNo}`,
-        undo: () => apply(before),
-        redo: () => apply(after),
-      })
-    },
-    [sheet, qc, sessionId, refreshSheet, history]
   )
 
   const onCellError = useCallback((key: string, message: string) => {
@@ -348,38 +285,24 @@ export function SheetPanel({
       const startNo = pasteAnchor.cycleNo
       const endNo = startNo + width - 1
       const beforeCells: { cycleId: string; cells: CellPayload[] }[] = []
-      const beforeOverlaps: { cycleId: string; cycleNo: number; updates: Array<{ relationId: string; status: OverlapCellState['status']; overlapDuration: number | null }> }[] = []
       const beforeIds = new Set(sheet.cycles.map((c) => c.id))
       for (let ri = 0; ri < data.length; ri++) {
         const grow = gridRows[anchorIdx + ri]
         if (!grow) continue
-        if (grow.kind === 'ELEMENT') {
-          const col = columns[grow.elementIndex]
-          if (!col) continue
-          for (const c of sheet.cycles) {
-            if (c.cycleNo < startNo || c.cycleNo > endNo) continue
-            const obs = findObservation(c, col.id)
-            const cell: CellPayload = obs
-              ? captureBefore(obs, col.id)
-              : { workElementId: col.id, rawDuration: null, cumulativeReading: null, startOffset: null, endOffset: null }
-            const existing = beforeCells.find((b) => b.cycleId === c.id)
-            if (existing) existing.cells.push(cell)
-            else beforeCells.push({ cycleId: c.id, cells: [cell] })
-          }
-        } else {
-          // زیرردیف رابطه — مقدار قبلی برای Undo (§۱۳.۹)
-          for (const c of sheet.cycles) {
-            if (c.cycleNo < startNo || c.cycleNo > endNo) continue
-            const v = c.overlaps?.[grow.relationId]
-            const update = {
-              relationId: grow.relationId,
-              status: (v?.status ?? 'UNREVIEWED') as OverlapCellState['status'],
-              overlapDuration: v?.overlapDuration ?? null,
-            }
-            const existing = beforeOverlaps.find((b) => b.cycleId === c.id)
-            if (existing) existing.updates.push(update)
-            else beforeOverlaps.push({ cycleId: c.id, cycleNo: c.cycleNo, updates: [update] })
-          }
+        // v1.5.2 §۲-۸ — زیرردیف موازی هم «ردیف عنصر» است: مقدار قبلی
+        // مشاهدهٔ عنصر مقابل برای Undo (همان مسیر سلول‌های عادی)
+        const col = grow.kind === 'ELEMENT' ? columns[grow.elementIndex] : undefined
+        const targetId = grow.kind === 'ELEMENT' ? grow.elementId : grow.otherElementId
+        if (!col && grow.kind === 'ELEMENT') continue
+        for (const c of sheet.cycles) {
+          if (c.cycleNo < startNo || c.cycleNo > endNo) continue
+          const obs = findObservation(c, targetId)
+          const cell: CellPayload = obs
+            ? captureBefore(obs, targetId)
+            : { workElementId: targetId, rawDuration: null, cumulativeReading: null, startOffset: null, endOffset: null }
+          const existing = beforeCells.find((b) => b.cycleId === c.id)
+          if (existing) existing.cells.push(cell)
+          else beforeCells.push({ cycleId: c.id, cells: [cell] })
         }
       }
 
@@ -400,11 +323,6 @@ export function SheetPanel({
           for (const b of beforeCells) {
             await applyCells(b.cycleId, b.cells)
           }
-          for (const b of beforeOverlaps) {
-            if (b.updates.length === 0) continue
-            await overlapApi.setCycleOverlaps(b.cycleId, { updates: b.updates.map((u) => ({ relationId: u.relationId, status: u.status, overlapDuration: u.overlapDuration })) })
-          }
-          if (beforeOverlaps.length > 0) await refreshSheet()
           for (const id of [...currentCreatedIds].reverse()) {
             const del = await timingApi.deleteCycle(id)
             onSheet(del.sheet)
@@ -427,7 +345,7 @@ export function SheetPanel({
       )
       for (const w of res.warnings) toast.warning(w)
     },
-    [sheet, saver, pasteAnchor, columns, sessionId, onSheet, history, applyCells, refreshSheet, prefs]
+    [sheet, saver, pasteAnchor, columns, sessionId, onSheet, history, applyCells, prefs]
   )
 
   // ── وضعیت مشاهده — FR-11 ──
@@ -534,8 +452,8 @@ export function SheetPanel({
         ? 'در روش پیوسته، قرائت تجمعی کرنومتر را در پایان هر عنصر وارد کنید؛ مدت هر عنصر به‌صورت خودکار از تفاضل قرائت‌ها محاسبه و زیر سلول نمایش داده می‌شود. قرائت‌ها باید نزولی نباشند.'
         : 'در روش برگشت به صفر، مدت سپسی‌شدهٔ هر عنصر را مستقیم وارد کنید. برای عناصر هم‌زمان، مقدار را به‌صورت «از تا» (مثل ۳ تا ۹) نسبت به مبدأ چرخه وارد کنید.',
     example:
-      'ورودی «۱۲٫۵» یا «12.5» — بازهٔ «۳ تا ۹» یا «3-9» — زیرردیف هم‌پوشانی: خالی (بررسی‌نشده)، ۰ (بدون هم‌پوشانی) یا مقدار مثبت — حرکت با Tab/Enter و جهت‌نما؛ کپی محدوده با Shift+جهت‌نما و Ctrl+C.',
-    note: 'زمان سپری‌شدهٔ چرخه در کارهای هم‌زمان، گستره (دیرترین پایان − زودترین شروع) است نه جمع مدت‌ها. زیرردیف‌های هم‌پوشانی در هر دو سمت از یک رکورد واحد خوانده می‌شوند؛ دادهٔ خام هرگز حذف نمی‌شود.',
+      'ورودی «۱۲٫۵» یا «12.5» — بازهٔ «۳ تا ۹» یا «3-9» — زیرردیف عنصر موازی: بازهٔ از/تا نسبت به مبدأ چرخه — حرکت با Tab/Enter و جهت‌نما؛ کپی محدوده با Shift+جهت‌نما و Ctrl+C.',
+    note: 'زمان سپری‌شدهٔ چرخه در کارهای هم‌زمان، گستره (دیرترین پایان − زودترین شروع) است نه جمع مدت‌ها. زمان عنصر موازی در زیرردیف همان دادهٔ ردیف اصلی آن عنصر است (در برگهٔ فعالیت مقابل نیز دیده می‌شود)؛ دادهٔ خام هرگز حذف نمی‌شود.',
   }
 
   return (
@@ -746,7 +664,6 @@ export function SheetPanel({
           editable={editable}
           projectCatalog={projectCatalog}
           commitCell={commitCell}
-          commitOverlap={commitOverlap}
           onCellError={onCellError}
           onDeleteCycle={(c) => void deleteCycle(c)}
           onSetValidity={(c, obs) => setValidityTarget({ cycle: c, obs })}
@@ -768,7 +685,6 @@ export function SheetPanel({
             }))
           }
           commitCell={commitCell}
-          commitOverlap={commitOverlap}
           onCellError={onCellError}
           onDeleteCycle={(c) => void deleteCycle(c)}
           onSetValidity={(c, obs) => setValidityTarget({ cycle: c, obs })}

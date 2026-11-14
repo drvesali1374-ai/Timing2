@@ -489,7 +489,7 @@ export async function getActivityAnalysis(activityId: string): Promise<ActivityA
   const hasOverlapLegacy = activity.workElements.some((e) => e.elementType === 'OVERLAP')
   const hasActiveOverlapRelations =
     gateElementIds.length > 0 &&
-    (await db.overlapRelation.count({
+    (await db.parallelElementRelation.count({
       where: {
         isActive: true,
         AND: [{ elementLowId: { in: gateElementIds } }, { elementHighId: { in: gateElementIds } }],

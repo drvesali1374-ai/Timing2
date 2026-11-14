@@ -28,9 +28,8 @@ export const qk = {
   // ── زمان‌سنجی — فاز ۳ ──
   sessions: (activityId: string) => ['timing-sessions', activityId] as const,
   sessionSheet: (sessionId: string) => ['timing-sheet', sessionId] as const,
-  // ── ماتریس هم‌پوشانی — جلسه ۲ ──
-  overlapMatrix: (projectId: string, cycleId?: string | null) =>
-    ['overlap-matrix', projectId, cycleId ?? 'none'] as const,
+  // ── روابط موازی عناصر کاری — v1.5.2 §۲ ──
+  elementsCatalog: (projectId: string) => ['elements-catalog', projectId] as const,
   elementRelations: (elementId: string) => ['element-relations', elementId] as const,
   // ── تحلیل — فاز ۴ ──
   activityAnalysis: (activityId: string) => ['activity-analysis', activityId] as const,

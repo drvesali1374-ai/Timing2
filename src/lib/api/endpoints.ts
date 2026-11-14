@@ -362,10 +362,6 @@ export interface CycleRowDto {
   hasSuspect: boolean
   hasIncompleteInterval: boolean
   observations: ObservationCellDto[]
-  /** v1.5.0 — نسخهٔ مجموعهٔ مقادیر هم‌پوشانی (کنترل هم‌زمانی زیرردیف‌ها) */
-  overlapRevision: number
-  /** v1.5.0 — مقادیر هم‌پوشانی بر اساس relationId؛ نبود کلید = UNREVIEWED */
-  overlaps: Record<string, { status: string; overlapDuration: number | null; version: number }>
 }
 
 /** v1.5.1 §۷ — رابطهٔ موازی فعال که حداقل یکی از دو endpoint آن در Activity جلسه است.
@@ -438,9 +434,6 @@ export interface PasteCellResultDto {
   cumulativeReading?: number | null
   startOffset?: number | null
   endOffset?: number | null
-  overlapStatus?: 'UNREVIEWED' | 'NO_OVERLAP' | 'OVERLAP'
-  overlapDuration?: number | null
-  computedOverlap?: number | null
   previewDerived?: number | null
   status: 'OK' | 'WARN' | 'ERROR' | 'SKIP'
   message?: string
@@ -494,13 +487,6 @@ export interface RemovedCycleDataDto {
       endOffset: number | null
       validityStatus: string
       exclusionReason: string | null
-    }[]
-    /** §۸ ممیزی جلسه ۲ — مقادیر هم‌پوشانی چرخهٔ حذف‌شده برای بازگردانی Undo */
-    overlaps: {
-      relationId: string
-      status: string
-      overlapDuration: number | null
-      version: number
     }[]
   }
 }
@@ -948,58 +934,20 @@ export const chartsApi = {
   ) => api.post<{ saved: boolean }>(`/api/projects/${projectId}/charts/${chartType}/layout-snapshot`, body),
 }
 
-// ── ماتریس هم‌پوشانی عناصر کاری — جلسه ۲ ──
+// ── روابط موازی عناصر کاری — v1.5.2 §۲ (ماتریس هم‌پوشانی حذف شد) ──
 
-export type OverlapStatusValue = 'UNREVIEWED' | 'NO_OVERLAP' | 'OVERLAP'
-
-export interface MatrixMemberDto {
-  elementId: string
-  name: string
-  activityId: string
-  activityName: string
-  stationId: string
-  stationName: string
-  stationSort: number
-  activitySort: number
-  elementSort: number
-}
-
-export interface OverlapRelationDto {
+export interface ParallelRelationDto {
   id: string
   elementLowId: string
   elementHighId: string
   isActive: boolean
-  /** v1.5.0 §۴.۳ — دلیل آرشیو (مثلاً CROSS_ACTIVITY_NOT_SUPPORTED_BY_SESSION_SHEET) */
   archiveReason: string | null
   version: number
   createdAt: string
   updatedAt: string
 }
 
-export interface OverlapCellDto {
-  relationId: string
-  status: OverlapStatusValue
-  overlapDuration: number | null
-  version: number
-  updatedAt: string
-}
-
-export interface OverlapCycleOptionDto {
-  cycleId: string
-  cycleNo: number
-  sessionId: string
-  operatorId: string
-  operatorName: string
-  timingMethod: string
-  sessionStatus: string
-  activityId: string
-  activityName: string
-  createdAt: string
-  /** نسخهٔ مجموعهٔ مقادیر هم‌پوشانی — کنترل هم‌زمانی §۱۰ ممیزی جلسه ۲ */
-  overlapRevision: number
-}
-
-export interface OverlapCatalogEntryDto {
+export interface ElementsCatalogEntryDto {
   elementId: string
   name: string
   activityId: string
@@ -1008,45 +956,9 @@ export interface OverlapCatalogEntryDto {
   stationName: string
 }
 
-export interface OverlapValidationDto {
-  verdict: 'VALID' | 'INVALID' | 'INDETERMINATE'
-  /** سازگاری داده‌های تأییدشده — مستقل از کامل‌بودن — §۳ ممیزی جلسه ۲ */
-  confirmedVerdict: 'VALID' | 'INVALID' | 'INDETERMINATE'
-  /** نتیجهٔ نهایی — روابط بررسی‌نشده/بازهٔ ناقص → INDETERMINATE */
-  overallVerdict: 'VALID' | 'INVALID' | 'INDETERMINATE'
-  localFailures: Array<{ pair: [string, string]; failures: Array<{ code: string; message: string }> }>
-  tripleIssues: Array<{ message: string; responsibleElementIds?: string[] }>
-  globalIssues: Array<{ message: string; responsibleElementIds?: string[] }>
-  /** تطبیق مقادیر ثبت‌شده با بازهٔ واقعی چرخه — §۴ ممیزی جلسه ۲ */
-  intervalIssues: Array<{
-    pair: [string, string]
-    recorded: number | null
-    computed: number | null
-    message: string
-    kind: 'DEFINITE' | 'INDETERMINATE'
-  }>
-  provisionalWarnings: Array<{ message: string; responsiblePairs?: Array<[string, string]> }>
-  multiOverlaps: Array<{ members: string[]; value: number | null; provisional: boolean }>
-  unions: Array<{ members: string[]; value: number | null; source: string }>
-}
-
-/** مقایسه‌پذیری یک زوج در چرخهٔ انتخاب‌شده — §۵ ممیزی جلسه ۲ */
-export interface OverlapComparabilityDto {
-  isComparable: boolean
-  notComparableReason: string | null
-}
-
-export interface OverlapMatrixDto {
+export interface ElementsCatalogDto {
   projectId: string
-  members: MatrixMemberDto[]
-  relations: OverlapRelationDto[]
-  cells: Record<string, OverlapCellDto>
-  /** مقایسه‌پذیری هر رابطهٔ فعال در چرخهٔ انتخاب‌شده — خالی وقتی چرخه‌ای انتخاب نشده */
-  comparability: Record<string, OverlapComparabilityDto>
-  selectedCycle: OverlapCycleOptionDto | null
-  cycles: OverlapCycleOptionDto[]
-  elementsCatalog: OverlapCatalogEntryDto[]
-  validation: OverlapValidationDto | null
+  elementsCatalog: ElementsCatalogEntryDto[]
 }
 
 export interface ElementRelationRowDto {
@@ -1058,51 +970,27 @@ export interface ElementRelationRowDto {
   isActive: boolean
   /** v1.5.1 §۶ — پرچم اطلاعاتی بین‌فعالیت (بازگردانی مجاز است؛ فقط برچسب UI) */
   crossActivity: boolean
-  /** v1.5.0 — دلیل آرشیو در صورت وجود */
   archiveReason: string | null
-  latest: {
-    cycleNo: number
-    operatorName: string
-    activityName: string
-    status: OverlapStatusValue
-    overlapDuration: number | null
-    cycleId: string
-  } | null
 }
 
-export const overlapApi = {
-  matrix: (projectId: string, cycleId?: string | null) =>
-    api.get<OverlapMatrixDto>(`/api/projects/${projectId}/overlap/matrix${cycleId ? `?cycleId=${cycleId}` : ''}`),
+export const parallelApi = {
+  /** کاتالوگ عناصر پروژه — منبع مستقل نامزدهای رابطه (v1.5.2 §۲-۵) */
+  catalog: (projectId: string) =>
+    api.get<ElementsCatalogDto>(`/api/projects/${projectId}/elements-catalog`),
+  listRelations: (projectId: string) =>
+    api.get<{ relations: ParallelRelationDto[] }>(`/api/projects/${projectId}/parallel-relations`),
   createRelation: (projectId: string, body: { elementAId: string; elementBId: string }) =>
-    api.post<{ relation: OverlapRelationDto; matrix: OverlapMatrixDto }>(`/api/projects/${projectId}/overlap/relations`, body),
+    api.post<{ relation: ParallelRelationDto }>(`/api/projects/${projectId}/parallel-relations`, body),
   archiveRelation: (relationId: string) =>
-    api.patch<{ relation: OverlapRelationDto }>(`/api/overlap-relations/${relationId}`, { action: 'archive' }),
+    api.patch<{ relation: ParallelRelationDto }>(`/api/parallel-relations/${relationId}`, { action: 'archive' }),
   restoreRelation: (relationId: string) =>
-    api.patch<{ relation: OverlapRelationDto }>(`/api/overlap-relations/${relationId}`, { action: 'restore' }),
-  setCycleOverlaps: (
-    cycleId: string,
-    body: {
-      updates: Array<{
-        relationId: string
-        status: OverlapStatusValue
-        overlapDuration?: number | null
-        expectedVersion?: number
-      }>
-      /** §۱۰ ممیزی جلسه ۲ — کنترل هم‌زمانی در سطح مجموعهٔ مقادیر چرخه */
-      expectedOverlapRevision?: number
-    }
-  ) =>
-    api.put<{ cells: Record<string, OverlapCellDto>; validation: OverlapValidationDto; warnings: string[] }>(
-      `/api/cycles/${cycleId}/overlaps`,
-      body
-    ),
-  elementRelations: (elementId: string, sessionId?: string | null) =>
+    api.patch<{ relation: ParallelRelationDto }>(`/api/parallel-relations/${relationId}`, { action: 'restore' }),
+  elementRelations: (elementId: string) =>
     api.get<{
       elementId: string
       elementName: string
       rows: ElementRelationRowDto[]
-      scope: 'PROJECT' | 'SESSION'
-    }>(`/api/elements/${elementId}/relations${sessionId ? `?sessionId=${sessionId}` : ''}`),
+    }>(`/api/elements/${elementId}/relations`),
 }
 
 

@@ -1,8 +1,9 @@
 'use client'
 
 // ═══════════════════════════════════════════════════════════
-// برگهٔ زمان‌سنجی موبایل — v1.5.0 §۹.۳
+// برگهٔ زمان‌سنجی موبایل — v1.5.0 §۹.۳ / v1.5.2 §۲-۸
 // همان مدل محوری دسکتاپ حفظ می‌شود (عنصر=ردیف، چرخه=ستون)؛
+// زیرردیف موازی = زمان عادی عنصر مقابل به‌صورت بازهٔ از/تا؛
 // نام عنصر/رابطه ثابت سمت راست، ستون‌های چرخه در سمت چپ با
 // اسکرول افقی، هدر چسبان، ارتفاع لمسی، بدون نیاز به Hover.
 // به مدل قدیمی «کارت برای هر چرخه» برنمی‌گردد.
@@ -18,19 +19,14 @@ import {
   buildRows,
   cellDisplayValue,
   cellEditValue,
-  computedOverlapFor,
   findObservation,
-  overlapCellOf,
   parseCellInput,
-  parseOverlapInput,
   payloadFromParsed,
-  relationComparability,
   type CellPayload,
   type ElementColumn,
   type GridRow,
-  type OverlapCellState,
 } from './shared'
-import { AddRelationControl, ArchiveRelationControl } from '../matrix/RelationControls'
+import { AddRelationControl, ArchiveRelationControl } from '../relations/RelationControls'
 import { SuspectDiagnosticDialog, type SuspectDiagTarget } from './SuspectDiagnosticDialog'
 import { DeleteCycleConfirm } from './DeleteCycleConfirm'
 import { CycleDetailDialog } from './CycleDetailDialog'
@@ -43,7 +39,6 @@ interface MobileSheetProps {
   /** v1.5.1 §۴ — کاتالوگ کامل عناصر پروژه؛ همان منبع دسکتاپ (نه منطق انتخاب مستقل) */
   projectCatalog: Array<{ elementId: string; name: string; activityId: string; activityName: string; stationId: string; stationName: string }>
   commitCell: (cycle: CycleRowDto, column: ElementColumn, payload: CellPayload) => void
-  commitOverlap: (relationId: string, cycle: CycleRowDto, state: OverlapCellState) => void
   onCellError: (key: string, message: string) => void
   onDeleteCycle: (cycle: CycleRowDto) => void
   onSetValidity: (cycle: CycleRowDto, obs: ObservationCellDto) => void
@@ -59,7 +54,6 @@ export function MobileSheet({
   editable,
   projectCatalog,
   commitCell,
-  commitOverlap,
   onCellError,
   onDeleteCycle,
   onSetValidity,
@@ -74,19 +68,7 @@ export function MobileSheet({
   const cycles = sheet.cycles
   const method = sheet.session.timingMethod
   const rows: GridRow[] = useMemo(() => buildRows(sheet, columns), [sheet, columns])
-  const relationById = useMemo(
-    () => new Map(sheet.parallelRelations.map((r) => [r.relationId, r])),
-    [sheet.parallelRelations]
-  )
   // v1.5.1 §۷ — نام عناصر خارج از Activity جاری نیز از روابط برگه حل می‌شود
-  const nameOf = (id: string) =>
-    sheet.elements.find((e) => e.id === id)?.name ??
-    sheet.parallelRelations.reduce<string>((acc, r) => {
-      if (acc !== '؟') return acc
-      if (r.elementLowId === id) return r.elementLowName
-      if (r.elementHighId === id) return r.elementHighName
-      return acc
-    }, '؟')
 
   return (
     <div className="space-y-3">
@@ -165,14 +147,13 @@ export function MobileSheet({
                   <MobileParallelRow
                     key={row.displayKey}
                     row={row}
-                    relation={relationById.get(row.relationId)}
                     sheet={sheet}
                     cycles={cycles}
                     prefs={prefs}
                     editable={editable}
-                    commitOverlap={commitOverlap}
+                    method={method}
+                    commitCell={commitCell}
                     onCellError={onCellError}
-                    nameOf={nameOf}
                   />
                 )
               )}
@@ -492,30 +473,30 @@ function MobileElementCell({
   )
 }
 
-// ── زیرردیف رابطهٔ موازی با ورودی لمسی ──
+// ── زیرردیف رابطهٔ موازی با ورودی لمسی — v1.5.2 §۲-۸ ──
+// زمان عادی «عنصر مقابل» در همین چرخه؛ همان ElementObservation ردیف اصلی آن عنصر.
 
 function MobileParallelRow({
   row,
-  relation,
   sheet,
   cycles,
   prefs,
   editable,
-  commitOverlap,
+  method,
+  commitCell,
   onCellError,
-  nameOf,
 }: {
   row: Extract<GridRow, { kind: 'PARALLEL' }>
-  relation: { relationId: string; elementLowId: string; elementHighId: string } | undefined
   sheet: SessionSheetDto
   cycles: CycleRowDto[]
   prefs: Prefs
   editable: boolean
-  commitOverlap: (relationId: string, cycle: CycleRowDto, state: OverlapCellState) => void
+  method: 'SNAPBACK' | 'CONTINUOUS'
+  commitCell: (cycle: CycleRowDto, column: ElementColumn, payload: CellPayload) => void
   onCellError: (key: string, message: string) => void
-  nameOf: (id: string) => string
 }) {
-  if (!relation) return null
+  // ستون ترکیبی INT برای عنصر مقابل — همان مسیر ذخیرهٔ ردیف‌های اصلی
+  const column: ElementColumn = { index: -1, id: row.otherElementId, name: row.otherName, entryMode: 'INT' }
   return (
     <tr className="t2-subrow">
       <th scope="row" className="sticky right-0 z-10 border-b border-l bg-surface-2/50 px-2 py-1 text-right backdrop-blur">
@@ -525,9 +506,9 @@ function MobileParallelRow({
             <span className="h-4 w-2 shrink-0 rounded-es border-b-2 border-r-2 border-brand/30" aria-hidden />
             <p
               className="flex min-w-0 items-center gap-1 truncate text-[10px] font-bold text-muted-foreground"
-              title={`هم‌پوشانی با ${row.otherName}${row.crossActivity ? ` (فعالیت ${row.otherActivityName ?? '؟'} / ایستگاه ${row.otherStationName ?? '؟'})` : ''}`}
+              title={`عنصر موازی: ${row.otherName} — زمان آن به‌صورت بازهٔ از/تا در همین چرخه ثبت می‌شود${row.crossActivity ? ` (فعالیت ${row.otherActivityName ?? '؟'} / ایستگاه ${row.otherStationName ?? '؟'})` : ''}`}
             >
-              <span className="truncate">↲ {row.otherName}</span>
+              <span className="truncate">↲ موازی: {row.otherName}</span>
               {row.crossActivity && (
                 <span
                   className="shrink-0 rounded-md border border-amber/70 bg-amber-soft/40 px-1 py-px text-[8px] font-bold"
@@ -557,132 +538,117 @@ function MobileParallelRow({
         </div>
       </th>
       {cycles.map((cycle) => (
-        <MobileOverlapCell
+        <MobileParallelCell
           key={cycle.id}
           cycle={cycle}
+          column={column}
           row={row}
-          relation={relation}
           prefs={prefs}
           editable={editable}
-          commitOverlap={commitOverlap}
+          method={method}
+          commitCell={commitCell}
           onCellError={onCellError}
-          nameOf={nameOf}
         />
       ))}
     </tr>
   )
 }
 
-function MobileOverlapCell({
+function MobileParallelCell({
   cycle,
+  column,
   row,
-  relation,
   prefs,
   editable,
-  commitOverlap,
+  method,
+  commitCell,
   onCellError,
-  nameOf,
 }: {
   cycle: CycleRowDto
+  column: ElementColumn
   row: Extract<GridRow, { kind: 'PARALLEL' }>
-  relation: { elementLowId: string; elementHighId: string }
   prefs: Prefs
   editable: boolean
-  commitOverlap: (relationId: string, cycle: CycleRowDto, state: OverlapCellState) => void
+  method: 'SNAPBACK' | 'CONTINUOUS'
+  commitCell: (cycle: CycleRowDto, column: ElementColumn, payload: CellPayload) => void
   onCellError: (key: string, message: string) => void
-  nameOf: (id: string) => string
 }) {
-  const cell = overlapCellOf(cycle, row.relationId)
-  const cmp = relationComparability(cycle, relation, nameOf)
-  const computed = computedOverlapFor(cycle, relation)
-  const [value, setValue] = useState(cell.status === 'UNREVIEWED' ? '' : String(cell.overlapDuration ?? ''))
-  // الگوی derive-state با «کلید پایدار» — overlapCellOf هر بار شیء جدید می‌سازد؛
-  // مقایسهٔ مرجع هرگر همگرا نمی‌شود و حلقهٔ رندر بی‌نهایت می‌سازد. کلید محتوایی
-  // پایدار است و فقط تغییر واقعی داده ورودی مقدار ویرایش را بازنشانی می‌کند.
-  const cellKey = `${cell.status}:${cell.overlapDuration ?? 'n'}:${cell.version}`
-  const [prevKey, setPrevKey] = useState(cellKey)
-  if (cellKey !== prevKey) {
-    setPrevKey(cellKey)
-    setValue(cell.status === 'UNREVIEWED' ? '' : String(cell.overlapDuration ?? ''))
+  const obs = findObservation(cycle, column.id)
+  const v = cellEditValue(obs, method)
+  const [start, setStart] = useState(v.start)
+  const [end, setEnd] = useState(v.end)
+  // همگام‌سازی با تغییر سرور (Undo/Redo) — کلید محتوایی پایدار
+  const [prevKey, setPrevKey] = useState(`${obs?.startOffset ?? 'n'}:${obs?.endOffset ?? 'n'}`)
+  const key = `${obs?.startOffset ?? 'n'}:${obs?.endOffset ?? 'n'}`
+  if (key !== prevKey) {
+    setPrevKey(key)
+    const nv = cellEditValue(obs, method)
+    setStart(nv.start)
+    setEnd(nv.end)
   }
 
   const commit = () => {
-    const parsed = parseOverlapInput(value)
-    if (parsed.kind === 'INVALID') {
-      onCellError(`${row.relationId}:${cycle.id}`, parsed.reason)
-      toast.error(parsed.reason)
-      return
+    const sText = start.trim()
+    const eText = end.trim()
+    const parsed = sText === '' && eText === '' ? ({ kind: 'EMPTY' } as const) : parseCellInput(sText === '' || eText === '' ? (sText || eText) : `${sText}-${eText}`)
+    const result = payloadFromParsed(parsed, column, method)
+    if ('error' in result) {
+      onCellError(`${column.id}:${cycle.id}`, result.error)
+      toast.error(result.error)
+    } else {
+      commitCell(cycle, column, result)
     }
-    if (parsed.kind === 'EMPTY') {
-      commitOverlap(row.relationId, cycle, { status: 'UNREVIEWED', overlapDuration: null })
-      return
-    }
-    if (parsed.value < 0) {
-      const msg = 'مقدار هم‌پوشانی منفی مجاز نیست'
-      onCellError(`${row.relationId}:${cycle.id}`, msg)
-      toast.error(msg)
-      return
-    }
-    if (parsed.value === 0) {
-      if (computed !== null && computed > 1e-9) {
-        const msg = `بازهٔ واقعی این چرخه هم‌پوشانی ${formatTimeValue(computed, prefs)} دارد؛ ثبت «بدون هم‌پوشانی» ممکن نیست`
-        onCellError(`${row.relationId}:${cycle.id}`, msg)
-        toast.error(msg)
-        return
-      }
-      commitOverlap(row.relationId, cycle, { status: 'NO_OVERLAP', overlapDuration: 0 })
-      return
-    }
-    if (computed !== null && Math.abs(parsed.value - computed) > 1e-6) {
-      const msg = `مقدار واردشده (${parsed.value}) با هم‌پوشانی بازهٔ واقعی (${formatTimeValue(computed, prefs)}) نمی‌خواند`
-      onCellError(`${row.relationId}:${cycle.id}`, msg)
-      toast.error(msg)
-      return
-    }
-    commitOverlap(row.relationId, cycle, { status: 'OVERLAP', overlapDuration: parsed.value })
   }
 
-  const canEdit = editable && cmp.isComparable
+  const excluded = obs?.validityStatus === 'EXCLUDED'
+  const suspect = obs?.validityStatus === 'SUSPECT'
+  const invalid = obs?.validityStatus === 'INVALID'
+  const partialInterval = obs && (obs.startOffset !== null) !== (obs.endOffset !== null)
 
   return (
     <td
-      className={`border-b border-l p-0.5 text-center last:border-l-0 ${
-        cell.status === 'NO_OVERLAP' ? 'bg-green-soft/30' : ''
-      } ${cell.status === 'OVERLAP' ? 'bg-green-soft/40' : ''}`}
-      title={!cmp.isComparable ? (cmp.notComparableReason ?? undefined) : undefined}
+      className={`border-b border-l p-0.5 text-center align-middle last:border-l-0 ${
+        suspect ? 'bg-amber-soft/50' : ''
+      } ${invalid ? 'bg-red-soft/60' : ''} ${excluded ? 'bg-muted/60' : ''} ${partialInterval ? 'ring-1 ring-inset ring-amber/60' : ''}`}
     >
-      {canEdit ? (
-        <input
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          onBlur={commit}
-          aria-label={`هم‌پوشانی ${row.parentName} با ${row.otherName} چرخهٔ ${cycle.cycleNo}`}
-          className="num w-16 rounded-md border-0 bg-transparent px-0.5 py-2 text-center text-xs focus-visible:bg-brand-soft/40 focus-visible:outline-none"
-          inputMode="decimal"
-          dir="ltr"
-          placeholder="—"
-        />
-      ) : cell.status === 'UNREVIEWED' ? (
-        <span className="mx-auto block w-fit rounded border border-dashed border-amber/50 px-1 text-[9px] leading-5 text-amber/70" title={cmp.notComparableReason ?? 'بررسی‌نشده'}>
-          ؟
+      {editable ? (
+        // v1.5.2 §۵ — جهت گروه RTL: «از» در راست، «تا» در چپ؛ ورودی‌ها LTR
+        <span dir="rtl" className="inline-flex items-end justify-center gap-0.5 rounded-md border bg-background px-0.5 py-0.5">
+          <label className="flex min-w-0 flex-col items-center">
+            <span className="text-[8px] font-bold leading-none text-muted-foreground" aria-hidden>
+              از
+            </span>
+            <input
+              value={start}
+              onChange={(e) => setStart(e.target.value)}
+              onBlur={commit}
+              aria-label={`شروع بازهٔ عنصر موازی ${row.otherName} چرخهٔ ${cycle.cycleNo}`}
+              className="num w-11 rounded-sm border-0 bg-transparent px-0.5 py-1 text-center text-xs focus-visible:bg-brand-soft/40 focus-visible:outline-none"
+              inputMode="decimal"
+              dir="ltr"
+            />
+          </label>
+          <span className="pb-1.5 text-faint" aria-hidden>–</span>
+          <label className="flex min-w-0 flex-col items-center">
+            <span className="text-[8px] font-bold leading-none text-muted-foreground" aria-hidden>
+              تا
+            </span>
+            <input
+              value={end}
+              onChange={(e) => setEnd(e.target.value)}
+              onBlur={commit}
+              aria-label={`پایان بازهٔ عنصر موازی ${row.otherName} چرخهٔ ${cycle.cycleNo}`}
+              className="num w-11 rounded-sm border-0 bg-transparent px-0.5 py-1 text-center text-xs focus-visible:bg-brand-soft/40 focus-visible:outline-none"
+              inputMode="decimal"
+              dir="ltr"
+            />
+          </label>
         </span>
-      ) : cell.status === 'NO_OVERLAP' ? (
-        <span className="num block py-2 text-xs text-green">۰</span>
       ) : (
-        <span className="num block py-2 text-xs font-bold">
-          {formatTimeValue(cell.overlapDuration, prefs)}
-          <span className="ms-0.5 text-[9px] font-normal text-faint">s</span>
-        </span>
+        <span className="num block px-1 py-2 text-xs">{cellDisplayValue(obs, method, prefs)}</span>
       )}
-      {computed !== null && cell.status !== 'OVERLAP' && canEdit && (
-        <button
-          type="button"
-          onClick={() => commitOverlap(row.relationId, cycle, { status: 'OVERLAP', overlapDuration: computed })}
-          className="block w-full text-[8px] leading-3 text-brand/80"
-          title={`هم‌پوشانی محاسبه‌شده از بازهٔ واقعی: ${formatTimeValue(computed, prefs)} — برای اعمال لمس کنید`}
-        >
-          ≈ {formatTimeValue(computed, prefs)}
-        </button>
+      {obs?.startOffset != null && obs?.endOffset != null && obs.derivedDuration != null && (
+        <span className="block text-[9px] leading-3 text-faint">({formatTimeValue(obs.derivedDuration, prefs)})</span>
       )}
     </td>
   )

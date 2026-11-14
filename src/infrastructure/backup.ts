@@ -206,7 +206,15 @@ export async function restoreBackup(
   const markers = await db.deletionMarker.findMany()
 
   // ۴) اعمال نشانگرها روی داده بازیابی‌شده + پاکسازی ردیف‌های یتیم
-  const snapshot: Record<string, Record<string, unknown>[]> = { ...parsed.data }
+  // v1.5.2 §۲ — سازگاری پشتیبان‌های قدیمی: overlapRelation → parallelElementRelation؛
+  // observationOverlap (مقادیر عددی ماتریس حذف‌شده) نادیده گرفته می‌شود.
+  const legacyData = { ...(parsed.data as Record<string, Record<string, unknown>[]>) }
+  if (legacyData.overlapRelation && !legacyData.parallelElementRelation) {
+    legacyData.parallelElementRelation = legacyData.overlapRelation
+  }
+  delete legacyData.overlapRelation
+  delete legacyData.observationOverlap
+  const snapshot: Record<string, Record<string, unknown>[]> = { ...legacyData }
   const { removed: removedByMarkers } = applyDeletionMarkers(snapshot, markers)
   const { removed: removedOrphans } = enforceReferentialIntegrity(snapshot)
   const removed = removedByMarkers + removedOrphans

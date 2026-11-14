@@ -27,7 +27,6 @@ import { validateInterval } from '@/calculation/overlap'
 import { round12 } from '@/calculation/westinghouse'
 import { refreshOutliersForElement, refreshOutliersForActivity } from './outlier-service'
 import { markProjectCalculationsStale } from './calc-stale'
-import { applyOverlapUpdatesInTx } from './overlap-service'
 import type { Prisma, ElementObservation, CycleObservation, StudySession, WorkElement } from '@prisma/client'
 
 /** parse امن snapshot تشخیصی (بدون throw روی داده قدیمی) */
@@ -81,10 +80,6 @@ export interface CycleDto {
   hasSuspect: boolean
   hasIncompleteInterval: boolean
   observations: ObservationDto[]
-  /** v1.5.0 — نسخهٔ مجموعهٔ مقادیر هم‌پوشانی چرخه (کنترل هم‌زمانی زیرردیف‌ها) */
-  overlapRevision: number
-  /** v1.5.0 — مقادیر هم‌پوشانی این چرخه بر اساس relationId؛ نبود کلید = UNREVIEWED */
-  overlaps: Record<string, { status: string; overlapDuration: number | null; version: number }>
 }
 
 /** v1.5.1 §۷ — رابطهٔ موازی فعال که «حداقل یکی» از دو endpoint آن در Activity جلسه است.
@@ -166,6 +161,36 @@ async function loadActivityElements(activityId: string): Promise<WorkElement[]> 
     where: { activityId },
     orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
   })
+}
+
+/** v1.5.2 §۲-۸ — عناصر قابل‌نگارش برگهٔ یک فعالیت:
+ *  عناصر خود فعالیت + «عنصر مقابل» روابط موازی فعالِ مرتبط با این فعالیت
+ *  (زیرردیف‌ها). منبع مستقل از ماتریس؛ گروه‌بندی هویتی با شناسه‌های واقعی. */
+async function loadSheetWritableElements(activityId: string, projectId: string) {
+  const elements = await loadActivityElements(activityId)
+  const elementIds = elements.map((e) => e.id)
+  const relations =
+    elementIds.length > 0
+      ? await db.parallelElementRelation.findMany({
+          where: {
+            projectId,
+            isActive: true,
+            OR: [{ elementLowId: { in: elementIds } }, { elementHighId: { in: elementIds } }],
+          },
+          select: { elementLowId: true, elementHighId: true },
+        })
+      : []
+  const externalIds = [
+    ...new Set(relations.flatMap((r) => [r.elementLowId, r.elementHighId]).filter((id) => !elementIds.includes(id))),
+  ]
+  const external =
+    externalIds.length > 0
+      ? await db.workElement.findMany({ where: { id: { in: externalIds } } })
+      : []
+  return {
+    elements: [...elements, ...external],
+    activityElementIds: new Set(elementIds),
+  }
 }
 
 /** حالت ورود پیش‌فرض عنصر — v1.5.0: مفهوم فنی مستقل ( elementType legacy فقط برای مهاجرت) */
@@ -468,8 +493,8 @@ async function buildSessionDetail(sessionId: string): Promise<SessionDetailDto> 
 
   // v1.5.1 §۷ — روابط فعال که «حداقل یکی» از دو endpoint آن در Activity جاری است
   // به برگه ارسال می‌شوند (روابط بین‌فعالیت در برگهٔ هر دو Activity دیده می‌شوند) +
-  // مقادیر چرخه‌های جلسه و اطلاعات کامل عناصر پروژه، همه به‌صورت batch (بدون N+1).
-  const [cyclesRaw, activityValidCycles, relationsRaw, overlapsRaw, projectElementsRaw] = await Promise.all([
+  // اطلاعات کامل عناصر پروژه، همه به‌صورت batch (بدون N+1).
+  const [cyclesRaw, activityValidCycles, relationsRaw, projectElementsRaw] = await Promise.all([
     db.cycleObservation.findMany({
       where: { sessionId },
       orderBy: { cycleNo: 'asc' },
@@ -487,7 +512,7 @@ async function buildSessionDetail(sessionId: string): Promise<SessionDetailDto> 
       },
     }),
     elementIds.length > 0
-      ? db.overlapRelation.findMany({
+      ? db.parallelElementRelation.findMany({
           where: {
             projectId: session.activity.station.projectId,
             isActive: true,
@@ -496,8 +521,6 @@ async function buildSessionDetail(sessionId: string): Promise<SessionDetailDto> 
           orderBy: { createdAt: 'asc' },
         })
       : Promise.resolve([]),
-    // §۱۰ — همهٔ مقادیر هم‌پوشانی چرخه‌های جلسه در یک کوئری (بدون N+1)
-    db.observationOverlap.findMany({ where: { cycle: { sessionId } } }),
     // v1.5.1 §۷ — اطلاعات کامل عناصر پروژه برای نام/فعالیت/ایستگاه هر دو endpoint (batch)
     db.workElement.findMany({
       where: { activity: { station: { projectId: session.activity.station.projectId } } },
@@ -529,17 +552,6 @@ async function buildSessionDetail(sessionId: string): Promise<SessionDetailDto> 
     }
   })
 
-  // مقادیر هم‌پوشانی بر اساس cycleId گروه‌بندی می‌شوند (§۱۰ — گروه‌بندی با relationId و cycleId)
-  const overlapsByCycle = new Map<string, Record<string, { status: string; overlapDuration: number | null; version: number }>>()
-  for (const ov of overlapsRaw) {
-    let m = overlapsByCycle.get(ov.cycleId)
-    if (!m) {
-      m = {}
-      overlapsByCycle.set(ov.cycleId, m)
-    }
-    m[ov.relationId] = { status: ov.status, overlapDuration: ov.overlapDuration, version: ov.version }
-  }
-
   const perElement: Record<string, { calcCount: number; excludedCount: number; totalCount: number }> = {}
   for (const e of elements) perElement[e.id] = { calcCount: 0, excludedCount: 0, totalCount: 0 }
 
@@ -567,8 +579,6 @@ async function buildSessionDetail(sessionId: string): Promise<SessionDetailDto> 
       hasExcluded: ind.hasExcluded,
       hasSuspect: ind.hasSuspect,
       hasIncompleteInterval: ind.hasIncompleteInterval,
-      overlapRevision: c.overlapRevision,
-      overlaps: overlapsByCycle.get(c.id) ?? {},
       observations: c.observations.map((o) => ({
         id: o.id,
         workElementId: o.workElementId,
@@ -807,7 +817,6 @@ export async function addCycles(sessionId: string, input: CyclesAddInput) {
     const entries: {
       cycleNo: number
       notes?: string | null
-      overlaps?: Array<{ relationId: string; status: string; overlapDuration?: number | null; version?: number }>
       observations: NonNullable<CyclesAddInput['withData']>[number]['observations']
     }[] = []
     if (input.withData && input.withData.length > 0) {
@@ -816,7 +825,7 @@ export async function addCycles(sessionId: string, input: CyclesAddInput) {
         const no = !taken.has(wd.cycleNo) ? wd.cycleNo : nextNo++
         taken.add(no)
         if (no >= nextNo) nextNo = no + 1
-        entries.push({ cycleNo: no, notes: wd.notes, observations: wd.observations, overlaps: wd.overlaps })
+        entries.push({ cycleNo: no, notes: wd.notes, observations: wd.observations })
       }
     } else {
       for (let i = 0; i < (input.count ?? 1); i++) {
@@ -831,7 +840,11 @@ export async function addCycles(sessionId: string, input: CyclesAddInput) {
       created.push({ id: cycle.id, cycleNo: cycle.cycleNo })
 
       if (entry.observations && entry.observations.length > 0) {
-        const elements = await tx.workElement.findMany({ where: { activityId: session.activityId } })
+        // عناصر «کل پروژه» — مشاهدهٔ بازگردانی‌شده ممکن است متعلق به عنصر موازیِ
+        // فعالیت دیگر باشد (زیرردیف رابطه در همین برگه ثبت شده است)
+        const elements = await tx.workElement.findMany({
+          where: { activity: { station: { projectId: session.activity.station.projectId } } },
+        })
         const elementById = new Map(elements.map((e) => [e.id, e]))
         const cycleWithObs = { ...cycle, observations: [] as ElementObservation[] }
         for (const op of entry.observations) {
@@ -863,34 +876,6 @@ export async function addCycles(sessionId: string, input: CyclesAddInput) {
         }
       }
 
-      // §۸ ممیزی جلسه ۲ — بازگردانی مقادیر هم‌پوشانی چرخهٔ حذف‌شده (Undo):
-      // رکوردها با شناسهٔ چرخهٔ جدید بازسازی می‌شوند؛ relationId، status،
-      // overlapDuration و version معتبر حفظ می‌شوند و مقادیر سایر چرخه‌ها
-      // دست نمی‌خورد. رابطهٔ حذف‌شدهٔ کامل (فقط در حذف پروژه) نادیده گرفته می‌شود.
-      if (entry.overlaps && entry.overlaps.length > 0) {
-        for (const ov of entry.overlaps) {
-          const rel = await tx.overlapRelation.findUnique({
-            where: { id: ov.relationId },
-            select: { id: true, isActive: true },
-          })
-          if (!rel) continue
-          const normalized = ov.status === 'NO_OVERLAP' ? 0 : ov.status === 'UNREVIEWED' ? null : ov.overlapDuration ?? null
-          await tx.observationOverlap.create({
-            data: {
-              relationId: ov.relationId,
-              cycleId: cycle.id,
-              status: ov.status,
-              overlapDuration: normalized,
-              ...(ov.version != null ? { version: ov.version } : {}),
-            },
-          })
-        }
-        // نسخهٔ مجموعهٔ مقادیر چرخهٔ جدید نیز جلو می‌رود (§۱۰)
-        await tx.cycleObservation.update({
-          where: { id: cycle.id },
-          data: { overlapRevision: { increment: 1 } },
-        })
-      }
     }
 
     await recomputeSession(tx, sessionId)
@@ -921,9 +906,7 @@ export async function deleteCycle(cycleId: string) {
   assertSessionOpen(cycle.session)
 
   // دادهٔ حذف‌شده برای Undo برگردانده می‌شود — FR-07
-  // §۸ ممیزی جلسه ۲ — مقادیر هم‌پوشانی چرخه نیز همراه داده حذف‌شده ذخیره و حذف می‌شوند
   const observations = await db.elementObservation.findMany({ where: { cycleId } })
-  const overlaps = await db.observationOverlap.findMany({ where: { cycleId } })
   const removedData = {
     cycle: {
       cycleNo: cycle.cycleNo,
@@ -938,12 +921,6 @@ export async function deleteCycle(cycleId: string) {
         validityStatus: o.validityStatus,
         exclusionReason: o.exclusionReason,
       })),
-      overlaps: overlaps.map((o) => ({
-        relationId: o.relationId,
-        status: o.status,
-        overlapDuration: o.overlapDuration,
-        version: o.version,
-      })),
     },
   }
 
@@ -951,9 +928,6 @@ export async function deleteCycle(cycleId: string) {
   await db.$transaction(async (tx) => {
     await markDeleted(tx, 'ElementObservation', observations.map((o) => o.id))
     await markDeleted(tx, 'TimelineLane', laneIds)
-    // §۸ ممیزی جلسه ۲ — حذف صریح مقادیر هم‌پوشانی چرخه (بدون ردیف یتیم)
-    await markDeleted(tx, 'ObservationOverlap', overlaps.map((o) => o.id))
-    await tx.observationOverlap.deleteMany({ where: { cycleId } })
     await markDeleted(tx, 'CycleObservation', [cycleId])
     await tx.cycleObservation.delete({ where: { id: cycleId } })
     await recomputeSession(tx, cycle.sessionId)
@@ -1023,9 +997,27 @@ export async function updateCells(cycleId: string, input: CellsPutInput) {
   if (!cycle) throw new AppError('CYCLE_NOT_FOUND', 'چرخه یافت نشد.', 404)
   assertSessionOpen(cycle.session)
 
-  const elements = await loadActivityElements(cycle.session.activityId)
+  // v1.5.2 §۲-۸ — عناصر قابل‌نگارش این برگه: عناصر خود فعالیت + endpointهای
+  // روابط موازی فعال (زیرردیف‌ها) — حتی اگر در فعالیت/ایستگاه دیگری باشند.
+  const { elements, activityElementIds } = await loadSheetWritableElements(
+    cycle.session.activityId,
+    cycle.session.activity.station.projectId,
+  )
   const existingByElement = new Map(cycle.observations.map((o) => [o.workElementId, o]))
   const cellErrors = validateCellsAgainstMethod(input.cells, elements, cycle.session.timingMethod, existingByElement)
+  // زیرردیف رابطهٔ موازی فقط بازهٔ «از/تا» می‌پذیرد (نه مدت/قرائت ترتیبی)
+  // (zod optionalNumber غیبت را به null تبدیل می‌کند — پس null = مقدار ترتیبی نیست)
+  for (const cell of input.cells) {
+    if (activityElementIds.has(cell.workElementId)) continue
+    if (cell.rawDuration != null || cell.cumulativeReading != null) {
+      const el = elements.find((e) => e.id === cell.workElementId)
+      cellErrors.push({
+        workElementId: cell.workElementId,
+        code: 'PARALLEL_INTERVAL_ONLY',
+        message: `زیرردیف «${el?.name ?? 'عنصر موازی'}» فقط بازهٔ «از/تا» می‌پذیرد؛ مقدار ترتیبی مجاز نیست.`,
+      })
+    }
+  }
   if (cellErrors.length > 0) {
     throw new AppError('CELL_VALIDATION_FAILED', 'برخی سلول‌ها معتبر نیستند.', 422, { cellErrors })
   }
@@ -1063,11 +1055,11 @@ export async function updateCells(cycleId: string, input: CellsPutInput) {
   return { warnings, sessionId: cycle.sessionId }
 }
 
-// ═══════════════ Paste — FR-07 — v1.5.0 محور جدید (§۸.۳) ═══════════════
+// ═══════════════ Paste — FR-07 — v1.5.0 محور جدید (§۸.۳) / v1.5.2 §۲-۸ ═══════════════
 // ردیف‌های دادهٔ Paste = ردیف‌های شبکهٔ برگه (عنصر اصلی + زیرردیف رابطهٔ موازی)
 // ستون‌های داده = چرخه‌ها به ترتیب شماره. لنگر بر اساس شناسهٔ ردیف و شمارهٔ
-// چرخه است (نه اندیس قدیمی). زیرردیف رابطه: خالی→بدون تغییر، ۰→NO_OVERLAP،
-// مثبت→OVERLAP؛ مقایسه‌پذیری و تطابق با بازهٔ واقعی در Preview بررسی می‌شود.
+// چرخه است (نه اندیس قدیمی). زیرردیف رابطهٔ موازی: زمان عادی عنصر مقابل در
+// همین چرخه به‌صورت بازهٔ «از-تا» ثبت می‌شود (همان مسیر ذخیرهٔ ElementObservation).
 
 export type PasteCellStatus = 'OK' | 'WARN' | 'ERROR' | 'SKIP'
 
@@ -1084,16 +1076,11 @@ export interface PasteCellResult {
   relationId: string | null
   parentElementId: string | null
   otherElementId: string | null
-  /** مقادیر تجزیه‌شدهٔ عنصر */
+  /** مقادیر تجزیه‌شدهٔ عنصر (ردیف اصلی یا زیرردیف موازی) */
   rawDuration?: number | null
   cumulativeReading?: number | null
   startOffset?: number | null
   endOffset?: number | null
-  /** مقدار هم‌پوشانی زیرردیف: ۰→NO_OVERLAP / مثبت→OVERLAP */
-  overlapStatus?: 'UNREVIEWED' | 'NO_OVERLAP' | 'OVERLAP'
-  overlapDuration?: number | null
-  /** هم‌پوشانی محاسبه‌شده از بازهٔ واقعی — پیشنهاد §۵.۵ */
-  computedOverlap?: number | null
   /** پیش‌نمایش مدت محاسبه‌شده (پیوسته/بازه) */
   previewDerived?: number | null
   status: PasteCellStatus
@@ -1142,7 +1129,7 @@ export async function buildGridRows(activityId: string, projectId: string) {
   const elementIds = elements.map((e) => e.id)
   const relations =
     elementIds.length > 0
-      ? await db.overlapRelation.findMany({
+      ? await db.parallelElementRelation.findMany({
           where: {
             projectId,
             isActive: true,
@@ -1206,9 +1193,8 @@ function parsePasteCell(text: string): { kind: 'EMPTY' } | { kind: 'NUMBER'; val
 async function evaluatePaste(sessionId: string, input: PasteInput): Promise<PastePreviewResult> {
   const session = await loadSessionContext(sessionId)
   const projectId = session.activity.station.projectId
-  const { rows: gridRows, relations } = await buildGridRows(session.activityId, projectId)
+  const { rows: gridRows } = await buildGridRows(session.activityId, projectId)
   const elements = await loadActivityElements(session.activityId)
-  const relationById = new Map(relations.map((r) => [r.id, r]))
   const existingCycles = await db.cycleObservation.findMany({
     where: { sessionId },
     orderBy: { cycleNo: 'asc' },
@@ -1236,10 +1222,6 @@ async function evaluatePaste(sessionId: string, input: PasteInput): Promise<Past
       422,
     )
   }
-
-  // مشاهدات هر چرخهٔ موجود برای مقایسه‌پذیری و بازهٔ واقعی زیرردیف‌ها
-  const obsByCycleNo = new Map<number, typeof existingCycles[number]['observations']>()
-  for (const c of existingCycles) obsByCycleNo.set(c.cycleNo, c.observations)
 
   const result: PastePreviewResult = {
     startCycleNo: input.startCycleNo,
@@ -1311,7 +1293,8 @@ async function evaluatePaste(sessionId: string, input: PasteInput): Promise<Past
       }
 
       if (grow.kind === 'RELATION') {
-        // ── زیرردیف رابطهٔ موازی — §۸.۳: خالی/صفر/مثبت ──
+        // ── زیرردیف رابطهٔ موازی — v1.5.2 §۲-۸: زمان عادی عنصر مقابل در همین
+        //    چرخه، فقط به‌صورت بازهٔ «از-تا» (startOffset/endOffset) ──
         const parsed = parsePasteCell(text)
         if (parsed.kind === 'EMPTY') {
           base.status = 'SKIP'
@@ -1320,95 +1303,35 @@ async function evaluatePaste(sessionId: string, input: PasteInput): Promise<Past
           rowCells.push(base)
           continue
         }
-        if (parsed.kind === 'INTERVAL') {
+        if (parsed.kind === 'NUMBER') {
           base.status = 'ERROR'
-          base.message = 'زیرردیف هم‌پوشانی فقط یک عدد می‌پذیرد: خالی (بررسی‌نشده)، صفر (بدون هم‌پوشانی) یا مقدار مثبت.'
+          base.message = 'زیرردیف عنصر موازی فقط بازهٔ «از-تا» می‌پذیرد (مثل ۳-۹ یا 3-9).'
           result.errorCount++
           rowCells.push(base)
           continue
         }
         if (parsed.kind === 'INVALID') {
           base.status = 'ERROR'
-          base.message = 'مقدار عددی معتبر نیست (ارقام فارسی یا لاتین).'
+          base.message = 'مقدار عددی معتبر نیست (ارقام فارسی یا لاتین و بازهٔ «شروع-پایان»).'
           result.errorCount++
           rowCells.push(base)
           continue
         }
-        if (parsed.value < 0) {
+        // INTERVAL
+        const { start, end } = parsed
+        base.startOffset = start
+        base.endOffset = end
+        if (start < 0) {
           base.status = 'ERROR'
-          base.message = 'مقدار هم‌پوشانی منفی مجاز نیست.'
+          base.message = 'شروع بازه نمی‌تواند منفی باشد؛ آفست‌ها نسبت به مبدأ چرخه‌اند.'
           result.errorCount++
-          rowCells.push(base)
-          continue
-        }
-        if (isNew) {
+        } else if (end <= start) {
           base.status = 'ERROR'
-          base.message = 'چرخهٔ جدید هنوز مشاهده‌ای ندارد؛ ابتدا زمان عناصر را ثبت کنید تا این زوج قابل‌مقایسه شود.'
+          base.message = `پایان بازه (${end}) باید بزرگ‌تر از شروع آن (${start}) باشد.`
           result.errorCount++
-          rowCells.push(base)
-          continue
-        }
-        const rel = relationById.get(grow.relationId!)
-        const obsList = obsByCycleNo.get(cycleNo) ?? []
-        const byEl = new Map(obsList.map((o) => [o.workElementId, o]))
-        const oLow = rel ? byEl.get(rel.elementLowId) : undefined
-        const oHigh = rel ? byEl.get(rel.elementHighId) : undefined
-        const reasons: string[] = []
-        const lowName = rel && grow.elementId === rel.elementLowId ? grow.elementName : grow.otherElementName
-        const highName = rel && grow.elementId === rel.elementHighId ? grow.elementName : grow.otherElementName
-        if (rel) {
-          if (!oLow) reasons.push(`«${lowName}» در این چرخه مشاهده‌ای ندارد`)
-          else if (!((oLow.startOffset !== null && oLow.endOffset !== null) || (oLow.derivedDuration ?? oLow.rawDuration) !== null))
-            reasons.push(`«${lowName}» در این چرخه مدت یا بازهٔ قابل‌مقایسه ندارد`)
-          if (!oHigh) reasons.push(`«${highName}» در این چرخه مشاهده‌ای ندارد`)
-          else if (!((oHigh.startOffset !== null && oHigh.endOffset !== null) || (oHigh.derivedDuration ?? oHigh.rawDuration) !== null))
-            reasons.push(`«${highName}» در این چرخه مدت یا بازهٔ قابل‌مقایسه ندارد`)
-        }
-        if (reasons.length > 0) {
-          base.status = 'ERROR'
-          base.message = `در این چرخه قابل‌مقایسه نیست: ${reasons.join('؛ ')}`
-          result.errorCount++
-          rowCells.push(base)
-          continue
-        }
-        // بازهٔ واقعی — §۵.۵: O(A,B) = max(0, min(E_A,E_B) − max(S_A,S_B))
-        if (oLow && oHigh && oLow.startOffset !== null && oLow.endOffset !== null && oHigh.startOffset !== null && oHigh.endOffset !== null) {
-          const computed = round12(Math.max(0, Math.min(oLow.endOffset, oHigh.endOffset) - Math.max(oLow.startOffset, oHigh.startOffset)))
-          base.computedOverlap = computed
-          if (parsed.value === 0 && computed > 1e-9) {
-            base.status = 'ERROR'
-            base.message = `بازهٔ واقعی این چرخه هم‌پوشانی ${computed} دارد؛ ثبت «بدون هم‌پوشانی» با بازهٔ واقعی نمی‌خواند.`
-            result.errorCount++
-            rowCells.push(base)
-            continue
-          }
-          if (parsed.value > 0 && Math.abs(parsed.value - computed) > 1e-6) {
-            base.status = 'ERROR'
-            base.message = `مقدار واردشده (${parsed.value}) با هم‌پوشانی بازهٔ واقعی (${computed}) نمی‌خواند.`
-            result.errorCount++
-            rowCells.push(base)
-            continue
-          }
-        }
-        // سقف مدت عنصر کوتاه‌تر — §۵.۵
-        const dLow = oLow ? (oLow.derivedDuration ?? oLow.rawDuration) : null
-        const dHigh = oHigh ? (oHigh.derivedDuration ?? oHigh.rawDuration) : null
-        if (parsed.value > 0 && dLow !== null && dHigh !== null && parsed.value > Math.min(dLow, dHigh) + 1e-9) {
-          base.status = 'ERROR'
-          base.message = `مقدار (${parsed.value}) از مدت عنصر کوتاه‌تر (${Math.min(dLow, dHigh)}) بیشتر است.`
-          result.errorCount++
-          rowCells.push(base)
-          continue
-        }
-        if (parsed.value === 0) {
-          base.overlapStatus = 'NO_OVERLAP'
-          base.overlapDuration = 0
-          base.status = 'OK'
-          result.okCount++
         } else {
-          base.overlapStatus = 'OVERLAP'
-          base.overlapDuration = parsed.value
           base.status = 'OK'
+          base.previewDerived = round12(end - start)
           result.okCount++
         }
         rowCells.push(base)
@@ -1581,11 +1504,11 @@ export async function pasteCommit(sessionId: string, input: PasteInput) {
     )
   }
 
-  const elements = await loadActivityElements(session.activityId)
+  // v1.5.2 §۲-۸ — عناصر قابل‌نگارش: عناصر فعالیت + endpointهای مقابل روابط فعال
+  const { elements } = await loadSheetWritableElements(session.activityId, projectId)
   const elementById = new Map(elements.map((e) => [e.id, e]))
   const committedCells: PasteCellResult[] = []
   const skippedCells: PasteCellResult[] = []
-  const overlapPendingAudits: Array<Parameters<typeof recordAudit>[0]> = []
 
   await db.$transaction(async (tx) => {
     // ایجاد چرخه‌های موردنیاز — ستون‌های Paste (چرخه‌ها) به ترتیب
@@ -1646,11 +1569,9 @@ export async function pasteCommit(sessionId: string, input: PasteInput) {
       }
     }
 
-    // ۲) اعمال سلول‌های زیرردیف‌های رابطه — §۸.۳/§۵.۵
-    //    پس از اعمال سلول‌های عنصر در همان تراکنش؛ اعتبارسنجی کامل
-    //    (مقایسه‌پذیری + محلی + سه‌تایی + solver + بازهٔ واقعی) روی
-    //    snapshot پس از اعمال انجام می‌شود (applyOverlapUpdatesInTx).
-    const overlapUpdatesByCycle = new Map<number, Array<{ relationId: string; status: 'UNREVIEWED' | 'NO_OVERLAP' | 'OVERLAP'; overlapDuration?: number | null }>>()
+    // ۲) اعمال سلول‌های زیرردیف‌های رابطه — v1.5.2 §۲-۸:
+    //    زمان عادی «عنصر مقابل» در همین چرخه به‌صورت بازه؛ همان مسیر
+    //    ذخیرهٔ ElementObservation ردیف‌های اصلی (بدون زیرسامانهٔ جداگانه).
     for (const prow of preview.rows) {
       if (prow.kind !== 'RELATION') continue
       for (const cell of prow.cells) {
@@ -1658,32 +1579,28 @@ export async function pasteCommit(sessionId: string, input: PasteInput) {
           skippedCells.push(cell)
           continue
         }
-        if (cell.status === 'SKIP' || !cell.relationId || !cell.overlapStatus) continue
-        const arr = overlapUpdatesByCycle.get(cell.cycleNo) ?? []
-        arr.push({ relationId: cell.relationId, status: cell.overlapStatus, overlapDuration: cell.overlapDuration ?? null })
-        overlapUpdatesByCycle.set(cell.cycleNo, arr)
+        if (cell.status === 'SKIP' || !cell.otherElementId) continue
+        const el = elementById.get(cell.otherElementId)
+        if (!el) continue
+        const cycle = await cycleOf(cell.cycleNo)
+        if (!cycle) continue
+        await applyCellToObservation(
+          tx,
+          cycle,
+          {
+            workElementId: el.id,
+            startOffset: cell.startOffset ?? undefined,
+            endOffset: cell.endOffset ?? undefined,
+          },
+          el,
+          session
+        )
         committedCells.push(cell)
       }
-    }
-    const nameOf = (id: string) => elementById.get(id)?.name ?? id
-    for (const [cycleNo, updates] of overlapUpdatesByCycle) {
-      const cycleId = cycleIds.get(cycleNo)
-      if (!cycleId) continue
-      const { pendingAudits } = await applyOverlapUpdatesInTx(tx, {
-        cycleId,
-        projectId,
-        updates,
-        nameOf,
-      })
-      overlapPendingAudits.push(...pendingAudits)
     }
 
     await recomputeSession(tx, sessionId)
   })
-
-  for (const entry of overlapPendingAudits) {
-    await recordAudit(entry)
-  }
 
   await recordAudit({
     entityType: 'StudySession',

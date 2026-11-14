@@ -1,7 +1,7 @@
-// روابط موازی عناصر کاری — فهرست/ایجاد (سرویس مرکزی) — جلسه ۲ §۲/§۴
+// روابط موازی عناصر کاری — فهرست/ایجاد (سرویس مرکزی) — v1.5.2 §۲-۹
 import { NextRequest } from 'next/server'
 import { handle, ok, readJson } from '@/lib/api-helpers'
-import { listRelations, createRelation, getOverlapMatrix } from '@/application/overlap-service'
+import { listRelations, createRelation } from '@/application/parallel-relation-service'
 import { z } from 'zod'
 
 type Ctx = { params: Promise<{ id: string }> }
@@ -24,7 +24,6 @@ export function POST(req: NextRequest, ctx: Ctx) {
     const { id } = await ctx.params
     const body = createSchema.parse(await readJson(req))
     const relation = await createRelation(id, body.elementAId, body.elementBId)
-    const matrix = await getOverlapMatrix(id, null)
-    return ok({ relation, matrix }, 201)
+    return ok({ relation }, 201)
   })
 }

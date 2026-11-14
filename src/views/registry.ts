@@ -13,7 +13,6 @@ export type RegistryView =
   | 'allowances'
   | 'westinghouse'
   | 'timing'
-  | 'matrix'
   | 'analysis'
   | 'charts'
   | 'dashboard'
@@ -31,7 +30,6 @@ export const registry: Record<RegistryView, ViewComponent> = {
   allowances: lazy(() => import('./project/GroupsView')),
   westinghouse: lazy(() => import('./project/WestinghouseView')),
   timing: lazy(() => import('./project/TimingView')),
-  matrix: lazy(() => import('./project/MatrixView')),
   analysis: lazy(() => import('./project/AnalysisView')),
   charts: lazy(() => import('./project/ChartsView')),
   dashboard: lazy(() => import('./project/DashboardView')),

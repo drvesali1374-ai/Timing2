@@ -186,7 +186,6 @@ export const STUDY_STAGES = [
   { key: 'allowances', label: 'مجازها و الونس‌ها', desc: 'تعریف مرکزی الونس، تخصیص سلسله‌مراتبی و گروه‌های فعالیت' },
   { key: 'westinghouse', label: 'ارزیابی وستینگهاوس', desc: 'جدول مرجع و ارزیابی عناصر کاری' },
   { key: 'timing', label: 'زمان‌سنجی', desc: 'جلسه، جدول چرخه‌محور، Paste از Excel' },
-  { key: 'matrix', label: 'ماتریس هم‌پوشانی', desc: 'روابط موازی عناصر کاری و مقادیر هر چرخه' },
   { key: 'analysis', label: 'تحلیل نتایج', desc: 'آمار، داده غیرعادی و مقایسه اپراتورها' },
   { key: 'charts', label: 'نمودار فرایند', desc: 'OPC و FPC با گره‌های فعالیت' },
   { key: 'dashboard', label: 'داشبورد', desc: 'کارت‌های خلاصه و شاخص‌های تخصصی' },

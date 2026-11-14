@@ -45,9 +45,9 @@ async function main() {
   for (const s of [sA, sA2, sB, sC]) await req('POST', `/api/sessions/${s}/cycles`, { count: 3 })
 
   // رابطه‌ها: A1-A2 هم‌فعالیت؛ A1-B1 بین‌فعالیت (هم‌ایستگاه)؛ B1-C1 بین‌فعالیت + بین‌ایستگاه
-  const r1 = await req('POST', `/api/projects/${projectId}/overlap/relations`, { elementAId: A1, elementBId: A2 })
-  const r2 = await req('POST', `/api/projects/${projectId}/overlap/relations`, { elementAId: A1, elementBId: B1 })
-  const r3 = await req('POST', `/api/projects/${projectId}/overlap/relations`, { elementAId: B1, elementBId: C1 })
+  const r1 = await req('POST', `/api/projects/${projectId}/parallel-relations`, { elementAId: A1, elementBId: A2 })
+  const r2 = await req('POST', `/api/projects/${projectId}/parallel-relations`, { elementAId: A1, elementBId: B1 })
+  const r3 = await req('POST', `/api/projects/${projectId}/parallel-relations`, { elementAId: B1, elementBId: C1 })
   console.log('relations:', r1.status, r2.status, r3.status)
 
   // دادهٔ چرخه‌ها: A1=[0,10) A2=[4,10) در همهٔ چرخه‌های sA → هم‌پوشانی ۶
@@ -60,13 +60,8 @@ async function main() {
       ],
     })
   }
-  // مقدار قطعی A1-A2 در چرخهٔ ۱ = ۶ (قابل‌مقایسه)
-  await req('PUT', `/api/cycles/${shA.cycles[0].id}/overlaps`, {
-    updates: [{ relationId: r1.data.relation.id, status: 'OVERLAP', overlapDuration: 6 }],
-  })
-  await req('PUT', `/api/cycles/${shA.cycles[1].id}/overlaps`, {
-    updates: [{ relationId: r1.data.relation.id, status: 'NO_OVERLAP' }],
-  })
+  // v1.5.2 §۲ — مقادیر عددی هم‌پوشانی حذف شد؛ زمان عناصر موازی از همان
+  // سلول‌های بازه‌ای بالا خوانده می‌شود (بازهٔ A1-A2 در هر دو چرخه ثبت شد)
 
   console.log(JSON.stringify({ projectId, actA, actB, actC, A1, A2, B1, C1, sA, sA2, sB, sC, relA1B1: r2.data.relation.id, relB1C1: r3.data.relation.id }, null, 2))
 }

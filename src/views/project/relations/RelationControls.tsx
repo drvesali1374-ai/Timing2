@@ -1,13 +1,14 @@
 'use client'
 
 // ═══════════════════════════════════════════════════════════
-// کنترل‌های مشترک مدیریت رابطهٔ موازی — v1.5.0 §۶ / v1.5.1 §۲
+// کنترل‌های مشترک مدیریت رابطهٔ موازی — v1.5.0 §۶ / v1.5.1 §۲ / v1.5.2 §۲
 // افزودن/آرشیو/بازگردانی رابطه از «یک» کامپوننت مشترک؛
 // هم برگهٔ زمان‌سنجی (دکمهٔ «+ موازی» و زیرردیف‌ها) و هم فرم
 // ویرایش عنصر کاری از همین‌جا استفاده می‌کنند — منطق ایجاد
 // رابطه در دو محل جداگانه کپی نمی‌شود.
 // v1.5.1 — نامزدها از «تمام Activityهای همان پروژه» انتخاب می‌شوند؛
 // گروه‌بندی بر اساس شناسهٔ واقعی ایستگاه/فعالیت (Station ← Activity ← Element).
+// v1.5.2 §۲ — مستقل از ماتریس هم‌پوشانی (حذف‌شده)؛ فقط parallelApi.
 // ═══════════════════════════════════════════════════════════
 import { useMemo, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
@@ -16,7 +17,7 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { ArchiveRestore, Check, Factory, Network, Plus, Trash2 } from 'lucide-react'
-import { overlapApi } from '@/lib/api/endpoints'
+import { parallelApi } from '@/lib/api/endpoints'
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
 import { cn } from '@/lib/utils'
 
@@ -30,13 +31,15 @@ export interface RelationCandidate {
   stationName: string
 }
 
-/** باطل‌سازی کش‌های مرتبط پس از تغییر رابطه — §۷ */
+/** باطل‌سازی کش‌های مرتبط پس از تغییر رابطه — §۷
+ *  v1.5.2 §۵ — به‌روزرسانی فوری برگهٔ زمان‌سنجی بدون نیاز به Refresh */
 export function useRelationInvalidation(projectId: string) {
   const qc = useQueryClient()
   return () => {
     void qc.invalidateQueries({ queryKey: ['element-relations'] })
-    void qc.invalidateQueries({ queryKey: ['overlap-matrix', projectId] })
     void qc.invalidateQueries({ queryKey: ['timing-sheet'] })
+    void qc.invalidateQueries({ queryKey: ['timing-sessions'] })
+    void qc.invalidateQueries({ queryKey: ['elements-catalog', projectId] })
   }
 }
 
@@ -87,7 +90,7 @@ export function AddRelationControl({
   }, [candidates, elementId])
 
   const create = useMutation({
-    mutationFn: () => overlapApi.createRelation(projectId, { elementAId: elementId, elementBId: selected! }),
+    mutationFn: () => parallelApi.createRelation(projectId, { elementAId: elementId, elementBId: selected! }),
     onSuccess: () => {
       invalidate()
       onAdded?.()
@@ -95,7 +98,7 @@ export function AddRelationControl({
       setConfirming(false)
       setOpen(false)
       toast.success('رابطهٔ موازی افزوده شد', {
-        description: 'زیرردیف مربوطه در برگهٔ زمان‌سنجی (برای همهٔ اپراتورهای هر دو فعالیت درگیر)، فرم هر دو عنصر و ماتریس نمایش داده می‌شود.',
+        description: 'زیرردیف مربوطه بلافاصله در برگهٔ زمان‌سنجی (برای همهٔ اپراتورهای هر دو فعالیتِ درگیر) و فرم هر دو عنصر نمایش داده می‌شود.',
       })
     },
     onError: (err) => toast.error(err instanceof Error ? err.message : 'ایجاد رابطه ناموفق بود'),
@@ -190,8 +193,8 @@ export function AddRelationControl({
               {isCrossActivity
                 ? ` (رابطهٔ بین‌فعالیت — «${selectedEntry?.activityName ?? '؟'}» / «${selectedEntry?.stationName ?? '؟'}»)`
                 : ''}
-              ، زیرردیف هم‌پوشانی در برگهٔ زمان‌سنجی (برای همهٔ اپراتورهای هر دو فعالیتِ درگیر)، فرم هر دو عنصر و ماتریس مرکزی
-              نمایش داده می‌شود. ادامه می‌دهید؟
+              ، زیرردیف زمان‌سنجی این عنصر در برگهٔ هر دو فعالیتِ درگیر و برای همهٔ اپراتورها نمایش داده می‌شود و
+              زمان آن به‌صورت بازهٔ «از/تا» در همین چرخه‌ها قابل ثبت خواهد بود. ادامه می‌دهید؟
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -226,13 +229,13 @@ export function ArchiveRelationControl({
   const [confirming, setConfirming] = useState(false)
   const invalidate = useRelationInvalidation(projectId)
   const archive = useMutation({
-    mutationFn: () => overlapApi.archiveRelation(relationId),
+    mutationFn: () => parallelApi.archiveRelation(relationId),
     onSuccess: () => {
       invalidate()
       onDone?.()
       setConfirming(false)
       toast.success('رابطه آرشیو شد', {
-        description: 'مقادیر تاریخی آن حفظ می‌شود و از بخش «روابط آرشیوشده» قابل بازگردانی است.',
+        description: 'زیرردیف آن از برگهٔ زمان‌سنجی حذف می‌شود؛ زمان‌های ثبت‌شدهٔ عناصر دست‌نخورده می‌مانند و از بخش «روابط آرشیوشده» قابل بازگردانی است.',
       })
     },
     onError: (err) => toast.error(err instanceof Error ? err.message : 'آرشیو ناموفق بود'),
@@ -256,9 +259,9 @@ export function ArchiveRelationControl({
           <DialogHeader>
             <DialogTitle>حذف رابطهٔ موازی</DialogTitle>
             <DialogDescription>
-              رابطهٔ {label} آرشیو می‌شود؛ زیرردیف آن در برگهٔ زمان‌سنجی (هر دو سمت و همهٔ اپراتورهای فعالیت) و
-              ماتریس فعال خارج می‌شود. مقادیر تاریخی چرخه‌ها حذف نمی‌شوند و با بازگردانی رابطه برمی‌گردند. ادامه
-              می‌دهید؟
+              رابطهٔ {label} آرشیو می‌شود و زیرردیف آن از برگهٔ زمان‌سنجی (هر دو سمت و همهٔ اپراتورهای فعالیت)
+              حذف می‌شود. زمان‌های ثبت‌شدهٔ خود عناصر دست‌نخورده می‌مانند و با بازگردانی رابطه، زیرردیف دوباره
+              نمایش داده می‌شود. ادامه می‌دهید؟
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -293,12 +296,12 @@ export function RestoreRelationControl({
 }) {
   const invalidate = useRelationInvalidation(projectId)
   const restore = useMutation({
-    mutationFn: () => overlapApi.restoreRelation(relationId),
+    mutationFn: () => parallelApi.restoreRelation(relationId),
     onSuccess: () => {
       invalidate()
       onDone?.()
       toast.success('رابطه بازگردانی شد', {
-        description: 'زیرردیف‌ها و مقادیر تاریخی آن دوباره نمایش داده می‌شوند.',
+        description: 'زیرردیف آن دوباره در برگهٔ زمان‌سنجی نمایش داده می‌شود.',
       })
     },
     onError: (err) => toast.error(err instanceof Error ? err.message : 'بازگردانی ناموفق بود'),

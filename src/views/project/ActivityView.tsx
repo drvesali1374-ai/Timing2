@@ -79,7 +79,7 @@ import { cn } from '@/lib/utils'
 import TimingView from './TimingView'
 import AnalysisContent from './analysis/AnalysisContent'
 import { AllowanceSection } from './allowances/AllowanceSection'
-import ParallelRelationsSection from './matrix/ParallelRelationsSection'
+import ParallelRelationsSection from './relations/ParallelRelationsSection'
 import { ProcessSymbol } from '@/components/common/ProcessSymbol'
 
 type Prefs = ReturnType<typeof useDisplayPrefs>

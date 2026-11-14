@@ -208,11 +208,11 @@ export function PasteDialog({
             <HelpDot
               label="ورود اطلاعات از Excel"
               content={{
-                what: 'ثبت هم‌زمان چند سطر و ستون از Excel در برگهٔ زمان‌سنجی — با چیدمان جدید: هر سطر داده یک ردیف شبکه (عنصر یا زیرردیف هم‌پوشانی) و هر ستون داده یک چرخه.',
+                what: 'ثبت هم‌زمان چند سطر و ستون از Excel در برگهٔ زمان‌سنجی — با چیدمان جدید: هر سطر داده یک ردیف شبکه (عنصر یا زیرردیف عنصر موازی) و هر ستون داده یک چرخه.',
                 input:
                   'دو مسیر مستقل: (۱) محدودهٔ موردنظر را در Excel کپی کنید (Ctrl+C) و همین‌جا بچسبانید (Ctrl+V)؛ (۲) «قالب Excel» این جلسه را دانلود کنید، تکمیل کنید و فایل را بارگذاری کنید.',
                 example:
-                  'اگر ۳ عنصر دارید و ۵ چرخه Paste می‌کنید، یک محدودهٔ ۳ سطر × ۵ ستون کپی کنید. برای عنصر هم‌زمان به‌جای یک عدد «۳-۹» (شروع تا پایان) و برای زیرردیف هم‌پوشانی خالی/۰/مقدار مثبت بنویسید.',
+                  'اگر ۳ عنصر دارید و ۵ چرخه Paste می‌کنید، یک محدودهٔ ۳ سطر × ۵ ستون کپی کنید. برای عنصر هم‌زمان و زیرردیف عنصر موازی، به‌جای یک عدد بازهٔ «۳-۹» (شروع تا پایان نسبت به مبدأ چرخه) بنویسید.',
                 note: 'هیچ داده‌ای بدون پیش‌نمایش و تأیید شما ثبت نمی‌شود؛ خطای هر سلول با محل و علت دقیق نمایش داده می‌شود. بارگذاری فایل هم فقط ورودی همین مسیر را می‌سازد و به‌صورت مستقیم ذخیره نمی‌کند.',
               }}
             />
@@ -227,7 +227,7 @@ export function PasteDialog({
               <>
                 مبدأ: چرخهٔ {formatInt(activeAnchor.cycleNo, prefs)}
                 {anchorElementName
-                  ? `، ردیف «${anchorRelation ? `هم‌پوشانی (${anchorElementName} ↔ ${anchorRelation.elementLowId === activeAnchor.elementId ? anchorRelation.elementHighName : anchorRelation.elementLowName})` : anchorElementName}»`
+                  ? `، ردیف «${anchorRelation ? `عنصر موازی ${anchorRelation.elementLowId === activeAnchor.elementId ? anchorRelation.elementHighName : anchorRelation.elementLowName} (زیر ${anchorElementName})` : anchorElementName}»`
                   : '، بدون ردیف (ابتدا سلولی از برگه انتخاب کنید)'}
               </>
             )}
@@ -278,8 +278,8 @@ export function PasteDialog({
                 className="num min-h-24 w-full rounded-xl border bg-background p-3 font-mono text-xs focus-visible:outline-2 focus-visible:outline-ring"
               />
               <p className="text-[11px] text-muted-foreground">
-                هر سطر = یک ردیف شبکه (عنصر یا زیرردیف هم‌پوشانی) — هر ستون = یک چرخه — جداکنندهٔ ستون: Tab — اعشار:
-                نقطه یا «٫» — بازهٔ عنصر: «۳-۹» — زیرردیف هم‌پوشانی: خالی/۰/مقدار مثبت — خالی = بدون تغییر
+                هر سطر = یک ردیف شبکه (عنصر یا زیرردیف عنصر موازی) — هر ستون = یک چرخه — جداکنندهٔ ستون: Tab — اعشار:
+                نقطه یا «٫» — بازهٔ از/تا: «۳-۹» (هر دو نوع ردیف) — خالی = بدون تغییر
               </p>
               <Button
                 variant="outline"
@@ -390,7 +390,7 @@ export function PasteDialog({
                         <td className="px-2 py-1.5 font-bold">
                           {row.kind === 'RELATION' ? (
                             /* v1.5.2 §۸ — فلش رو به چپ به طرف عنصر والد */
-                            <span className="text-[11px] text-muted-foreground">↲ هم‌پوشانی با {row.otherElementName}</span>
+                            <span className="text-[11px] text-muted-foreground">↲ موازی: {row.otherElementName}</span>
                           ) : (
                             row.elementName
                           )}
@@ -416,15 +416,9 @@ export function PasteDialog({
                                 <p className="num">
                                   {cell.status === 'SKIP'
                                     ? '—'
-                                    : cell.relationId
-                                      ? cell.overlapStatus === 'NO_OVERLAP'
-                                        ? '۰ (بدون هم‌پوشانی)'
-                                        : cell.overlapStatus === 'OVERLAP'
-                                          ? formatTimeValue(cell.overlapDuration ?? null, prefs)
-                                          : '—'
-                                      : cell.startOffset !== undefined
-                                        ? `${formatTimeValue(cell.startOffset ?? 0, prefs)}–${formatTimeValue(cell.endOffset ?? 0, prefs)}`
-                                        : formatTimeValue(
+                                    : cell.startOffset !== undefined
+                                      ? `${formatTimeValue(cell.startOffset ?? 0, prefs)}–${formatTimeValue(cell.endOffset ?? 0, prefs)}`
+                                      : formatTimeValue(
                                             cell.cumulativeReading ?? cell.rawDuration ?? cell.previewDerived ?? null,
                                             prefs
                                           )}
@@ -432,7 +426,6 @@ export function PasteDialog({
                                 {(() => {
                                   const isOkWithDerived =
                                     cell.status === 'OK' &&
-                                    !cell.relationId &&
                                     cell.cumulativeReading !== undefined &&
                                     cell.previewDerived !== undefined &&
                                     cell.previewDerived !== null

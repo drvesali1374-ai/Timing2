@@ -232,13 +232,9 @@ export async function deleteProject(projectId: string) {
     await tx.ratingAssessment.deleteMany({
       where: { workElement: { activity: { station: { projectId } } } },
     })
-    // §۹ ممیزی جلسه ۲ — حذف صریح روابط هم‌پوشانی و مقادیر چرخه‌ای پروژه؛
-    // مدل OverlapRelation FK مستقیم به Project ندارد و cascade معمولی آن را
-    // پاک نمی‌کند — بدون این پاک‌سازی، رکورد یتیم باقی می‌ماند.
-    await tx.observationOverlap.deleteMany({
-      where: { relation: { projectId } },
-    })
-    await tx.overlapRelation.deleteMany({
+    // حذف صریح روابط موازی پروژه؛ ParallelElementRelation FK مستقیم به
+    // Project ندارد و cascade معمولی آن را پاک نمی‌کند.
+    await tx.parallelElementRelation.deleteMany({
       where: { projectId },
     })
     // حذف اتمیک (Cascade کلیدهای خارجی)

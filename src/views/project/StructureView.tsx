@@ -89,7 +89,7 @@ import { useDisplayPrefs } from '@/store/display-store'
 import { formatDate, formatDateTime, formatInt } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { AllowanceSection } from './allowances/AllowanceSection'
-import ParallelRelationsSection from './matrix/ParallelRelationsSection'
+import ParallelRelationsSection from './relations/ParallelRelationsSection'
 import { ProcessSymbol } from '@/components/common/ProcessSymbol'
 
 type Prefs = ReturnType<typeof useDisplayPrefs>

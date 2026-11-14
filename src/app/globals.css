@@ -244,17 +244,6 @@
     border-bottom-color: color-mix(in srgb, var(--border) 85%, transparent);
     box-shadow: 0 8px 20px -16px rgba(15, 23, 42, 0.35);
   }
-  /* جلسه ۲ — قطر ماتریس هم‌پوشانی: خط‌دار و غیرقابل ویرایش (§۱۱) */
-  .matrix-diagonal {
-    background-image: repeating-linear-gradient(
-      45deg,
-      color-mix(in srgb, var(--muted-foreground) 22%, transparent),
-      color-mix(in srgb, var(--muted-foreground) 22%, transparent) 2px,
-      transparent 2px,
-      transparent 7px
-    );
-    cursor: default;
-  }
   .chip-icon {
     display: inline-flex;
     align-items: center;
