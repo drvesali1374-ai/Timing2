@@ -214,13 +214,13 @@
 
     /* ── سربرگ (خارج از چاپ — در چاپ فقط div.print-report دیده می‌شود) ── */
     function buildHeader() {
-      root.appendChild(U.h('header', { class: 'flex items-center gap-3 mb-4 no-print' },
+      root.appendChild(UI.stickyHeading(U.h('header', { class: 'flex items-center gap-3 mb-4 no-print' },
         U.h('span', { class: 'chip-icon' }, U.icon('fileText')),
         U.h('div', { class: 'min-w-0' },
           U.h('div', { class: 'flex items-center gap-1' },
             U.h('h1', { class: 'text-xl font-extrabold', text: 'مرکز گزارش‌ها و خروجی‌ها' }),
             UI.helpDot('مرکز گزارش‌ها', HELP_REPORTS)),
-          U.h('p', { class: 'text-sm text-muted', text: 'خروجی Excel برای تحلیل و گزارش رسمی برای چاپ/PDF' }))));
+          U.h('p', { class: 'text-sm text-muted', text: 'خروجی Excel برای تحلیل و گزارش رسمی برای چاپ/PDF' })))))
     }
 
     /* ── نوار چاپ (فقط وقتی داده‌ای برای گزارش هست) ── */

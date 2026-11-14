@@ -222,11 +222,11 @@
       }
 
       /* ── سربرگ ── */
-      root.appendChild(U.h('header', { class: 'flex items-center gap-3' },
+      root.appendChild(UI.stickyHeading(U.h('header', { class: 'flex items-center gap-3' },
         U.h('span', { class: 'chip-icon' }, U.icon('workflow')),
         U.h('div', { class: 'flex items-center gap-2 min-w-0' },
           U.h('h1', { class: 'text-xl font-extrabold', text: 'نمودار فرایند — OPC / FPC' }),
-          UI.helpDot('نمودار فرایند', HELP_CHART))));
+          UI.helpDot('نمودار فرایند', HELP_CHART)))))
 
       /* ── زبانهٔ OPC / FPC ── */
       root.appendChild(UI.tabsBar([

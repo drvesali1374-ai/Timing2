@@ -76,11 +76,11 @@
     var page = U.h('div', { class: 'mx-auto w-full flex flex-col gap-4', style: { maxWidth: '820px' } });
 
     // ── سربرگ ──
-    page.appendChild(U.h('div', { class: 'flex items-center gap-3' },
+    page.appendChild(UI.stickyHeading(U.h('div', { class: 'flex items-center gap-3' },
       U.h('span', { class: 'chip-icon' }, U.icon('settings2')),
       U.h('div', null,
         U.h('h1', { class: 'text-xl font-extrabold', text: 'مشخصات پروژه' }),
-        U.h('p', { class: 'text-sm text-muted', text: 'مشخصات مطالعه، تنظیمات محاسبات و عملیات پروژه' }))));
+        U.h('p', { class: 'text-sm text-muted', text: 'مشخصات مطالعه، تنظیمات محاسبات و عملیات پروژه' })))))
 
     // ═══════════ بخش ۱ — مشخصات مطالعه با ذخیره خودکار (FR-23) ═══════════
     var form = {

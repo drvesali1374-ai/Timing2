@@ -93,7 +93,8 @@
       var rated = 0;
       matrix.forEach(function (r) { if (r.rated) rated++; });
 
-      container.appendChild(U.h('div', { class: 'flex flex-wrap items-center justify-between gap-3' },
+      // سربرگ بخش — چسبان زیر نوار اصلی (v1.5.2 §۸)
+      container.appendChild(UI.stickyHeading(U.h('div', { class: 'flex flex-wrap items-center justify-between gap-3' },
         U.h('div', { class: 'flex items-center gap-3' },
           U.h('span', { class: 'chip-icon' }, U.icon('gauge')),
           U.h('div', null,
@@ -101,7 +102,7 @@
             U.h('p', { class: 'text-sm text-muted flex flex-wrap items-center gap-1' },
               U.h('span', { dir: 'ltr' }, U.h('code', { class: 'inline' }, 'R = 1 + Skill + Effort + Conditions + Consistency')),
               ' — ' + U.formatInt(rated) + ' از ' + U.formatInt(total) + ' عنصر ارزیابی شده',
-              UI.helpDot('ارزیابی وستینگهاوس', MAIN_HELP))))));
+              UI.helpDot('ارزیابی وستینگهاوس', MAIN_HELP)))))));
 
       container.appendChild(U.h('div', { class: 'mt-4' }, UI.tabsBar([
         { key: 'assess', label: 'ارزیابی عناصر' },
@@ -164,10 +165,11 @@
     }
 
     // بخش فعالیت در ماتریس — جدول عناصر با دکمه ارزیابی
+    // v1.5.2 §۷.۱: فاصله عمودی عنوان فعالیت از خط جداکننده هدر ایستگاه افزایش یافت
     function activitySection(x) {
       var a = x.a;
       var sym = DB.CONST.PROCESS_TYPE_SYMBOLS[a.processType] || '';
-      var sec = U.h('div', { class: 'mb-3' },
+      var sec = U.h('div', { class: 'mb-3 mt-4' },
         U.h('div', { class: 'flex flex-wrap items-center gap-2 mb-2' },
           U.h('h4', { class: 'text-sm font-bold' }, (sym ? sym + ' ' : '') + a.name)));
       sec.appendChild(UI.table(['عنصر کاری', 'وضعیت ارزیابی', ''], function (tbody) {

@@ -60,6 +60,13 @@
     return U.h('tr', null, cells.map(function (c) { return U.h('td', null, c === undefined || c === null ? null : c); }));
   }
 
+  /** بلوک چیپ خلاصه — عنوان بالای مقدار (v1.5.2 §۴.۱) */
+  function summaryBlock(label, valueEl) {
+    return U.h('div', { class: 'flex flex-col justify-center gap-0.5 px-3 py-1.5', style: { background: 'var(--card)', border: '1px solid color-mix(in srgb, var(--border) 60%, transparent)', borderRadius: 'var(--radius)' } },
+      U.h('span', { class: 'text-[10px] font-bold text-muted', text: label }),
+      valueEl);
+  }
+
   var SCOPE_TITLES = {
     PROJECT: 'سطح خط تولید (همه ایستگاه‌ها و فعالیت‌ها)',
     STATION: 'سطح ایستگاه (فعالیت‌ها و عناصر زیرمجموعه)',
@@ -74,20 +81,22 @@
     var activeCount = defs.filter(function (d) { return d.isActive && !d.isArchived; }).length;
     var archivedCount = defs.filter(function (d) { return d.isArchived; }).length;
 
-    var header = U.h('header', { class: 'flex flex-wrap items-center justify-between gap-3' },
+    var header = UI.stickyHeading(U.h('header', { class: 'flex flex-wrap items-center justify-between gap-3' },
       U.h('div', { class: 'flex items-center gap-3' },
-        U.h('span', { class: 'chip-icon brand', 'aria-hidden': 'true' }, U.icon('tags')),
+        // v1.5.2 §۴.۳/§۵.۴: آیکون Percent برای بخش الونس‌ها
+        U.h('span', { class: 'chip-icon brand', 'aria-hidden': 'true' }, U.icon('percent')),
         U.h('div', null,
           U.h('h1', { class: 'text-xl font-extrabold', text: 'مجازها و الونس‌ها' }),
           U.h('p', { class: 'num text-xs text-muted' },
             activeCount.toLocaleString('fa-IR') + ' تعریف فعال' +
             (archivedCount > 0 ? ' · ' + archivedCount.toLocaleString('fa-IR') + ' بایگانی‌شده' : '') +
-            ' · ' + groups.length.toLocaleString('fa-IR') + ' گروه فعالیت'))));
+            ' · ' + groups.length.toLocaleString('fa-IR') + ' گروه فعالیت')))));
 
     var tabs = UI.tabsBar([
       { key: 'definitions', label: 'تعریف‌های مرکزی', icon: 'layers' },
-      { key: 'project', label: 'الونس‌های خط تولید', icon: 'listPlus' },
-      { key: 'groups', label: 'گروه‌های فعالیت', icon: 'folderTree' },
+      // v1.5.2 §۵.۴: آیکون‌های یکپارچه — SlidersHorizontal / ListTree
+      { key: 'project', label: 'الونس‌های خط تولید', icon: 'sliders' },
+      { key: 'groups', label: 'گروه‌های فعالیت', icon: 'listTree' },
     ], activeTab, function (k) { activeTab = k; render(container, projectId); });
 
     var body = U.h('div', { class: 'space-y-4' });
@@ -299,16 +308,66 @@
   // ═══════════════ زبانه الونس‌های خط تولید ═══════════════
 
   function renderProjectTab(body, projectId) {
-    body.appendChild(U.h('div', { class: 'card card-premium p-4' },
-      U.h('div', { class: 'flex flex-wrap items-start justify-between gap-2' },
-        UI.helpDot('الونس‌های سطح خط تولید', PROJECT_SCOPE_HELP),
-        U.h('span', { class: 'text-xs leading-6 text-muted', text: 'این الونس‌ها به تمام ایستگاه‌ها، فعالیت‌ها و عناصر کاری ارث می‌رسند؛ در هر سطح پایین‌تر قابل جایگزینی یا حذف از ارث‌بری‌اند.' }))));
+    // v1.5.2 §۵.۱: کارت توضیحی مستقل حذف شد؛ راهنمای ظریف یک‌خطی با HelpDot
+    body.appendChild(U.h('div', { class: 'flex items-start gap-2 px-1 mb-3 text-[11px] leading-5 text-muted' },
+      UI.helpDot('الونس‌های سطح خط تولید', PROJECT_SCOPE_HELP),
+      U.h('p', { text: 'این الونس‌ها به تمام ایستگاه‌ها، فعالیت‌ها و عناصر کاری ارث می‌رسند؛ در هر سطح پایین‌تر قابل جایگزینی یا حذف از ارث‌بری‌اند.' })));
     var sectionEl = U.h('div');
     body.appendChild(sectionEl);
     g.T2VIEWS._allowanceSection(sectionEl, projectId, 'PROJECT', projectId);
   }
 
   // ═══════════════ زبانه گروه‌های فعالیت — فقط طبقه‌بندی ═══════════════
+  // v1.5.2 §۵.۲: فهرست کامل فعالیت‌ها با «نمایش همه / نمایش کمتر»؛
+  // نام فعالیت‌ها بدون بریده‌شدن (wrap) و تایپوگرافی بازطراحی‌شده.
+
+  /** آستانه نمایش فهرست جمع‌وجور قبل از دکمهٔ «نمایش همه» */
+  var GROUP_COLLAPSED_COUNT = 5;
+  /** وضعیت باز/بستهٔ فهرست فعالیت‌های هر گروه — پایدار بین رندرها */
+  var _groupExpanded = {}; // groupId -> bool
+
+  function groupCard(grp, acts, projectId, onDelete, redraw) {
+    var expanded = !!_groupExpanded[grp.id];
+    var showAll = expanded || acts.length <= GROUP_COLLAPSED_COUNT;
+    var visibleActs = showAll ? acts : acts.slice(0, GROUP_COLLAPSED_COUNT);
+    var hiddenCount = acts.length - visibleActs.length;
+
+    var actList = U.h('ul', { class: 'mt-3 space-y-1 pt-3', style: { borderTop: '1px solid var(--border)' } });
+    visibleActs.forEach(function (a) {
+      actList.appendChild(U.h('li', null,
+        U.h('button', {
+          class: 'flex w-full items-baseline gap-1.5 rounded-md px-1.5 py-1 text-right text-xs leading-5 hover:bg-brand-soft',
+          onclick: function () { g.T2APP.navigate('/p/' + projectId + '/activity/' + a.id); },
+        },
+          // نام فعالیت با wrap کامل — بدون بریده‌شدن (v1.5.2 §۵.۲)
+          U.h('span', { class: 'min-w-0 flex-1 break-words', text: a.name }),
+          U.h('span', { class: 'shrink-0 text-faint', text: '— ' + a.stationName }))));
+    });
+    // نمایش همه فعالیت‌ها / نمایش کمتر — دسترسی به فهرست کامل (§۵.۲)
+    if (acts.length > GROUP_COLLAPSED_COUNT) {
+      actList.appendChild(U.h('li', null,
+        U.h('button', {
+          class: 'num flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-[11px] font-bold',
+          style: { color: 'var(--brand)' },
+          'aria-expanded': String(expanded),
+          onclick: function () { _groupExpanded[grp.id] = !expanded; redraw(); },
+        },
+          U.icon(expanded ? 'chevronUp' : 'chevronDown'),
+          expanded ? 'نمایش کمتر' : 'نمایش همه فعالیت‌ها (' + hiddenCount.toLocaleString('fa-IR') + ' مورد دیگر)')));
+    }
+
+    return U.h('div', { class: 'flex flex-col rounded-xl p-4', style: { border: '1px solid color-mix(in srgb, var(--border) 60%, transparent)', background: 'color-mix(in srgb, var(--surface-2) 50%, transparent)' } },
+      U.h('div', { class: 'flex items-start justify-between gap-2' },
+        U.h('div', { class: 'min-w-0 flex-1' },
+          U.h('p', { class: 'text-[15px] font-bold leading-6', text: grp.name }),
+          grp.description ? U.h('p', { class: 'mt-1 text-xs leading-5 text-muted', text: grp.description }) : null,
+          U.h('p', { class: 'num mt-1.5 text-[11px] leading-4 text-faint', text: acts.length.toLocaleString('fa-IR') + ' فعالیت · ساخته‌شده ' + U.formatDateTime(grp.createdAt) })),
+        U.h('button', {
+          class: 'icon-btn sm danger shrink-0', 'aria-label': 'حذف گروه ' + grp.name,
+          onclick: function () { onDelete(grp, acts); },
+        }, U.icon('trash'))),
+      acts.length > 0 ? actList : null);
+  }
 
   function renderGroupsTab(body, projectId) {
     var wrap = U.h('div');
@@ -328,7 +387,8 @@
 
       var head = U.h('div', { class: 'card-head flex flex-wrap items-center justify-between gap-3 p-4 pb-3' },
         U.h('div', { class: 'flex items-center gap-2.5' },
-          U.h('span', { class: 'chip-icon cyan', 'aria-hidden': 'true' }, U.icon('folderTree')),
+          // v1.5.2 §۵.۴: ListTree — آیکون یکپارچهٔ گروه‌های فعالیت
+          U.h('span', { class: 'chip-icon cyan', 'aria-hidden': 'true' }, U.icon('listTree')),
           U.h('div', null,
             U.h('h2', { class: 'text-sm font-extrabold', text: 'گروه‌های فعالیت' }),
             U.h('p', { class: 'text-[11px] text-muted', text: 'طبقه‌بندی فعالیت‌های مشابه — منبع محاسبه نیست' })),
@@ -343,26 +403,10 @@
           U.h('p', { class: 'mx-auto mt-1 max-w-lg text-xs leading-5 text-muted', text: 'گروه‌ها صرفاً برچسب طبقه‌بندی فعالیت‌ها هستند؛ الونس‌ها از مدل سلسله‌مراتبی (خط → ایستگاه → فعالیت → عنصر) اعمال می‌شوند.' }),
           U.h('button', { class: 'btn btn-brand btn-sm mt-3 gap-1.5', type: 'button', onclick: openCreateGroup }, U.icon('plus'), 'اولین گروه')));
       } else {
-        var grid = U.h('div', { class: 'grid gap-2 sm:grid-cols-2' });
+        var grid = U.h('div', { class: 'grid gap-3 sm:grid-cols-2' });
         groups.forEach(function (grp) {
           var acts = actsByGroup[grp.id] || [];
-          var actList = U.h('ul', { class: 'mt-2.5 space-y-1 pt-2', style: { borderTop: '1px solid var(--border)' } });
-          acts.slice(0, 4).forEach(function (a) {
-            actList.appendChild(U.h('li', null,
-              U.h('button', {
-                class: 'w-full truncate rounded-md px-1.5 py-1 text-right text-xs hover:bg-brand-soft',
-                onclick: function () { g.T2APP.navigate('/p/' + projectId + '/activity/' + a.id); },
-              }, a.name, U.h('span', { class: 'text-faint', text: ' — ' + a.stationName }))));
-          });
-          if (acts.length > 4) actList.appendChild(U.h('li', { class: 'num px-1.5 text-[10px] text-faint', text: 'و ' + (acts.length - 4).toLocaleString('fa-IR') + ' فعالیت دیگر…' }));
-          grid.appendChild(U.h('div', { class: 'rounded-xl p-3.5', style: { border: '1px solid var(--border)', background: 'var(--surface-2)' } },
-            U.h('div', { class: 'flex items-start justify-between gap-2' },
-              U.h('div', { class: 'min-w-0 flex-1' },
-                U.h('p', { class: 'truncate text-sm font-bold', text: grp.name }),
-                grp.description ? U.h('p', { class: 'mt-0.5 text-xs leading-5 text-muted', text: grp.description }) : null,
-                U.h('p', { class: 'num mt-1.5 text-[11px] text-faint', text: acts.length.toLocaleString('fa-IR') + ' فعالیت · ساخته‌شده ' + U.formatDateTime(grp.createdAt) })),
-              U.h('button', { class: 'icon-btn sm danger shrink-0', 'aria-label': 'حذف گروه ' + grp.name, onclick: function () { confirmDeleteGroup(grp, acts, draw); } }, U.icon('trash'))),
-            acts.length > 0 ? actList : null));
+          grid.appendChild(groupCard(grp, acts, projectId, function (g2, acts2) { confirmDeleteGroup(g2, acts2, draw); }, draw));
         });
         content.appendChild(grid);
       }
@@ -486,7 +530,8 @@
       // هدر
       var head = U.h('div', { class: 'card-head flex flex-wrap items-center justify-between gap-3 p-4 pb-3' },
         U.h('div', { class: 'flex items-center gap-2.5' },
-          U.h('span', { class: 'chip-icon brand', 'aria-hidden': 'true' }, U.icon('tags')),
+          // v1.5.2 §۴.۳: آیکون Percent — مفهوم الونس/درصد
+          U.h('span', { class: 'chip-icon brand', 'aria-hidden': 'true' }, U.icon('percent')),
           U.h('div', null,
             U.h('h3', { class: 'text-sm font-extrabold', text: 'الونس‌ها و زمان‌های مجاز' }),
             U.h('p', { class: 'text-[11px] text-muted', text: SCOPE_TITLES[scopeType] })),
@@ -529,21 +574,23 @@
             U.h('span', { class: 'text-xs text-muted' }, row.sourceScopeLabel || '—',
               row.sourceScopeType ? U.h('span', { class: 'block text-[10px] text-faint', text: DB.CONST.ALLOWANCE_SCOPE_LABELS[row.sourceScopeType] || '' }) : null),
             U.h('span', null, UI.badge(badge.label, badge.tone),
-              row.note ? U.h('span', { class: 'mt-0.5 block max-w-44 text-[10px] leading-4 text-faint', title: row.note, text: row.note }) : null),
+              // v1.5.2 §۴.۲: فقط Badge کوتاه؛ توضیح کامل از طریق پاپ‌اور «توضیح»
+              row.note ? UI.noteDot(row.note, 'توضیح وضعیت ' + row.title) : null),
             menu,
           ];
         });
         content.appendChild(UI.table(['عنوان الونس', 'نوع و مبنا', 'مقدار مؤثر', 'مبدأ', 'وضعیت', 'عملیات'], tableRows.map(tr)));
 
-        // خلاصه — §۶
-        content.appendChild(U.h('div', { class: 'flex flex-wrap items-center gap-x-4 gap-y-1.5 rounded-xl px-3.5 py-2.5 text-xs', style: { background: 'var(--surface-2)' } },
-          U.h('span', { class: 'font-bold' }, 'خلاصه: ',
-            U.h('span', { class: 'num text-brand', text: summary.count.toLocaleString('fa-IR') + ' الونس مؤثر' })),
-          U.h('span', { class: 'num' }, 'جمع درصدها (A): ', U.h('b', { class: 'text-brand', text: U.formatPercent(summary.totalPercent) })),
-          U.h('span', { class: 'num' }, 'زمان ثابت هر اجرا: ', U.h('b', { text: fmtSeconds(summary.perExecutionSeconds) })),
-          U.h('span', { class: 'num' }, 'زمان ثابت هر چرخه: ', U.h('b', { text: fmtSeconds(summary.perCycleSeconds) }),
-            U.h('span', { class: 'text-faint', text: ' (جدا از ST عناصر)' })),
-          UI.badge(data.settings.formula, 'outline')));
+        // خلاصه — بلوک‌های مستقل و منظم با فاصله کافی (v1.5.2 §۴.۱)
+        content.appendChild(U.h('div', { class: 'rounded-xl px-3.5 py-3', style: { background: 'var(--surface-2)' } },
+          U.h('p', { class: 'mb-2 text-[11px] font-extrabold text-muted', text: 'خلاصه محاسبات الونس' }),
+          U.h('div', { class: 'flex flex-wrap items-stretch gap-2' },
+            summaryBlock('الونس مؤثر', U.h('span', { class: 'num text-[13px] font-extrabold', style: { color: 'var(--brand)' }, text: summary.count.toLocaleString('fa-IR') })),
+            summaryBlock('جمع درصدها (A)', U.h('span', { dir: 'ltr', class: 'num text-[13px] font-extrabold text-right', style: { color: 'var(--brand)' }, text: U.formatPercent(summary.totalPercent) })),
+            summaryBlock('زمان ثابت هر اجرا', U.h('span', { class: 'num text-[13px] font-extrabold', text: fmtSeconds(summary.perExecutionSeconds) })),
+            summaryBlock('زمان ثابت هر چرخه (جدا از ST عناصر)', U.h('span', { class: 'num text-[13px] font-extrabold', text: fmtSeconds(summary.perCycleSeconds) })),
+            // فرمول — نمایش چپ‌به‌راست صحیح (v1.5.2 §۴.۱)
+            U.h('div', { dir: 'ltr', class: 'num flex items-center justify-center self-stretch px-3.5 py-1.5 text-[12px] font-extrabold', style: { color: 'var(--brand)', background: 'color-mix(in srgb, var(--brand-soft) 40%, transparent)', border: '1px dashed color-mix(in srgb, var(--brand) 40%, transparent)', borderRadius: 'var(--radius)' }, text: data.settings.formula }))));
 
         // نیازمند قاعده تجمیع — §۲.۳
         if (needsAgg.length > 0) {

@@ -154,31 +154,105 @@
   }
 
   // ── HelpDot ──
+  // v1.5.2 §۶.۱: پاپ‌اور در لایهٔ ثابت سطح body رندر می‌شود (خارج از
+  // والد‌های دارای overflow-hidden/stacking context) و با z-index 9999
+  // همیشه روی کارت‌ها و دیالوگ‌هاست. §۶.۲: فقط کلیک روی خود آیکون باز می‌کند.
   var openHelp = null;
+  function positionFixedPop(anchor, pop, offset) {
+    var r = anchor.getBoundingClientRect();
+    pop.style.visibility = 'hidden';
+    var w = pop.offsetWidth, h = pop.offsetHeight;
+    var x = r.left + r.width / 2 - w / 2;
+    x = Math.max(8, Math.min(x, window.innerWidth - w - 8));
+    var y = r.top - h - (offset || 6);
+    if (y < 8) y = r.bottom + (offset || 6);
+    pop.style.left = x + 'px';
+    pop.style.top = y + 'px';
+    pop.style.visibility = '';
+  }
+  function trackOpenPop(anchor, pop) {
+    var reposition = function () { if (document.body.contains(pop)) positionFixedPop(anchor, pop); };
+    window.addEventListener('scroll', reposition, true);
+    window.addEventListener('resize', reposition);
+    return function untrack() {
+      window.removeEventListener('scroll', reposition, true);
+      window.removeEventListener('resize', reposition);
+    };
+  }
   function helpDot(label, content) {
     if (!content) return null;
-    var pop = U.h('div', { class: 'helpdot-pop', dir: 'rtl', onclick: function (e) { e.stopPropagation(); } },
-      U.h('div', { class: 'hd-head', text: 'راهنمای ' + (label || 'این مورد') }),
-      U.h('div', { class: 'hd-sec' }, U.h('b', { text: 'این مورد چیست؟' }), U.h('div', { text: content.what || '' })),
-      content.input ? U.h('div', { class: 'hd-sec' }, U.h('b', { text: 'چه چیزی وارد کنم؟' }), U.h('div', { text: content.input })) : null,
-      content.example ? U.h('div', { class: 'hd-example' }, U.h('b', { class: 'block', text: 'مثال' }), U.h('div', { text: content.example })) : null,
-      content.note ? U.h('div', { class: 'hd-note' }, U.h('b', { text: 'نکته مهم' }), U.h('div', { style: { color: 'var(--foreground)' }, text: content.note })) : null
-    );
     var btn = U.h('button', { class: 'helpdot', type: 'button', 'aria-label': 'راهنمای ' + (label || ''), title: 'راهنما' }, U.icon('circleHelp'));
-    btn.appendChild(pop);
     btn.addEventListener('click', function (e) {
       e.stopPropagation();
-      if (openHelp && openHelp.pop === pop) { closeHelp(); return; }
+      if (openHelp && openHelp.btn === btn) { closeHelp(); return; }
       closeHelp();
-      pop.style.display = 'block';
-      openHelp = { btn: btn, pop: pop };
+      var pop = U.h('div', { class: 'helpdot-pop is-open', dir: 'rtl', onclick: function (e) { e.stopPropagation(); } },
+        U.h('div', { class: 'hd-head', text: 'راهنمای ' + (label || 'این مورد') }),
+        U.h('div', { class: 'hd-sec' }, U.h('b', { text: 'این مورد چیست؟' }), U.h('div', { text: content.what || '' })),
+        content.input ? U.h('div', { class: 'hd-sec' }, U.h('b', { text: 'چه چیزی وارد کنم؟' }), U.h('div', { text: content.input })) : null,
+        content.example ? U.h('div', { class: 'hd-example' }, U.h('b', { class: 'block', text: 'مثال' }), U.h('div', { text: content.example })) : null,
+        content.note ? U.h('div', { class: 'hd-note' }, U.h('b', { text: 'نکته مهم' }), U.h('div', { style: { color: 'var(--foreground)' }, text: content.note })) : null
+      );
+      document.body.appendChild(pop);
+      positionFixedPop(btn, pop);
+      var untrack = trackOpenPop(btn, pop);
+      openHelp = { btn: btn, pop: pop, untrack: untrack };
     });
     return btn;
   }
   function closeHelp() {
-    if (openHelp) { openHelp.pop.style.display = 'none'; openHelp = null; }
+    if (openHelp) {
+      if (openHelp.untrack) openHelp.untrack();
+      if (openHelp.pop.parentNode) openHelp.pop.parentNode.removeChild(openHelp.pop);
+      openHelp = null;
+    }
   }
   document.addEventListener('click', function () { closeHelp(); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeHelp(); });
+
+  // ── پاپ‌اور کوچک «توضیح» — معادل Tooltip وب (v1.5.2 §۴.۲) ──
+  var openNote = null;
+  function noteDot(text, ariaLabel) {
+    var btn = U.h('button', {
+      class: 'note-dot', type: 'button',
+      'aria-label': ariaLabel || 'توضیح وضعیت',
+    }, U.icon('circleHelp'), 'توضیح');
+    btn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      if (openNote && openNote.btn === btn) { closeNote(); return; }
+      closeNote();
+      var pop = U.h('div', { class: 'note-pop is-open', dir: 'rtl', onclick: function (ev) { ev.stopPropagation(); } },
+        U.h('p', { style: { margin: 0, lineHeight: '1.75' }, text: text }));
+      document.body.appendChild(pop);
+      positionFixedPop(btn, pop);
+      var untrack = trackOpenPop(btn, pop);
+      openNote = { btn: btn, pop: pop, untrack: untrack };
+    });
+    return btn;
+  }
+  function closeNote() {
+    if (openNote) {
+      if (openNote.untrack) openNote.untrack();
+      if (openNote.pop.parentNode) openNote.pop.parentNode.removeChild(openNote.pop);
+      openNote = null;
+    }
+  }
+  document.addEventListener('click', function () { closeNote(); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeNote(); });
+
+  // ── عنوان چسبان بخش‌های اصلی — معادل SectionHeading وب (v1.5.2 §۸) ──
+  // عنصر باید top: calc(3.5rem - 1px) داشته باشد (کلاس sticky-heading در app.css).
+  function stickyHeading(el) {
+    if (!el || typeof IntersectionObserver === 'undefined') return el;
+    el.classList.add('sticky-heading');
+    el.setAttribute('data-stuck', 'false');
+    var io = new IntersectionObserver(function (entries) {
+      var e = entries[0];
+      el.setAttribute('data-stuck', (e.intersectionRatio < 1 && e.boundingClientRect.top < 56) ? 'true' : 'false');
+    }, { threshold: [1], rootMargin: '-56px 0px 0px 0px' });
+    io.observe(el);
+    return el;
+  }
 
   // ── Badge / EmptyState ──
   function badge(text, variant, iconName) {
@@ -505,22 +579,43 @@
     return barChart({ data: data, ariaLabel: ariaLabel || 'هیستوگرام توزیع', formatValue: function (v) { return String(Math.round(v)); }, maxBarSize: 64 });
   }
 
-  // ── نماد فرایندی (ProcessSymbol) — جلسه ۲ §۱۵.۲ ──
+  // ── نماد فرایندی (ProcessSymbol) — بازطراحی v1.5.2 §۳ ──
   // renderer واحد در همهٔ نماها (ساختار، فعالیت، ماتریس، نمودار)؛ CSS patch پراکنده ممنوع.
+  // شکل SVG توپر بدون قاب/حاشیه/پس‌زمینهٔ بیرونی؛ رنگ مستقیماً روی خود شکل.
   // رشتهٔ HTML برمی‌گرداند — با U.h('span', { html: UI.processSymbol(...) }) استفاده کنید.
   var PROCESS_SYMBOL_META = {
-    OPERATION: { glyph: '○', label: 'عملیات' },
-    INSPECTION: { glyph: '□', label: 'بازرسی' },
-    TRANSPORT: { glyph: '⇨', label: 'حمل‌ونقل' },
-    DELAY: { glyph: 'D', label: 'تأخیر' },
-    STORAGE: { glyph: '▽', label: 'انبارش' },
-    MATERIAL_INPUT: { glyph: '⬡', label: 'ورودی مواد/قطعات' },
+    OPERATION: { label: 'عملیات' },
+    INSPECTION: { label: 'بازرسی' },
+    TRANSPORT: { label: 'حمل‌ونقل' },
+    DELAY: { label: 'تأخیر' },
+    STORAGE: { label: 'انبارش' },
+    MATERIAL_INPUT: { label: 'ورودی مواد/قطعات' },
+  };
+  /** مسیر SVG توپر هر شکل (viewBox 24×24) — عیناً هم‌ارز نسخهٔ وب */
+  var PROCESS_SYMBOL_SHAPES = {
+    OPERATION: '<circle cx="12" cy="12" r="8.5"/>',
+    INSPECTION: '<rect x="4.5" y="4.5" width="15" height="15" rx="2"/>',
+    TRANSPORT: '<path d="M4 11.1 12.4 4.3v4.3H20v5h-7.6v4.3z"/>',
+    DELAY: '<path d="M5 5h7.6a7 7 0 0 1 0 14H5z"/>',
+    STORAGE: '<path d="M4.5 5.5h15L12 19.6z"/>',
+    MATERIAL_INPUT: '<path d="M12 3.6 19.7 8v8L12 20.4 4.3 16V8z"/>',
+  };
+  /** رنگ خود شکل بر اساس نوع — قرارداد رنگی واحد (v1.5.2 §۳: روی خود شکل) */
+  var PROCESS_SYMBOL_COLOR = {
+    OPERATION: 'var(--brand)',
+    INSPECTION: 'var(--amber)',
+    TRANSPORT: 'var(--muted-foreground)',
+    DELAY: 'var(--red)',
+    STORAGE: 'var(--green)',
+    MATERIAL_INPUT: 'var(--cyan)',
   };
   function processSymbol(nodeType, size, titleOverride) {
     var s = size === 'sm' || size === 'md' || size === 'lg' ? size : 'md';
-    var m = PROCESS_SYMBOL_META[nodeType] || PROCESS_SYMBOL_META.OPERATION;
-    return '<span class="psym psym-' + s + ' psym-' + (PROCESS_SYMBOL_META[nodeType] ? nodeType : 'OPERATION') +
-      '" title="' + U.escapeHtml(titleOverride || m.label) + '" aria-hidden="true">' + m.glyph + '</span>';
+    var key = PROCESS_SYMBOL_META[nodeType] ? nodeType : 'OPERATION';
+    var label = titleOverride || PROCESS_SYMBOL_META[key].label;
+    return '<svg viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg" class="psym psym-' + s +
+      '" style="color:' + PROCESS_SYMBOL_COLOR[key] + '" role="img" aria-label="' + U.escapeHtml(label) + '">' +
+      '<title>' + U.escapeHtml(label) + '</title>' + PROCESS_SYMBOL_SHAPES[key] + '</svg>';
   }
 
   // ── جدول کمکی ──
@@ -547,5 +642,6 @@
     collapsibleCard: collapsibleCard, projectStatusBadge: projectStatusBadge, stageStatusBadge: stageStatusBadge,
     barChart: barChart, lineChart: lineChart, donutChart: donutChart, histogramChart: histogramChart,
     table: table, processSymbol: processSymbol,
+    noteDot: noteDot, stickyHeading: stickyHeading,
   };
 })(typeof window !== 'undefined' ? window : globalThis);
