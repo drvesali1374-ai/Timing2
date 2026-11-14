@@ -13,14 +13,17 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
-  ArrowRight,
   ClipboardPaste,
+  FileSpreadsheet,
+  ListTree,
   Lock,
   LockOpen,
   Plus,
   Redo2,
   Target,
+  Timer,
   Undo2,
+  UserRound,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -81,10 +84,16 @@ export function SheetPanel({
   sessionId,
   prefs,
   onBack,
+  canCreateSession,
+  onCreateSession,
 }: {
   sessionId: string
   prefs: Prefs
+  /** بازگشت به فهرست جلسات همان فعالیت — v1.5.2 §۴-۲ */
   onBack: () => void
+  /** امکان ایجاد جلسهٔ جدید از هدر واحد — v1.5.2 §۴ */
+  canCreateSession?: boolean
+  onCreateSession?: () => void
 }) {
   const qc = useQueryClient()
   const isMobile = useIsMobile()
@@ -531,36 +540,63 @@ export function SheetPanel({
 
   return (
     <div className="animate-view-in space-y-4">
-      {/* سربرگ لاغر برگه + نوار ابزار — §۱۲.۱ */}
-      <div className="card-premium overflow-hidden">
-        <div className="card-head flex flex-wrap items-center justify-between gap-x-3 gap-y-2 px-3 py-2">
-          <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <Button variant="outline" size="sm" onClick={onBack} className="shrink-0 gap-1.5">
-              <ArrowRight className="size-4" aria-hidden />
-              بازگشت به جلسات
-            </Button>
-            <h2 className="flex shrink-0 items-center gap-1 text-sm font-extrabold">
-              برگهٔ زمان‌سنجی
-              <HelpDot label="برگهٔ زمان‌سنجی" content={sheetHelp} />
-            </h2>
-            <Badge variant="outline" className="num shrink-0">
-              {TIMING_METHOD_LABELS[sheet.session.timingMethod]}
-            </Badge>
-            {sheet.session.status === 'CLOSED' && (
-              <Badge className="shrink-0 gap-1 bg-muted text-faint">
-                <Lock className="size-3" aria-hidden /> بسته
-              </Badge>
-            )}
-            <span className="num shrink-0 text-[11px] text-muted-foreground">
-              {formatInt(sheet.stats.sessionCycles, prefs)} چرخه در این جلسه
+      {/* ═══ هدر واحد برگه — v1.5.2 §۴ ═══
+          ادغام زیرهدر فعالیت و سربرگ برگه در یک نوار چسبان:
+          ردیف ۱ = هویت فعالیت/ایستگاه + بازگشت به جلسات + اپراتور +
+          روش + وضعیت + SaveIndicator + جلسهٔ جدید + بستن این جلسه؛
+          ردیف ۲ = عنوان «برگهٔ زمان‌سنجی» + شمار چرخه + نوار ابزار.
+          z-40: بالاتر از سربرگ/ستون چسبان داخل جدول (z-20/z-30). */}
+      <div className="glass-bar sticky top-14 z-40 space-y-2 rounded-xl border px-3 py-2 shadow-[var(--shadow-1)]">
+        {/* ردیف ۱ — هویت و اقدامات جلسه */}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-brand-soft text-brand">
+              <Timer className="size-4" aria-hidden />
             </span>
+            <div className="min-w-0">
+              <p className="truncate text-sm font-extrabold leading-5">{sheet.activity.name}</p>
+              <p className="truncate text-[11px] leading-4 text-muted-foreground">
+                ایستگاه {sheet.activity.stationName}
+              </p>
+            </div>
           </div>
-          <div className="flex shrink-0 items-center gap-2">
+
+          {/* §۴-۲ — بازگشت به فهرست جلساتِ همان فعالیت (انتخاب فعالیت حفظ می‌شود) */}
+          <Button variant="outline" size="sm" onClick={onBack} className="shrink-0 gap-1.5">
+            <ListTree className="size-4" aria-hidden />
+            بازگشت به جلسات
+          </Button>
+
+          <span className="inline-flex min-w-0 shrink-0 items-center gap-1.5 rounded-full bg-brand-soft px-3 py-1 text-xs font-bold text-brand">
+            <UserRound className="size-3.5 shrink-0" aria-hidden />
+            <span className="truncate">{sheet.operator.displayName}</span>
+          </span>
+
+          <Badge variant="outline" className="num shrink-0">
+            {TIMING_METHOD_LABELS[sheet.session.timingMethod]}
+          </Badge>
+          {sheet.session.status === 'CLOSED' && (
+            <Badge
+              className="shrink-0 gap-1 bg-muted text-faint"
+              title="این جلسه بسته است؛ برگه فقط‌خواندنی است. برای ثبت داده، جلسهٔ جدیدی ایجاد کنید یا این جلسه را بازگشایی کنید."
+            >
+              <Lock className="size-3" aria-hidden /> بسته
+            </Badge>
+          )}
+
+          <div className="ms-auto flex shrink-0 flex-wrap items-center gap-2">
             <SaveIndicator status={saver.status} onRetry={saver.retry} />
+            {canCreateSession && onCreateSession && (
+              <Button size="sm" onClick={onCreateSession} className="btn-brand gap-1.5 border-0">
+                <Plus className="size-4" aria-hidden />
+                جلسهٔ جدید
+              </Button>
+            )}
+            {/* §۴-۳ — بستن این جلسه؛ مستقل از «بازگشت به جلسات» */}
             {editable ? (
               <Button variant="outline" size="sm" onClick={() => setCloseConfirm(true)} className="gap-1.5">
                 <Lock className="size-4" aria-hidden />
-                بستن جلسه
+                بستن این جلسه
               </Button>
             ) : (
               <Button variant="outline" size="sm" onClick={() => void setSessionStatus('OPEN')} className="gap-1.5">
@@ -571,69 +607,97 @@ export function SheetPanel({
           </div>
         </div>
 
-        {/* نوار ابزار برگه — FR-07 / ۷.۴ */}
-        <div className="flex flex-wrap items-center gap-2 p-2.5">
-          <div className="flex items-center gap-1">
-            <Button
-              variant="outline"
-              size="icon"
-              onClick={() => void history.undo()}
-              disabled={!history.canUndo || actionBusy}
-              aria-label="واگردانی (Ctrl+Z)"
-              title={history.undoLabel ?? 'واگردانی'}
-            >
-              <Undo2 className="size-4" aria-hidden />
-            </Button>
-            <Button
-              variant="outline"
-              size="icon"
-              onClick={() => void history.redo()}
-              disabled={!history.canRedo || actionBusy}
-              aria-label="ازنو (Ctrl+Y)"
-              title={history.redoLabel ?? 'ازنو'}
-            >
-              <Redo2 className="size-4" aria-hidden />
-            </Button>
-          </div>
+        {/* ردیف ۲ — عنوان برگه + نوار ابزار — FR-07 / ۷.۴ */}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-t border-border/60 pt-2">
+          <h2 className="flex shrink-0 items-center gap-1 text-sm font-extrabold">
+            برگهٔ زمان‌سنجی
+            <HelpDot label="برگهٔ زمان‌سنجی" content={sheetHelp} />
+          </h2>
+          <span className="num shrink-0 text-[11px] text-muted-foreground">
+            {formatInt(sheet.stats.sessionCycles, prefs)} چرخه در این جلسه
+          </span>
 
-          {editable && (
-            <>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="outline" size="sm" disabled={actionBusy} className="gap-1.5">
-                    <Plus className="size-4" aria-hidden />
-                    افزودن چرخه
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  {[1, 5, 10, 20].map((n) => (
-                    <DropdownMenuItem key={n} onClick={() => void addCycles(n)} className="num">
-                      {formatInt(n, prefs)} چرخه
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
-
+          <div className="ms-auto flex flex-wrap items-center gap-2">
+            <div className="flex items-center gap-1">
               <Button
                 variant="outline"
-                size="sm"
-                className="gap-1.5"
-                onClick={() =>
-                  openPaste({
-                    cycleNo: sheet.cycles[0]?.cycleNo ?? 1,
-                    elementId: columns[0]?.id ?? '',
-                    relationId: null,
-                  })
-                }
+                size="icon"
+                onClick={() => void history.undo()}
+                disabled={!history.canUndo || actionBusy}
+                aria-label="واگردانی (Ctrl+Z)"
+                title={history.undoLabel ?? 'واگردانی'}
               >
-                <ClipboardPaste className="size-4" aria-hidden />
-                Paste از Excel
+                <Undo2 className="size-4" aria-hidden />
               </Button>
-            </>
-          )}
+              <Button
+                variant="outline"
+                size="icon"
+                onClick={() => void history.redo()}
+                disabled={!history.canRedo || actionBusy}
+                aria-label="ازنو (Ctrl+Y)"
+                title={history.redoLabel ?? 'ازنو'}
+              >
+                <Redo2 className="size-4" aria-hidden />
+              </Button>
+            </div>
 
-          <div className="ms-auto flex items-center gap-1.5 text-[11px] text-muted-foreground">
-            <span className="hidden sm:inline">Tab/Enter حرکت • F2 یا دابل‌کلیک ویرایش • Ctrl+Z واگردانی</span>
+            {editable && (
+              <>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" size="sm" disabled={actionBusy} className="gap-1.5">
+                      <Plus className="size-4" aria-hidden />
+                      افزودن چرخه
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    {[1, 5, 10, 20].map((n) => (
+                      <DropdownMenuItem key={n} onClick={() => void addCycles(n)} className="num">
+                        {formatInt(n, prefs)} چرخه
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5"
+                  onClick={() =>
+                    openPaste({
+                      cycleNo: sheet.cycles[0]?.cycleNo ?? 1,
+                      elementId: columns[0]?.id ?? '',
+                      relationId: null,
+                    })
+                  }
+                >
+                  <ClipboardPaste className="size-4" aria-hidden />
+                  Paste از Excel
+                </Button>
+              </>
+            )}
+
+            {/* v1.5.2 §۹ — دانلود قالب Excel مخصوص همین جلسه */}
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              onClick={() => {
+                if (columns.length === 0) {
+                  toast.error('این فعالیت عنصر کاری ندارد؛ قالب Excel فقط برای فعالیت دارای عنصر ساخته می‌شود')
+                  return
+                }
+                window.open(`/api/sessions/${sessionId}/excel-template`)
+              }}
+              title="دانلود قالب Excel متناسب با این جلسه — تکمیل و بارگذاری یا کپی/Paste"
+            >
+              <FileSpreadsheet className="size-4" aria-hidden />
+              قالب Excel
+            </Button>
+
+            <span className="hidden text-[11px] text-muted-foreground sm:inline">
+              Tab/Enter حرکت • F2 یا دابل‌کلیک ویرایش • Ctrl+Z واگردانی
+            </span>
           </div>
         </div>
       </div>
