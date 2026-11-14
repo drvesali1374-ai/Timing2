@@ -386,7 +386,7 @@ export default function HomeView() {
         {/* بنر اولین استفاده */}
         {!isLoading && !error && projects.length === 0 && !firstUseDismissed && (
           <section className="card-premium overflow-hidden" aria-label="راهنمای اولین استفاده">
-            <div className="flex items-center justify-between gap-2 border-b bg-gradient-to-l from-brand-soft/70 to-transparent p-4">
+            <div className="flex items-center justify-between gap-2 border-b bg-surface-2/60 p-4">
               <div className="flex items-center gap-3">
                 <div className="chip-icon bg-brand-soft text-brand">
                   <Rocket className="size-5" aria-hidden />

@@ -6,21 +6,29 @@
 // ▸ گره‌های پایه به‌صورت خودکار از فعالیت‌ها ساخته می‌شوند
 // ▸ راهنمای نمادها و تفاوت دو نمودار + ورودی مواد و OPC توسعه‌یافته
 // ═══════════════════════════════════════════════════════════
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { Waypoints } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { HelpDot } from '@/components/common/HelpDot'
+import { useStuck } from '@/components/common/SectionHeading'
 import type { ChartTypeValue } from '@/lib/api/endpoints'
 import ChartCanvas from './charts/ChartCanvas'
 
 export default function ChartsView({ projectId }: { projectId: string }) {
   const [chartType, setChartType] = useState<ChartTypeValue>('FPC')
+  // هدر بخش اصلی در top-14 چسبان می‌ماند — دسترسی دائم به تب‌های OPC/FPC (v1.5.2 §۸)
+  const headRef = useRef<HTMLDivElement>(null)
+  const headStuck = useStuck(headRef)
 
   return (
     <div className="space-y-4">
       <Card>
-        <CardHeader className="pb-3">
+        <CardHeader
+          ref={headRef}
+          data-stuck={headStuck ? 'true' : 'false'}
+          className="card-head sticky-heading pb-3"
+        >
           <CardTitle className="flex items-center gap-2 text-lg">
             <Waypoints className="size-5 text-brand" aria-hidden />
             نمودار فرایند — OPC / FPC

@@ -51,6 +51,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { EmptyState } from '@/components/common/Feedback'
 import { HelpDot } from '@/components/common/HelpDot'
+import { SectionHeading } from '@/components/common/SectionHeading'
 import {
   EXCEL_REPORT_LABELS,
   reportsApi,
@@ -685,28 +686,30 @@ export default function ReportsView({ projectId }: { projectId: string }) {
 
   return (
     <div className="space-y-5">
-      {/* ── سربرگ ── */}
-      <div className="print:hidden flex flex-wrap items-center justify-between gap-3">
-        <h2 className="flex flex-wrap items-center gap-2 text-lg font-black">
-          <FileText className="size-5 text-brand" aria-hidden />
-          مرکز گزارش‌ها و خروجی‌ها
-          <HelpDot
-            label="مرکز گزارش‌ها"
-            content={{
-              what: 'محل تهیهٔ خروجی Excel برای تحلیل داده و گزارش رسمی PDF/چاپ با تمام پارامترها و فرض‌های محاسبات.',
-              input: 'نوع گزارش، فعالیت و اپراتور را انتخاب کنید؛ فیلترها هم روی Excel و هم روی گزارش رسمی اعمال می‌شوند.',
-              example: 'برای گزارش یک اپراتور خاص، او را از فیلتر انتخاب کنید؛ زمان‌ها میانگین همان اپراتور خواهد بود و در متن گزارش شفاف می‌شود.',
-              note: 'گزارش رسمی، نتیجهٔ نیازمند بازبینی را استاندارد قطعی معرفی نمی‌کند و موارد بازبینی را در ابتدا فهرست می‌کند.',
-            }}
-          />
-        </h2>
-        {hasData && (
-          <Button variant="outline" size="sm" className="gap-1.5 print:hidden" onClick={handlePrint}>
-            <Printer className="size-4" aria-hidden />
-            چاپ / ذخیره PDF
-          </Button>
-        )}
-      </div>
+      {/* ── سربرگ — چسبان زیر نوار اصلی (v1.5.2 §۸) ── */}
+      <SectionHeading>
+        <div className="print:hidden flex flex-wrap items-center justify-between gap-3">
+          <h2 className="flex flex-wrap items-center gap-2 text-lg font-black">
+            <FileText className="size-5 text-brand" aria-hidden />
+            مرکز گزارش‌ها و خروجی‌ها
+            <HelpDot
+              label="مرکز گزارش‌ها"
+              content={{
+                what: 'محل تهیهٔ خروجی Excel برای تحلیل داده و گزارش رسمی PDF/چاپ با تمام پارامترها و فرض‌های محاسبات.',
+                input: 'نوع گزارش، فعالیت و اپراتور را انتخاب کنید؛ فیلترها هم روی Excel و هم روی گزارش رسمی اعمال می‌شوند.',
+                example: 'برای گزارش یک اپراتور خاص، او را از فیلتر انتخاب کنید؛ زمان‌ها میانگین همان اپراتور خواهد بود و در متن گزارش شفاف می‌شود.',
+                note: 'گزارش رسمی، نتیجهٔ نیازمند بازبینی را استاندارد قطعی معرفی نمی‌کند و موارد بازبینی را در ابتدا فهرست می‌کند.',
+              }}
+            />
+          </h2>
+          {hasData && (
+            <Button variant="outline" size="sm" className="gap-1.5 print:hidden" onClick={handlePrint}>
+              <Printer className="size-4" aria-hidden />
+              چاپ / ذخیره PDF
+            </Button>
+          )}
+        </div>
+      </SectionHeading>
 
       {!hasData ? (
         <EmptyState

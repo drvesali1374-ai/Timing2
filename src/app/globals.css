@@ -220,16 +220,29 @@
     box-shadow: var(--shadow-2);
     transform: translateY(-2px);
   }
-  /* هدر کارت‌های اصلی — پس‌زمینه بسیار ملایم + divider نازک (§۸.۱ جلسه اول)
+  /* هدر کارت‌های اصلی — پس‌زمینه یکدست و یکپارچه (v1.5.2 §۷)
      به‌صورت component مشترک؛ نه CSS تکراری در هر صفحه.
      کارت‌های کوچک توکار (KPI و nested) header مستقل ندارند. */
   .card-head {
-    background: linear-gradient(
-      to left,
-      color-mix(in srgb, var(--brand-soft) 45%, transparent),
-      transparent 65%
-    );
+    background: color-mix(in srgb, var(--surface-2) 60%, transparent);
     border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  }
+  /* v1.5.2 §۸ — عنوان چسبان بخش‌های اصلی (SectionHeading)
+     زیر نوار اصلی h-14 (یک پیکسل هم‌پوشانی با مرز viewport منفی‌شده
+     برای تشخیص لحظهٔ چسبیدن با IntersectionObserver).
+     خط زیرین همیشه رزرو می‌شود تا هنگام چسبیدن جابه‌جایی رخ ندهد. */
+  .sticky-heading {
+    position: sticky;
+    top: calc(3.5rem - 1px);
+    z-index: 30;
+    border-bottom: 1px solid transparent;
+    transition: background-color 0.2s var(--ease), border-color 0.2s var(--ease),
+      box-shadow 0.2s var(--ease);
+  }
+  .sticky-heading[data-stuck='true'] {
+    background: var(--background);
+    border-bottom-color: color-mix(in srgb, var(--border) 85%, transparent);
+    box-shadow: 0 8px 20px -16px rgba(15, 23, 42, 0.35);
   }
   /* جلسه ۲ — قطر ماتریس هم‌پوشانی: خط‌دار و غیرقابل ویرایش (§۱۱) */
   .matrix-diagonal {

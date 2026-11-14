@@ -30,6 +30,7 @@ import {
   Pencil,
   Plus,
   Search,
+  SquareArrowOutUpRight,
   Trash2,
   Warehouse,
   X,
@@ -63,6 +64,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { ConfirmDeleteDialog, EmptyState } from '@/components/common/Feedback'
 import { HelpDot } from '@/components/common/HelpDot'
 import { SaveIndicator } from '@/components/common/SaveIndicator'
+import { SectionHeading } from '@/components/common/SectionHeading'
 import { SortableList } from '@/components/common/SortableList'
 import { useAutosave } from '@/hooks/use-autosave'
 import { useIsMobile } from '@/hooks/use-mobile'
@@ -203,6 +205,7 @@ export default function StructureView({ projectId }: { projectId: string }) {
   const [treeOpen, setTreeOpen] = useState(true) // درخت تاشوی موبایل
   const [openMap, setOpenMap] = useState<Record<string, boolean>>({}) // ایستگاه‌های باز (پیش‌فرض: باز)
   const [openActivityMap, setOpenActivityMap] = useState<Record<string, boolean>>({}) // فعالیت‌های باز (پیش‌فرض: بسته)
+  const [selectedActivityId, setSelectedActivityId] = useState<string | null>(null) // فعالیت انتخاب‌شده در درخت — کلیک دومانی (v1.5.2 §۲.۴)
   const [search, setSearch] = useState('')
   const [stationCreateOpen, setStationCreateOpen] = useState(false)
   const [stationCreateForm, setStationCreateForm] = useState<StationFormState>(EMPTY_STATION_FORM)
@@ -471,6 +474,16 @@ export default function StructureView({ projectId }: { projectId: string }) {
     if (isMobile) setTreeOpen(false)
   }
 
+  // انتخاب فعالیت در درخت — کلیک دومانی (v1.5.2 §۲.۴):
+  // کلیک اول = انتخاب (به همراه انتخاب ایستگاه والد برای پنل جزئیات)؛
+  // کلیک دوم روی کارت انتخاب‌شده = باز/بسته زیرشاخه. ورود به صفحه
+  // فعالیت از دکمهٔ مستقل «ورود به فعالیت» انجام می‌شود.
+  // توجه: درخت جمع نمی‌شود — کلیک دوم باید بتواند زیرشاخه را باز/بسته کند.
+  const selectActivity = (activity: ActivityDto) => {
+    setSelectedActivityId(activity.id)
+    setSelectedStation(activity.stationId)
+  }
+
   const openEditStation = (station: StationDto) => {
     // فرم ویرایش در پنل جزئیات رندر می‌شود؛ انتخاب + باز کردن دیالوگ مشترک
     setSelectedStation(station.id)
@@ -616,7 +629,9 @@ export default function StructureView({ projectId }: { projectId: string }) {
     project: projectQuery.data ?? null,
     lineLoading: projectQuery.isLoading,
     selectedStationId,
+    selectedActivityId,
     onSelectStation: selectStation,
+    onSelectActivity: selectActivity,
     onEditStation: openEditStation,
     onDeleteStation: (station: StationDto) => setDeletingStation(station),
     onOpenActivity: (activityId: string) => openActivity(projectId, activityId),
@@ -636,21 +651,23 @@ export default function StructureView({ projectId }: { projectId: string }) {
 
   return (
     <div className="animate-view-in w-full space-y-5">
-      {/* سربرگ بخش */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <div className="chip-icon bg-brand-soft text-brand">
-            <ListTree className="size-6" aria-hidden />
-          </div>
-          <div>
-            <h1 className="text-xl font-extrabold">ساختار تولید</h1>
-            <p className="num text-xs text-muted-foreground">
-              {formatInt(stations.length, prefs)} ایستگاه · {formatInt(totalActivities, prefs)} فعالیت ·{' '}
-              {formatInt(totalElements, prefs)} عنصر کاری
-            </p>
+      {/* سربرگ بخش — چسبان زیر نوار اصلی (v1.5.2 §۸) */}
+      <SectionHeading>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="chip-icon bg-brand-soft text-brand">
+              <ListTree className="size-6" aria-hidden />
+            </div>
+            <div>
+              <h1 className="text-xl font-extrabold">ساختار تولید</h1>
+              <p className="num text-xs text-muted-foreground">
+                {formatInt(stations.length, prefs)} ایستگاه · {formatInt(totalActivities, prefs)} فعالیت ·{' '}
+                {formatInt(totalElements, prefs)} عنصر کاری
+              </p>
+            </div>
           </div>
         </div>
-      </div>
+      </SectionHeading>
 
       {/* محتوا */}
       {treeQuery.isLoading ? (
@@ -676,8 +693,9 @@ export default function StructureView({ projectId }: { projectId: string }) {
         />
       ) : (
         <div className="grid items-start gap-5 lg:grid-cols-2">
-          {/* ستون راست (RTL): درخت ساختار — موبایل: تاشو در بالا */}
-          <div className="lg:sticky lg:top-20">
+          {/* ستون راست (RTL): درخت ساختار — موبایل: تاشو در بالا
+              v1.5.2 §۲.۱: اسکرول داخلی و sticky مستقل حذف شد؛ ستون همراه اسکرول اصلی صفحه حرکت می‌کند */}
+          <div>
             <div className="lg:hidden">
               <Collapsible open={treeOpen} onOpenChange={setTreeOpen}>
                 <div className="card-premium overflow-hidden">
@@ -1050,7 +1068,9 @@ interface StructureTreeProps {
   project: { name: string; lineName: string; productName: string } | null
   lineLoading: boolean
   selectedStationId: string | null
+  selectedActivityId: string | null
   onSelectStation: (stationId: string) => void
+  onSelectActivity: (activity: ActivityDto) => void
   onEditStation: (station: StationDto) => void
   onDeleteStation: (station: StationDto) => void
   onOpenActivity: (activityId: string) => void
@@ -1082,7 +1102,9 @@ function StructureTree(props: StructureTreeProps) {
     project,
     lineLoading,
     selectedStationId,
+    selectedActivityId,
     onSelectStation,
+    onSelectActivity,
     onEditStation,
     onDeleteStation,
     onOpenActivity,
@@ -1121,8 +1143,8 @@ function StructureTree(props: StructureTreeProps) {
 
   return (
     <div>
-      {/* ریشه: پروژه/خط تولید + محصول — §۷.۱ */}
-      <div className="border-b bg-gradient-to-l from-brand-soft/70 to-transparent p-4">
+      {/* ریشه: پروژه/خط تولید + محصول — §۷.۱؛ هدر یکدست بدون گرادیان (v1.5.2 §۷) */}
+      <div className="border-b bg-surface-2/60 p-4">
         <div className="flex items-center gap-2.5">
           <span className="chip-icon bg-brand-soft text-brand">
             <Factory className="size-5" aria-hidden />
@@ -1199,8 +1221,9 @@ function StructureTree(props: StructureTreeProps) {
         </Button>
       </div>
 
-      {/* ایستگاه‌ها */}
-      <div className="scroll-slim max-h-[26rem] overflow-y-auto p-3 lg:max-h-[calc(100vh-23rem)]">
+      {/* ایستگاه‌ها — v1.5.2 §۲.۱: بدون محدودیت ارتفاع و اسکرول داخلی؛
+          ارتفاع طبیعی متناسب با تعداد گره‌ها، همراه اسکرول اصلی صفحه */}
+      <div className="p-3">
         {visibleStations.length === 0 ? (
           <div className="rounded-xl border border-dashed border-border/70 p-5 text-center">
             <p className="text-sm font-bold">
@@ -1234,9 +1257,11 @@ function StructureTree(props: StructureTreeProps) {
                   hasSearch={hasSearch}
                   openActivityMap={openActivityMap}
                   selectedStationId={selectedStationId}
+                  selectedActivityId={selectedActivityId}
                   onStationOpenChange={onStationOpenChange}
                   onActivityOpenChange={onActivityOpenChange}
                   onSelectStation={onSelectStation}
+                  onSelectActivity={onSelectActivity}
                   onEditStation={onEditStation}
                   onDeleteStation={onDeleteStation}
                   onOpenActivity={onOpenActivity}
@@ -1268,7 +1293,10 @@ function StructureTree(props: StructureTreeProps) {
   )
 }
 
-// ═══════════════ گره ایستگاه — کارت متمایز از ردیف فعالیت (§۷.۶) ═══════════════
+// ═══════════════ گره ایستگاه — کارت سطح اول (v1.5.2 §۲) ═══════════════
+// • عرض ۱۰۰٪ والد — پس‌زمینه bg-card (تمایز سلسله‌مراتب §۲.۲)
+// • شمارش فعالیت/عنصر در خط مجزا زیر عنوان (§۲.۳)
+// • کلیک دومانی: انتخاب ← باز/بسته زیرشاخه (§۲.۴)؛ chevron مستقل
 
 interface StationNodeProps {
   station: StationDto
@@ -1279,9 +1307,11 @@ interface StationNodeProps {
   hasSearch: boolean
   openActivityMap: Record<string, boolean>
   selectedStationId: string | null
+  selectedActivityId: string | null
   onStationOpenChange: (stationId: string, open: boolean) => void
   onActivityOpenChange: (activityId: string, open: boolean) => void
   onSelectStation: (stationId: string) => void
+  onSelectActivity: (activity: ActivityDto) => void
   onEditStation: (station: StationDto) => void
   onDeleteStation: (station: StationDto) => void
   onOpenActivity: (activityId: string) => void
@@ -1308,14 +1338,14 @@ function StationNode(p: StationNodeProps) {
     >
       <div
         className={cn(
-          // کارت ایستگاه: پس‌زمینه متفاوت از ردیف فعالیت + border واضح‌تر (§۷.۶)
-          'overflow-hidden rounded-xl border bg-card transition-all',
+          // کارت ایستگاه — سطح ۱: پس‌زمینه card (روشن‌ترین سطح سلسله‌مراتب §۲.۲)
+          'overflow-hidden rounded-xl border transition-all',
           isSelected
             ? 'border-brand bg-brand-soft/40 shadow-[0_6px_18px_-8px_rgba(114,87,255,0.5)] ring-2 ring-brand/25'
             : 'border-line-strong bg-card hover:border-brand/40'
         )}
       >
-        {/* سربرگ کارت: chevron مستقل + بدنه انتخاب + عملیات چپ — §۷.۲ */}
+        {/* سربرگ کارت: chevron مستقل + بدنه دو مرحله‌ای + عملیات چپ — v1.5.2 §۲.۴ */}
         <div className="flex items-stretch gap-1 py-1 pe-1.5 ps-8">
           {/* chevron — فقط باز/بسته زیرشاخه (§۷.۲) */}
           <button
@@ -1331,31 +1361,32 @@ function StationNode(p: StationNodeProps) {
           >
             <ChevronDown className={cn('size-4 transition-transform', !isOpen && '-rotate-90')} aria-hidden />
           </button>
-          {/* بدنه — کلیک = فقط انتخاب (§۷.۲) */}
+          {/* بدنه — کلیک دومانی (v1.5.2 §۲.۴):
+              کلیک اول = فقط انتخاب و نمایش جزئیات؛
+              کلیک دوم روی کارت انتخاب‌شده = باز/بسته زیرشاخه */}
           <div
             role="button"
             tabIndex={0}
             aria-current={isSelected ? 'true' : undefined}
+            aria-expanded={isSelected ? isOpen : undefined}
             className="flex min-w-0 flex-1 cursor-pointer flex-col justify-center gap-0.5 rounded-md px-1.5 py-1.5 transition-colors hover:bg-brand-soft/25 focus-visible:outline-2 focus-visible:outline-ring"
-            onClick={() => p.onSelectStation(station.id)}
+            onClick={() => {
+              if (isSelected) p.onStationOpenChange(station.id, !isOpen)
+              else p.onSelectStation(station.id)
+            }}
             onKeyDown={(e) => {
               if (e.key === 'Enter' || e.key === ' ') {
                 e.preventDefault()
-                p.onSelectStation(station.id)
+                if (isSelected) p.onStationOpenChange(station.id, !isOpen)
+                else p.onSelectStation(station.id)
               }
             }}
           >
-            <div className="flex items-center gap-1.5">
-              <span className="line-clamp-2 min-w-0 flex-1 text-sm font-bold leading-5">{station.name}</span>
-              <Badge variant="secondary" className="num shrink-0 border-0 bg-surface-3 text-[10px]" aria-label="تعداد فعالیت">
-                {formatInt(station.activities.length, prefs)}
-              </Badge>
-            </div>
-            {isSelected && (
-              <p className="num text-[11px] leading-4 text-muted-foreground">
-                {formatInt(station.activities.length, prefs)} فعالیت · {formatInt(elementCount, prefs)} عنصر کاری
-              </p>
-            )}
+            <span className="line-clamp-2 min-w-0 flex-1 text-sm font-bold leading-5">{station.name}</span>
+            {/* شمارش فرزندان در خط مجزا زیر عنوان — همیشه نمایان (v1.5.2 §۲.۳) */}
+            <p className="num text-[11px] leading-4 text-muted-foreground">
+              {formatInt(station.activities.length, prefs)} فعالیت · {formatInt(elementCount, prefs)} عنصر کاری
+            </p>
           </div>
           {/* عملیات ویرایش/حذف عمودی در چپ ردیف RTL — §۷.۵ */}
           <div className="flex shrink-0 flex-col justify-center gap-0.5">
@@ -1386,9 +1417,9 @@ function StationNode(p: StationNodeProps) {
           </div>
         </div>
 
-        {/* زیرشاخه فعالیت‌ها — خط راهنمای سلسله‌مراتبی */}
+        {/* زیرشاخه فعالیت‌ها — خط راهنمای سلسله‌مراتبی + عرض ~۷۵٪ کارت ایستگاه (v1.5.2 §۲.۲) */}
         <CollapsibleContent>
-          <div className="mb-2 mt-1 ms-2 border-s-2 border-dashed border-brand/25 pb-1 ps-2.5">
+          <div className="mb-2 mt-1 ms-2 w-[85%] min-w-0 border-s-2 border-dashed border-brand/25 pb-1 ps-2.5 sm:w-3/4">
             {p.activities.length === 0 ? (
               <p className="px-1 py-1.5 text-[11px] text-faint">
                 {hasSearch ? 'فعالیت منطبقی نیست' : 'فعالیتی ثبت نشده است'}
@@ -1409,9 +1440,11 @@ function StationNode(p: StationNodeProps) {
                       station={station}
                       prefs={prefs}
                       parentSelected={parentSelected}
+                      isSelected={p.selectedActivityId === activity.id}
                       isOpen={actOpen}
                       hasSearch={hasSearch}
                       onActivityOpenChange={p.onActivityOpenChange}
+                      onSelectActivity={p.onSelectActivity}
                       onOpenActivity={p.onOpenActivity}
                       onEditActivity={p.onEditActivity}
                       onDeleteActivity={p.onDeleteActivity}
@@ -1442,16 +1475,22 @@ function StationNode(p: StationNodeProps) {
   )
 }
 
-// ═══════════════ گره فعالیت — ردیف با border مستقل ظریف + badge نوع فرایند (§۷.۶) ═══════════════
+// ═══════════════ گره فعالیت — کارت سطح دوم (v1.5.2 §۲) ═══════════════
+// • عرض ~۷۵٪ کارت ایستگاه + پس‌زمینه surface-2 (سلسله‌مراتب §۲.۲)
+// • شمارش عناصر کاری در خط مجزا زیر عنوان (§۲.۳)
+// • کلیک دومانی: انتخاب ← باز/بسته عناصر (§۲.۴)؛ chevron مستقل؛
+//   ورود به صفحه فعالیت از دکمهٔ ثانویه واضح «ورود به فعالیت»
 
 interface ActivityNodeProps {
   activity: ActivityDto
   station: StationDto
   prefs: Prefs
   parentSelected: boolean
+  isSelected: boolean
   isOpen: boolean
   hasSearch: boolean
   onActivityOpenChange: (activityId: string, open: boolean) => void
+  onSelectActivity: (activity: ActivityDto) => void
   onOpenActivity: (activityId: string) => void
   onEditActivity: (activity: ActivityDto) => void
   onDeleteActivity: (activity: ActivityDto) => void
@@ -1463,7 +1502,7 @@ interface ActivityNodeProps {
 }
 
 function ActivityNode(p: ActivityNodeProps) {
-  const { activity, prefs, parentSelected, isOpen, hasSearch } = p
+  const { activity, prefs, parentSelected, isSelected, isOpen, hasSearch } = p
   const elements = p.visibleElements(activity)
   const elementCount = activityElementCount(activity)
   const groupLabel = activity.group?.name ?? null
@@ -1475,14 +1514,18 @@ function ActivityNode(p: ActivityNodeProps) {
     >
       <div
         className={cn(
-          // ردیف فعالیت: پس‌زمینه متفاوت از کارت ایستگاه + border مستقل ظریف (§۷.۶)
-          'overflow-hidden rounded-lg border border-border/60 bg-surface-2/80 transition-colors hover:border-brand/35',
-          parentSelected && 'bg-brand-soft/25'
+          // کارت فعالیت — سطح ۲: پس‌زمینه surface-2 (یک پله تیره‌تر از card — §۲.۲)
+          'overflow-hidden rounded-lg border transition-colors',
+          isSelected
+            ? 'border-brand bg-brand-soft/45 ring-2 ring-brand/25'
+            : parentSelected
+              ? 'border-border/60 bg-surface-2/90 hover:border-brand/35'
+              : 'border-border/60 bg-surface-2/80 hover:border-brand/35'
         )}
         title={`${processLabelOf(activity.processType)}${groupLabel ? ` · گروه: ${groupLabel}` : ''} · ${formatInt(elementCount, prefs)} عنصر کاری`}
       >
-        <div className="flex items-stretch gap-1 py-0.5 pe-1 ps-8">
-          {/* chevron — فقط باز/بسته عناصر کاری (§۷.۲) */}
+        <div className="flex items-stretch gap-1 py-1 pe-1 ps-8">
+          {/* chevron — فقط باز/بسته عناصر کاری؛ مستقل از انتخاب (§۲.۴) */}
           <button
             type="button"
             className="flex w-5 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-brand-soft/50 hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
@@ -1496,28 +1539,51 @@ function ActivityNode(p: ActivityNodeProps) {
           >
             <ChevronDown className={cn('size-3.5 transition-transform', !isOpen && '-rotate-90')} aria-hidden />
           </button>
-          {/* بدنه — کلیک = باز شدن صفحه فعالیت */}
-          <button
-            type="button"
-            className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-1.5 py-1 text-right transition-colors hover:bg-brand-soft/30 focus-visible:outline-2 focus-visible:outline-ring"
-            aria-label={`باز کردن صفحه فعالیت ${activity.name}`}
-            onClick={() => p.onOpenActivity(activity.id)}
+          {/* بدنه — کلیک دومانی (v1.5.2 §۲.۴):
+              کلیک اول = انتخاب فعالیت؛ کلیک دوم = باز/بسته عناصر کاری */}
+          <div
+            role="button"
+            tabIndex={0}
+            aria-current={isSelected ? 'true' : undefined}
+            aria-expanded={isSelected ? isOpen : undefined}
+            className="flex min-w-0 flex-1 cursor-pointer flex-col justify-center gap-0.5 rounded-md px-1.5 py-1 text-right transition-colors hover:bg-brand-soft/30 focus-visible:outline-2 focus-visible:outline-ring"
+            onClick={() => {
+              if (isSelected) p.onActivityOpenChange(activity.id, !isOpen)
+              else p.onSelectActivity(activity)
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault()
+                if (isSelected) p.onActivityOpenChange(activity.id, !isOpen)
+                else p.onSelectActivity(activity)
+              }
+            }}
           >
-            <span className="line-clamp-2 min-w-0 flex-1 text-[13px] font-medium leading-4.5">{activity.name}</span>
-            {/* badge نوع فرایند کنار نام — نه فقط در title (§۷.۶) */}
-            <span
-              className="num size-5 shrink-0 rounded-md bg-brand-soft text-[11px] font-bold leading-5 text-brand"
-              title={processLabelOf(activity.processType)}
-              aria-label={`نوع فرایند: ${processLabelOf(activity.processType)}`}
-            >
-              <ProcessSymbol type={activity.processType} size="sm" />
-            </span>
-            <Badge variant="secondary" className="num shrink-0 border-0 bg-surface-3 text-[9.5px]" aria-label="تعداد عنصر">
-              {formatInt(elementCount, prefs)}
-            </Badge>
-          </button>
-          {/* عملیات ویرایش/حذف عمودی در چپ — §۷.۵ */}
+            <div className="flex min-w-0 items-center gap-1.5">
+              <span className="line-clamp-2 min-w-0 flex-1 text-[13px] font-medium leading-4.5">{activity.name}</span>
+              {/* نماد نوع فرایند — بدون قاب اضافه (v1.5.2 §۳) */}
+              <ProcessSymbol type={activity.processType} size="sm" className="size-4" />
+            </div>
+            {/* شمارش عناصر در خط مجزا زیر عنوان — همیشه نمایان (v1.5.2 §۲.۳) */}
+            <p className="num text-[10.5px] leading-4 text-muted-foreground">
+              {formatInt(elementCount, prefs)} عنصر کاری{groupLabel ? ` · گروه: ${groupLabel}` : ''}
+            </p>
+          </div>
+          {/* عملیات: ورود به فعالیت + ویرایش/حذف عمودی در چپ — v1.5.2 §۲.۴ */}
           <div className="flex shrink-0 flex-col justify-center gap-0.5">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-6 text-brand hover:text-brand"
+              aria-label={`ورود به صفحه فعالیت ${activity.name}`}
+              title="ورود به صفحه فعالیت"
+              onClick={(e) => {
+                e.stopPropagation()
+                p.onOpenActivity(activity.id)
+              }}
+            >
+              <SquareArrowOutUpRight className="size-3.5" aria-hidden />
+            </Button>
             <Button
               variant="ghost"
               size="icon"
@@ -1545,9 +1611,9 @@ function ActivityNode(p: ActivityNodeProps) {
           </div>
         </div>
 
-        {/* زیرشاخه عناصر کاری — سطح چهارم (§۷.۱) */}
+        {/* زیرشاخه عناصر کاری — سطح سوم؛ عرض ~۷۵٪ کارت فعالیت (v1.5.2 §۲.۲) */}
         <CollapsibleContent>
-          <div className="mb-1 mt-0.5 ms-2 border-s-2 border-dashed border-border/70 pb-1 ps-2">
+          <div className="mb-1 mt-0.5 ms-2 w-[85%] min-w-0 border-s-2 border-dashed border-border/70 pb-1 ps-2 sm:w-3/4">
             {elements.length === 0 ? (
               <p className="px-1 py-1 text-[10.5px] text-faint">
                 {hasSearch ? 'عنصر منطبقی نیست' : 'عنصری ثبت نشده است'}
@@ -1560,7 +1626,7 @@ function ActivityNode(p: ActivityNodeProps) {
                 renderItem={(element) => (
                   <div
                     key={element.id}
-                    className="group flex items-stretch gap-1 rounded-md py-0.5 pe-1 ps-7 transition-colors hover:bg-brand-soft/25"
+                    className="group flex items-stretch gap-1 rounded-md bg-surface-3/60 py-0.5 pe-1 ps-6 transition-colors hover:bg-brand-soft/25"
                   >
                     <button
                       type="button"

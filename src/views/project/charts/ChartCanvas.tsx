@@ -572,7 +572,7 @@ export default function ChartCanvas({ projectId, chartType }: { projectId: strin
           )}
           {allowedTypes.map((t) => (
             <span key={t} className={cn('inline-flex items-center gap-1 rounded-full border px-2 py-0.5', counts.byType[t] ? 'border-border' : 'opacity-40')}>
-              <ProcessSymbol type={t} size="sm" className="size-4 text-[11px]" />
+              <ProcessSymbol type={t} size="sm" />
               {PROCESS_TYPE_LABELS_WITH_INPUT[t]}: {formatInt(counts.byType[t] ?? 0, prefs)}
             </span>
           ))}

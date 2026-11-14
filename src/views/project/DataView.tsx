@@ -48,6 +48,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { HelpDot } from '@/components/common/HelpDot'
+import { SectionHeading } from '@/components/common/SectionHeading'
 import { ConfirmDeleteDialog, EmptyState } from '@/components/common/Feedback'
 import { auditApi, backupsApi, settingsApi, type AuditDto, type BackupDto } from '@/lib/api/endpoints'
 import { qk } from '@/lib/api/keys'
@@ -139,18 +140,20 @@ function fmtAuditValue(value: unknown): string {
 export default function DataView({ projectId }: { projectId: string }) {
   return (
     <div className="animate-view-in mx-auto max-w-5xl space-y-5">
-      {/* سربرگ */}
-      <div className="flex items-center gap-3">
-        <div className="chip-icon bg-brand-soft text-brand">
-          <DatabaseBackup className="size-6" aria-hidden />
+      {/* سربرگ — چسبان زیر نوار اصلی (v1.5.2 §۸) */}
+      <SectionHeading>
+        <div className="flex items-center gap-3">
+          <div className="chip-icon bg-brand-soft text-brand">
+            <DatabaseBackup className="size-6" aria-hidden />
+          </div>
+          <div>
+            <h1 className="text-xl font-extrabold">داده و پشتیبان</h1>
+            <p className="text-xs text-muted-foreground">
+              پشتیبان‌گیری و بازیابی، بسته پروژه و تاریخچه تغییرات
+            </p>
+          </div>
         </div>
-        <div>
-          <h1 className="text-xl font-extrabold">داده و پشتیبان</h1>
-          <p className="text-xs text-muted-foreground">
-            پشتیبان‌گیری و بازیابی، بسته پروژه و تاریخچه تغییرات
-          </p>
-        </div>
-      </div>
+      </SectionHeading>
 
       <Tabs defaultValue="backups" dir="rtl" className="gap-4">
         <TabsList className="grid w-full grid-cols-3 sm:inline-flex sm:w-auto">
@@ -716,7 +719,7 @@ function PackageTab({ projectId }: { projectId: string }) {
 
   return (
     <div className="card-premium overflow-hidden">
-      <div className="flex items-center gap-3 border-b bg-gradient-to-l from-brand-soft/70 to-transparent p-5">
+      <div className="flex items-center gap-3 border-b bg-surface-2/60 p-5">
         <div className="chip-icon bg-brand-soft text-brand">
           <Package className="size-6" aria-hidden />
         </div>

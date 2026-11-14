@@ -60,6 +60,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from '@/components/ui/chart'
 import { EmptyState } from '@/components/common/Feedback'
 import { HelpDot } from '@/components/common/HelpDot'
+import { SectionHeading } from '@/components/common/SectionHeading'
 import { dashboardApi, type DashboardLayoutDto, type ProjectDashboardDto } from '@/lib/api/endpoints'
 import { qk } from '@/lib/api/keys'
 import { useAppStore } from '@/store/app-store'
@@ -955,39 +956,41 @@ export default function DashboardView({ projectId }: { projectId: string }) {
 
   return (
     <div className="space-y-5">
-      {/* ── سربرگ ── */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="min-w-0">
-          <h2 className="flex flex-wrap items-center gap-2 text-lg font-black">
-            <LayoutDashboard className="size-5 text-brand" aria-hidden />
-            داشبورد تحلیل
-            <HelpDot
-              label="داشبورد تحلیل"
-              content={{
-                what: 'نمای کلی مطالعه با کارت‌های خلاصه و شاخص‌های تخصصی؛ همهٔ اعداد از دادهٔ واقعی محاسبه می‌شوند.',
-                input: 'شخصی‌سازی کنید: کارت‌ها و نمودارها را مرتب، مخفی یا نمایان کنید — چیدمان ذخیره می‌شود.',
-                example: 'اگر فقط «پراکندگی عناصر» برایتان مهم است، بقیهٔ نمودارها را مخفی کنید تا داشبورد ساده بماند.',
-                note: 'کارت‌ها هرگز مقدار ساختگی نشان نمی‌دهند؛ اگر داده کافی نباشد، علت را می‌بینید.',
-              }}
-            />
-          </h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {data.project.name} · {formatInt(data.counts.activities, prefs)} فعالیت ·{' '}
-            {formatInt(data.counts.elements, prefs)} عنصر · {formatInt(data.counts.operators, prefs)} اپراتور ·{' '}
-            {formatInt(data.counts.sessions, prefs)} جلسه — به‌روزرسانی: {formatDateTime(data.generatedAt, prefs)}
-          </p>
+      {/* ── سربرگ — چسبان زیر نوار اصلی (v1.5.2 §۸) ── */}
+      <SectionHeading>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="min-w-0">
+            <h2 className="flex flex-wrap items-center gap-2 text-lg font-black">
+              <LayoutDashboard className="size-5 text-brand" aria-hidden />
+              داشبورد تحلیل
+              <HelpDot
+                label="داشبورد تحلیل"
+                content={{
+                  what: 'نمای کلی مطالعه با کارت‌های خلاصه و شاخص‌های تخصصی؛ همهٔ اعداد از دادهٔ واقعی محاسبه می‌شوند.',
+                  input: 'شخصی‌سازی کنید: کارت‌ها و نمودارها را مرتب، مخفی یا نمایان کنید — چیدمان ذخیره می‌شود.',
+                  example: 'اگر فقط «پراکندگی عناصر» برایتان مهم است، بقیهٔ نمودارها را مخفی کنید تا داشبورد ساده بماند.',
+                  note: 'کارت‌ها هرگز مقدار ساختگی نشان نمی‌دهند؛ اگر داده کافی نباشد، علت را می‌بینید.',
+                }}
+              />
+            </h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {data.project.name} · {formatInt(data.counts.activities, prefs)} فعالیت ·{' '}
+              {formatInt(data.counts.elements, prefs)} عنصر · {formatInt(data.counts.operators, prefs)} اپراتور ·{' '}
+              {formatInt(data.counts.sessions, prefs)} جلسه — به‌روزرسانی: {formatDateTime(data.generatedAt, prefs)}
+            </p>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <Button variant="outline" size="sm" className="gap-1.5" onClick={() => navigate({ name: 'project', projectId, stage: 'reports' })}>
+              <FileSpreadsheet className="size-4" aria-hidden />
+              گزارش‌ها و خروجی
+            </Button>
+            <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setPersonalizeOpen(true)}>
+              <LayoutDashboard className="size-4" aria-hidden />
+              شخصی‌سازی
+            </Button>
+          </div>
         </div>
-        <div className="flex shrink-0 items-center gap-2">
-          <Button variant="outline" size="sm" className="gap-1.5" onClick={() => navigate({ name: 'project', projectId, stage: 'reports' })}>
-            <FileSpreadsheet className="size-4" aria-hidden />
-            گزارش‌ها و خروجی
-          </Button>
-          <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setPersonalizeOpen(true)}>
-            <LayoutDashboard className="size-4" aria-hidden />
-            شخصی‌سازی
-          </Button>
-        </div>
-      </div>
+      </SectionHeading>
 
       {/* ── کارت‌های خلاصه — همیشه ابتدا — FR-21 ── */}
       {visibleCards.length > 0 ? (

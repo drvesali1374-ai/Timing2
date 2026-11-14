@@ -9,13 +9,14 @@
 //   می‌شود؛ هیچ ورودی عددی یا دکمهٔ ثبت مقداری در این صفحه نیست.
 // ▸ روابط آرشیوشده + بازگردانی معتبر حفظ شده است.
 // ═══════════════════════════════════════════════════════════
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Network, Plus } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { HelpDot } from '@/components/common/HelpDot'
+import { useStuck } from '@/components/common/SectionHeading'
 import { EmptyState } from '@/components/common/Feedback'
 import { qk } from '@/lib/api/keys'
 import { overlapApi, type OverlapMatrixDto } from '@/lib/api/endpoints'
@@ -32,6 +33,9 @@ export default function MatrixView({ projectId }: { projectId: string }) {
   const openProject = useAppStore((s) => s.openProject)
   const [cycleId, setCycleId] = useState<string | null>(null)
   const [addOpen, setAddOpen] = useState(false)
+  // هدر بخش اصلی در top-14 چسبان می‌ماند — دسترسی دائم به «افزودن رابطهٔ موازی» (v1.5.2 §۸)
+  const headRef = useRef<HTMLDivElement>(null)
+  const headStuck = useStuck(headRef)
 
   const matrixQ = useQuery({
     queryKey: qk.overlapMatrix(projectId, cycleId),
@@ -53,7 +57,11 @@ export default function MatrixView({ projectId }: { projectId: string }) {
   return (
     <div className="space-y-4">
       <Card>
-        <CardHeader className="card-head pb-3">
+        <CardHeader
+          ref={headRef}
+          data-stuck={headStuck ? 'true' : 'false'}
+          className="card-head sticky-heading pb-3"
+        >
           <CardTitle className="flex flex-wrap items-center justify-between gap-2 text-lg">
             <span className="flex items-center gap-2">
               <span className="flex size-9 items-center justify-center rounded-xl bg-brand-soft text-brand">

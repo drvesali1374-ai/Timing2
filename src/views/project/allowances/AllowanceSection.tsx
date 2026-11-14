@@ -14,13 +14,14 @@ import { toast } from 'sonner'
 import {
   AlertTriangle,
   Ban,
+  CircleHelp,
   CirclePlus,
   Loader2,
   MoreHorizontal,
   PencilLine,
+  Percent,
   Plus,
   RotateCcw,
-  Tags,
   Timer,
   X,
 } from 'lucide-react'
@@ -41,6 +42,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { Textarea } from '@/components/ui/textarea'
 import { HelpDot } from '@/components/common/HelpDot'
 import { PercentInput, PersianNumberInput } from '@/components/common/PersianNumberInput'
@@ -238,7 +240,8 @@ export function AllowanceSection({
       <div className={cn(!compact && 'card-head flex flex-wrap items-center justify-between gap-3 p-4 pb-3')}>
         <div className="flex items-center gap-2.5">
           <span className="chip-icon bg-brand-soft text-brand">
-            <Tags className="size-5" aria-hidden />
+            {/* v1.5.2 §۴.۳: آیکون Percent — مفهوم الونس/درصد */}
+            <Percent className="size-5" aria-hidden />
           </span>
           <div>
             <h3 className="text-sm font-extrabold">الونس‌ها و زمان‌های مجاز</h3>
@@ -341,27 +344,40 @@ export function AllowanceSection({
               ))}
             </div>
 
-            {/* خلاصه — §۶ */}
+            {/* خلاصه — بلوک‌های مستقل و منظم با فاصله کافی (v1.5.2 §۴.۱) */}
             {summary && (
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 rounded-xl bg-surface-2/70 px-3.5 py-2.5 text-xs">
-                <span className="font-bold">
-                  خلاصه: <span className="num text-brand">{formatIntFa(summary.count)} الونس مؤثر</span>
-                </span>
-                <span className="num">
-                  جمع درصدها (A): <b className="text-brand">{formatPercent(summary.totalPercent, prefs, 2)}</b>
-                </span>
-                <span className="num">
-                  زمان ثابت هر اجرا: <b>{formatSeconds(summary.perExecutionSeconds, prefs)}</b>
-                </span>
-                <span className="num">
-                  زمان ثابت هر چرخه: <b>{formatSeconds(summary.perCycleSeconds, prefs)}</b>
-                  <span className="text-faint"> (جدا از ST عناصر)</span>
-                </span>
-                {data?.settings.formula && (
-                  <Badge variant="outline" dir="ltr" className="num border-border/60 text-[10px]">
-                    {data.settings.formula}
-                  </Badge>
-                )}
+              <div className="rounded-xl bg-surface-2/70 px-3.5 py-3">
+                <p className="mb-2 text-[11px] font-extrabold text-muted-foreground">خلاصه محاسبات الونس</p>
+                <div className="flex flex-wrap items-stretch gap-2">
+                  <div className="flex flex-col justify-center gap-0.5 rounded-lg border border-border/60 bg-card px-3 py-1.5">
+                    <span className="text-[10px] font-bold text-muted-foreground">الونس مؤثر</span>
+                    <span className="num text-[13px] font-extrabold text-brand">{formatIntFa(summary.count)}</span>
+                  </div>
+                  <div className="flex flex-col justify-center gap-0.5 rounded-lg border border-border/60 bg-card px-3 py-1.5">
+                    <span className="text-[10px] font-bold text-muted-foreground">جمع درصدها (A)</span>
+                    <span dir="ltr" className="num text-right text-[13px] font-extrabold text-brand">
+                      {formatPercent(summary.totalPercent, prefs, 2)}
+                    </span>
+                  </div>
+                  <div className="flex flex-col justify-center gap-0.5 rounded-lg border border-border/60 bg-card px-3 py-1.5">
+                    <span className="text-[10px] font-bold text-muted-foreground">زمان ثابت هر اجرا</span>
+                    <span className="num text-[13px] font-extrabold">{formatSeconds(summary.perExecutionSeconds, prefs)}</span>
+                  </div>
+                  <div className="flex flex-col justify-center gap-0.5 rounded-lg border border-border/60 bg-card px-3 py-1.5">
+                    <span className="text-[10px] font-bold text-muted-foreground">
+                      زمان ثابت هر چرخه <span className="font-normal text-faint">(جدا از ST عناصر)</span>
+                    </span>
+                    <span className="num text-[13px] font-extrabold">{formatSeconds(summary.perCycleSeconds, prefs)}</span>
+                  </div>
+                  {data?.settings.formula && (
+                    <div
+                      dir="ltr"
+                      className="num flex items-center justify-center self-stretch rounded-lg border border-dashed border-brand/40 bg-brand-soft/40 px-3.5 py-1.5 text-[12px] font-extrabold text-brand"
+                    >
+                      {data.settings.formula}
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 
@@ -597,14 +613,27 @@ function AllowanceRowDesktop({
         {row.sourceScopeLabel ?? '—'}
         <span className="block text-[10px] text-faint">{SCOPE_LABELS[row.sourceScopeType ?? ''] ?? ''}</span>
       </td>
-      <td className="px-3 py-2.5 text-center">
+      <td className="w-28 px-3 py-2.5 text-center">
+        {/* v1.5.2 §۴.۲: فقط Badge کوتاه؛ توضیح کامل از طریق Tooltip */}
         <span className={cn('inline-block rounded-full px-2 py-0.5 text-[10.5px] font-bold', badge.className)}>
           {badge.label}
         </span>
         {row.note && (
-          <span className="mt-0.5 block max-w-44 text-[10px] leading-4 text-faint" title={row.note}>
-            {row.note}
-          </span>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                className="mt-0.5 inline-flex items-center gap-0.5 text-[10px] font-bold text-faint transition-colors hover:text-brand focus-visible:outline-2 focus-visible:outline-ring"
+                aria-label={`توضیح وضعیت ${row.title}`}
+              >
+                <CircleHelp className="size-3.5" aria-hidden />
+                توضیح
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="top" className="max-w-72 whitespace-normal bg-popover text-popover-foreground shadow-lg">
+              <p className="text-right leading-5" dir="rtl">{row.note}</p>
+            </TooltipContent>
+          </Tooltip>
         )}
       </td>
       <td className="px-2 py-2.5">

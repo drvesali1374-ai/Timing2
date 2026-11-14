@@ -52,10 +52,11 @@ export function HelpDot({
           <CircleHelp className="size-4" aria-hidden />
         </button>
       </PopoverTrigger>
+      {/* v1.5.2 §۶.۱: لایهٔ نمایش بالاتر از Dialog (z-50) — همیشه روی کارت‌ها */}
       <PopoverContent
         side="top"
         align="center"
-        className="w-80 overflow-hidden p-0"
+        className="z-[60] w-80 overflow-hidden p-0"
         dir="rtl"
         onClick={stopParentActivation}
         onKeyDown={stopParentActivation}
