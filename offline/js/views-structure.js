@@ -926,7 +926,7 @@
           var host = body.querySelector('#tree-element-allowances');
           g.T2VIEWS._allowanceSection(host, ctx.projectId, 'WORK_ELEMENT', element.id, { compact: true });
         }
-        // بخش «عناصر موازی و اطلاعات هم‌پوشانی» — کامپوننت مشترک ماتریس (جلسه ۲ §۴.۲)
+        // بخش «عناصر موازی» — کامپوننت مشترک (views-relations.js)
         if (isEdit && g.T2VIEWS._parallelRelationsSection) {
           var pHost = body.querySelector('#tree-element-parallel');
           g.T2VIEWS._parallelRelationsSection(pHost, ctx.projectId, element.id, element.name);
@@ -1495,7 +1495,7 @@
           var host = body.querySelector('#tab-element-allowances');
           g.T2VIEWS._allowanceSection(host, ctx.projectId, 'WORK_ELEMENT', element.id, { compact: true });
         }
-        // بخش «عناصر موازی و اطلاعات هم‌پوشانی» — کامپوننت مشترک ماتریس (جلسه ۲ §۴.۲)
+        // بخش «عناصر موازی» — کامپوننت مشترک (views-relations.js)
         if (isEdit && ctx && g.T2VIEWS._parallelRelationsSection) {
           var pHost = body.querySelector('#tab-element-parallel');
           g.T2VIEWS._parallelRelationsSection(pHost, ctx.projectId, element.id, element.name);

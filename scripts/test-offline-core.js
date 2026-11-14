@@ -414,15 +414,15 @@ ok(DB.listSessions(actS.id).length === 1, 'other session intact');
   ok(rEl3?.status === 'INHERITED' && Math.abs(rEl3.percentValue - 0.15) < 1e-9, 'migration: element inherits without copy');
 
   const pkg = await DB.exportProjectPackage(p2.id);
-  // جلسه ۲ — schema v۳: روابط موازی + anchorهای یال + snapshot تشخیصی
-  ok(pkg.manifest.schemaVersion === 3, 'package v3');
+  // v1.5.2 §۲ — schema v۴: فقط روابط موازی (مقادیر عددی هم‌پوشانی حذف شد)
+  ok(pkg.manifest.schemaVersion === 4, 'package v4');
   ok(Array.isArray(pkg.data.allowanceDefinition) && Array.isArray(pkg.data.allowanceAssignment), 'package contains new tables');
-  ok(Array.isArray(pkg.data.overlapRelation) && Array.isArray(pkg.data.observationOverlap), 'package contains session2 overlap tables');
-  // سازگاری رو به عقب: بستهٔ v۲ قدیمی (بدون جداول جدید) باید بدون خطا وارد شود
+  ok(Array.isArray(pkg.data.overlapRelation), 'package contains parallel relations table');
+  ok(!('observationOverlap' in pkg.data), 'package no longer contains observationOverlap (removed)');
+  // سازگاری رو به عقب: بستهٔ v۳ قدیمی (دارای observationOverlap) باید بدون خطا وارد شود
   const pkgV2 = JSON.parse(JSON.stringify(pkg));
-  pkgV2.manifest.schemaVersion = 2;
-  delete pkgV2.data.overlapRelation;
-  delete pkgV2.data.observationOverlap;
+  pkgV2.manifest.schemaVersion = 3;
+  pkgV2.data.observationOverlap = [{ id: 'legacy-ov-1', relationId: 'x', cycleId: 'y', status: 'OVERLAP', overlapDuration: 1, version: 1, updatedAt: new Date().toISOString() }];
   let impV2 = null;
   try { impV2 = await DB.importProjectPackage(pkgV2); } catch (e) { impV2 = null; }
   ok(impV2 === null || !!impV2.projectId, 'package v2 backward-compat: rejected safely or imported');

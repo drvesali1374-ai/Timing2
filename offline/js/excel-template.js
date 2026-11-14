@@ -72,19 +72,14 @@
     return exceljsPromise;
   }
 
-  /* مقدار متنی فعلی یک سلول قالب — فرمت پذیرفته‌شدهٔ Paste */
+  /* مقدار متنی فعلی یک سلول قالب — فرمت پذیرفته‌شدهٔ Paste
+   *  v1.5.2 §۲-۸ — زیرردیف موازی: بازهٔ از/تا مشاهدهٔ «عنصر مقابل» در همان چرخه */
   function cellTextFor(grow, cycle, method) {
     if (!cycle) return '';
-    if (grow.kind === 'RELATION') {
-      var ov = (cycle.overlaps || {})[grow.relationId];
-      if (!ov) return '';
-      if (ov.status === 'NO_OVERLAP') return '0';
-      if (ov.status === 'OVERLAP' && ov.overlapDuration != null) return String(round6(ov.overlapDuration));
-      return '';
-    }
+    var targetId = grow.kind === 'RELATION' ? grow.otherElementId : grow.elementId;
     var obs = null;
     for (var i = 0; i < cycle.observations.length; i++) {
-      if (cycle.observations[i].workElementId === grow.elementId) { obs = cycle.observations[i]; break; }
+      if (cycle.observations[i].workElementId === targetId) { obs = cycle.observations[i]; break; }
     }
     if (!obs) return '';
     if (obs.startOffset != null && obs.endOffset != null) return round6(obs.startOffset) + '-' + round6(obs.endOffset);
@@ -155,7 +150,7 @@
         labelCell.font = { bold: true, size: 11 };
         labelCell.alignment = { horizontal: 'right', vertical: 'middle', readingOrder: 'rtl' };
       } else {
-        labelCell.value = '↲ هم‌پوشانی با ' + grow.otherElementName;
+        labelCell.value = '↲ موازی: ' + grow.otherElementName;
         labelCell.font = { size: 10, color: { argb: 'FF71717A' } };
         labelCell.alignment = { horizontal: 'right', vertical: 'middle', readingOrder: 'rtl', indent: 2 };
       }
@@ -186,7 +181,7 @@
       ['۱. این قالب مخصوص «همین جلسهٔ زمان‌سنجی» است (شناسهٔ جلسه در شیت مخفی Metadata). برای جلسهٔ دیگری، قالب جدید دانلود کنید.', {}],
       ['۲. فقط سلول‌های سبز روشن را تکمیل کنید (ستون‌های چرخه). نام عناصر، ستون اول و سربرگ‌ها را تغییر ندهید و سطری را جابه‌جا یا حذف نکنید.', {}],
       ['۳. مقدار هر عنصر: یک عدد (مثل 12.5 یا ۱۲٫۵) یا برای عناصر هم‌زمان بازهٔ «شروع-پایان» (مثل 3-9).', {}],
-      ['۴. زیرردیف «هم‌پوشانی با …»: خالی = بررسی‌نشده، ۰ = بدون هم‌پوشانی، عدد مثبت = مدت هم‌پوشانی (ثانیه).', {}],
+      ['۴. زیرردیف «↲ موازی: …» زمان همان عنصر موازی است: بازهٔ «شروع-پایان» نسبت به مبدأ چرخه وارد کنید (مثل 3-9).', {}],
       ['۵. ستون‌های خالی انتهایی برای چرخه‌های جدیدند؛ در صورت نیاز می‌توانید در سمت چپ ستون‌های بیشتری اضافه کنید (عنوان ستون جدید را هم «چرخهٔ N» بگذارید).', {}],
       ['۶. سلول خالی به معنی «بدون تغییر» است — دادهٔ موجود حذف نمی‌شود.', {}],
       ['', {}],
@@ -274,7 +269,7 @@
   function cellText(value, gridRows, rowIdx, colIdx, startCycleNo, cellErrors) {
     if (value == null) return '';
     var grow = gridRows[rowIdx];
-    var where = 'ردیف ' + (rowIdx + 1) + ' (' + (grow.kind === 'ELEMENT' ? grow.elementName : 'هم‌پوشانی ' + grow.elementName + '↔' + grow.otherElementName) + ')، چرخهٔ ' + (startCycleNo + colIdx);
+    var where = 'ردیف ' + (rowIdx + 1) + ' (' + (grow.kind === 'ELEMENT' ? grow.elementName : 'موازی: ' + grow.otherElementName) + ')، چرخهٔ ' + (startCycleNo + colIdx);
     if (typeof value === 'string') return value.trim();
     if (typeof value === 'number') {
       if (!isFinite(value)) { cellErrors.push(where + ': عدد نامعتبر است.'); return ''; }

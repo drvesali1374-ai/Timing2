@@ -303,8 +303,7 @@
   /** حذف واقعی یک چرخه — دور زدن باگ هسته:
       DB.deleteCycle فقط مشاهدات/خطوط را پاک می‌کند و خود ردیف چرخه را
       (به دلیل فیلتر cascadeDelete بر sessionId به‌جای id) باقی می‌گذارد.
-      اینجا حذف از مسیر عمومی snapshot + replaceSessionRows انجام می‌شود.
-      §۸ ممیزی جلسه ۲ — مقادیر هم‌پوشانی چرخه نیز حذف و با Undo بازگردانده می‌شوند. */
+      اینجا حذف از مسیر عمومی snapshot + replaceSessionRows انجام می‌شود. */
   function deleteCycleSafe(sessionId, cycleId) {
     var snap = DB.snapshotSessionRows(sessionId);
     var before = snap.cycles.length;
@@ -312,7 +311,6 @@
     if (snap.cycles.length === before) throw new Error('چرخه یافت نشد.');
     snap.lanes = snap.lanes.filter(function (l) { return l.cycleId !== cycleId; });
     snap.observations = snap.observations.filter(function (o) { return o.cycleId !== cycleId; });
-    snap.overlaps = (snap.overlaps || []).filter(function (o) { return o.cycleId !== cycleId; });
     DB.replaceSessionRows(sessionId, snap);
   }
   /** حذف واقعی جلسه — دور زدن باگ هسته:
@@ -696,8 +694,8 @@
       input: method === 'CONTINUOUS'
         ? 'در روش پیوسته، قرائت تجمعی کرنومتر را در پایان هر عنصر وارد کنید؛ مدت هر عنصر به‌صورت خودکار از تفاضل قرائت‌ها محاسبه و زیر سلول نمایش داده می‌شود. قرائت‌ها باید نزولی نباشند.'
         : 'در روش برگشت به صفر، مدت سپری‌شدهٔ هر عنصر را مستقیم وارد کنید. برای عناصر هم‌زمان، مقدار را به‌صورت «شروع-پایان» (مثل ۳-۹) نسبت به مبدأ چرخه وارد کنید.',
-      example: 'ورودی «۱۲٫۵» یا «12.5» — بازهٔ «۳ تا ۹» یا «3-9» — زیرردیف هم‌پوشانی: خالی (بررسی‌نشده)، ۰ (بدون هم‌پوشانی) یا مقدار مثبت — حرکت با Tab/Enter و جهت‌نما؛ کپی محدوده با Shift+جهت‌نما و Ctrl+C.',
-      note: 'زمان سپری‌شدهٔ چرخه در کارهای هم‌زمان، گستره (دیرترین پایان − زودترین شروع) است نه جمع مدت‌ها. زیرردیف‌های هم‌پوشانی در هر دو سمت از یک رکورد واحد خوانده می‌شوند؛ دادهٔ خام هرگز حذف نمی‌شود؛ خروج از محاسبه فقط وضعیت را عوض می‌کند.',
+      example: 'ورودی «۱۲٫۵» یا «12.5» — بازهٔ «۳ تا ۹» یا «3-9» — زیرردیف عنصر موازی: بازهٔ از/تا نسبت به مبدأ چرخه — حرکت با Tab/Enter و جهت‌نما؛ کپی محدوده با Shift+جهت‌نما و Ctrl+C.',
+      note: 'زمان سپری‌شدهٔ چرخه در کارهای هم‌زمان، گستره (دیرترین پایان − زودترین شروع) است نه جمع مدت‌ها. زمان عنصر موازی در زیرردیف همان دادهٔ ردیف اصلی آن عنصر است (در برگهٔ فعالیت مقابل نیز دیده می‌شود)؛ دادهٔ خام هرگز حذف نمی‌شود؛ خروج از محاسبه فقط وضعیت را عوض می‌کند.',
     };
 
     var canCreate = elements.length > 0 && DB.listOperators(ctx.projectId).length > 0;
@@ -892,45 +890,6 @@
     var relByIdMap = {};
     (sheet.parallelRelations || []).forEach(function (r) { relByIdMap[r.relationId] = r; });
 
-    /* مقایسه‌پذیری یک رابطه در یک چرخه — هم‌ارز منطق سرور (§۵.۵) */
-    function comparabilityOf(cycle, rel) {
-      var reasons = [];
-      [rel.elementLowId, rel.elementHighId].forEach(function (eid) {
-        var o = findObs(cycle, eid);
-        if (!o) {
-          var nm = nameOfElementLocal(eid);
-          reasons.push('«' + nm + '» در این چرخه مشاهده‌ای ندارد');
-        } else if (!((o.startOffset !== null && o.endOffset !== null) || (o.derivedDuration !== null || o.rawDuration !== null))) {
-          reasons.push('«' + nameOfElementLocal(eid) + '» در این چرخه مدت یا بازهٔ قابل‌مقایسه ندارد');
-        }
-      });
-      return reasons.length === 0
-        ? { isComparable: true, notComparableReason: null }
-        : { isComparable: false, notComparableReason: 'در این چرخه قابل‌مقایسه نیست: ' + reasons.join('؛ ') };
-    }
-    function nameOfElementLocal(id) {
-      for (var i = 0; i < elements.length; i++) if (elements[i].id === id) return elements[i].name;
-      /* v1.5.1 §۷ — نام عنصر خارج از Activity جاری از روابط برگه */
-      var rels = sheet.parallelRelations || [];
-      for (var j = 0; j < rels.length; j++) {
-        if (rels[j].elementLowId === id) return rels[j].elementLowName;
-        if (rels[j].elementHighId === id) return rels[j].elementHighName;
-      }
-      return '؟';
-    }
-    /* هم‌پوشانی محاسبه‌شده از بازهٔ واقعی — §۵.۵ */
-    function computedOverlapOf(cycle, rel) {
-      var a = findObs(cycle, rel.elementLowId);
-      var b = findObs(cycle, rel.elementHighId);
-      if (!a || !b || a.startOffset === null || a.endOffset === null || b.startOffset === null || b.endOffset === null) return null;
-      return Math.max(0, Math.min(a.endOffset, b.endOffset) - Math.max(a.startOffset, b.startOffset));
-    }
-    function overlapCellOfLocal(cycle, relationId) {
-      var v = (cycle.overlaps || {})[relationId];
-      if (!v) return { status: 'UNREVIEWED', overlapDuration: null, version: 0 };
-      return { status: v.status, overlapDuration: v.overlapDuration, version: v.version };
-    }
-
     /* — سربرگ چرخه‌ها (چسبان بالا) — */
     var theadRow = U.h('tr', null, U.h('th', { class: 'sticky-col t2t-corner', text: 'عنصر کاری / رابطه' }));
     cycles.forEach(function (cycle) {
@@ -978,7 +937,7 @@
         var sub = U.h('tr', { class: 't2-subrow' });
         sub.appendChild(parallelRowHeader(grow));
         cycles.forEach(function (cycle, colIdx) {
-          sub.appendChild(buildOverlapTd(cycle, colIdx, grow, rowIdx));
+          sub.appendChild(buildParallelTd(cycle, colIdx, grow, rowIdx));
         });
         tbody.appendChild(sub);
       }
@@ -1119,7 +1078,7 @@
       return th;
     }
 
-    /* ── سربرگ زیرردیف رابطه (چسبان راست) — «↲ هم‌پوشانی با X» + حذف §۶.۱ ──
+    /* ── سربرگ زیرردیف موازی (چسبان راست) — «↲ موازی: X» + حذف — v1.5.2 §۲-۸
        v1.5.1 §۷ — روابط بین‌فعالیت با برچسب فعالیت/ایستگاه عنصر مقابل */
     function parallelRowHeader(grow) {
       var th = U.h('th', { class: 'sticky-col t2t-row-head t2t-subrow-head', scope: 'row' });
@@ -1128,8 +1087,8 @@
         U.h('span', { class: 't2t-subrow-tie', 'aria-hidden': 'true' }),
         U.h('span', {
           class: 'font-bold truncate', style: { fontSize: '11px', color: 'var(--muted-foreground)' },
-          title: 'هم‌پوشانی با ' + grow.otherName + (grow.crossActivity ? ' (فعالیت ' + (grow.otherActivityName || '؟') + ' / ایستگاه ' + (grow.otherStationName || '؟') + ')' : ''),
-          text: '↲ هم‌پوشانی با ' + grow.otherName,
+          title: 'عنصر موازی: ' + grow.otherName + ' — زمان آن به‌صورت بازهٔ از/تا در همین چرخه ثبت می‌شود' + (grow.crossActivity ? ' (فعالیت ' + (grow.otherActivityName || '؟') + ' / ایستگاه ' + (grow.otherStationName || '؟') + ')' : ''),
+          text: '↲ موازی: ' + grow.otherName,
         }),
         grow.crossActivity
           ? U.h('span', {
@@ -1162,7 +1121,7 @@
       /* کاتالوگ کامل عناصر پروژه — batch از ماتریس (بدون چرخه) */
       var catalogAll = [];
       try {
-        catalogAll = DB.getOverlapMatrix(sheet.activity.projectId, null).elementsCatalog;
+        catalogAll = DB.getElementsCatalog(sheet.activity.projectId).elementsCatalog;
       } catch (e) { catalogAll = []; }
       var candidates = catalogAll.filter(function (c) { return c.elementId !== el.id && !related[c.elementId]; });
       var ownEntry = catalogAll.find(function (c) { return c.elementId === el.id; });
@@ -1485,20 +1444,37 @@
       return td;
     }
 
-    /* ── سازندهٔ سلول زیرردیف هم‌پوشانی — §۵.۳/§۵.۴ (خالی=UNREVIEWED، ۰=NO_OVERLAP، مثبت=OVERLAP) ── */
-    function buildOverlapTd(cycle, colIdx, grow, rowIdx) {
-      var rel = grow.relation;
-      var cell = overlapCellOfLocal(cycle, rel.relationId);
-      var cmp = comparabilityOf(cycle, rel);
-      var computed = computedOverlapOf(cycle, rel);
-      var canEdit = editable && cmp.isComparable;
-      var td = U.h('td', { style: { textAlign: 'center', padding: '0 2px' } });
-      if (cell.status === 'NO_OVERLAP') td.style.background = 'color-mix(in srgb, var(--green) 8%, transparent)';
-      else if (cell.status === 'OVERLAP') td.style.background = 'color-mix(in srgb, var(--green) 12%, transparent)';
-      if (!cmp.isComparable) {
-        td.title = cmp.notComparableReason;
-        td.style.opacity = '.6';
+
+
+    /* ── سازندهٔ سلول زیرردیف موازی — v1.5.2 §۲-۸:
+       زمان عادی «عنصر مقابل» در همین چرخه؛ همان ElementObservation ردیف
+       اصلی آن عنصر (بازهٔ از/تا؛ سلول وضعیت/مقدار هم‌پوشانی حذف شد) ── */
+    function buildParallelTd(cycle, colIdx, grow, rowIdx) {
+      var otherEl = { id: grow.otherId, name: grow.otherName };
+      var obs = null;
+      for (var i = 0; i < (cycle.observations || []).length; i++) {
+        if (cycle.observations[i].workElementId === grow.otherId) { obs = cycle.observations[i]; break; }
       }
+      var partial = !!obs && (obs.startOffset !== null) !== (obs.endOffset !== null);
+      var suspect = !!obs && obs.validityStatus === 'SUSPECT';
+      var excluded = !!obs && obs.validityStatus === 'EXCLUDED';
+      var td = U.h('td', { style: { textAlign: 'center', padding: '0 2px' } });
+      if (partial || (!!obs && obs.validityStatus === 'INVALID')) {
+        td.style.boxShadow = 'inset 0 0 0 2px color-mix(in srgb, var(--amber) 60%, transparent)';
+      }
+      if (suspect) td.style.background = 'color-mix(in srgb, var(--amber-soft) 50%, transparent)';
+
+      var derivedText = null;
+      if (obs && obs.startOffset !== null && obs.endOffset !== null && obs.derivedDuration !== null) {
+        derivedText = U.formatTimeValue(obs.derivedDuration);
+      }
+      var stack = U.h('div', { class: 'flex flex-col', style: { height: '100%' } });
+      var row = U.h('div', { class: 'flex items-center justify-center gap-0.5 flex-1 min-w-0' });
+      stack.appendChild(row);
+      if (derivedText !== null) {
+        stack.appendChild(U.h('div', { class: 'cell-derived', text: '(' + derivedText + ')', style: { paddingBottom: '1px' } }));
+      }
+      td.appendChild(stack);
 
       var errEl = null;
       function clearError() {
@@ -1510,83 +1486,100 @@
         errEl = U.h('div', { class: 'cell-error', text: msg });
         td.appendChild(errEl);
       }
-
-      function commitOverlap() {
-        clearError();
-        var t = String(inp.value).trim();
-        if (t === '' || t === '-' || t === '—' || t === '–') {
-          if (cell.status === 'UNREVIEWED') { scheduleRender(); return; }
-          if (withUndo(sessionId, 'پاک‌کردن هم‌پوشانی', function () {
-            DB.setCycleOverlaps(cycle.id, [{ relationId: rel.relationId, status: 'UNREVIEWED', overlapDuration: null }]);
-          })) invalidateSheetCache(sessionId);
-          scheduleRender();
-          return;
-        }
+      function readNum(v) {
+        var t = String(v).trim();
+        if (t === '' || t === '-' || t === '—' || t === '–') return { empty: true };
         var n = U.parseNumber(t);
-        if (isNaN(n)) { showError('مقدار عددی معتبر نیست'); scheduleRender(); return; }
-        if (n < 0) { showError('مقدار هم‌پوشانی منفی مجاز نیست'); scheduleRender(); return; }
-        if (n === 0 && computed !== null && computed > 1e-9) {
-          showError('بازهٔ واقعی این چرخه هم‌پوشانی ' + U.formatTimeValue(computed) + ' دارد؛ ثبت «بدون هم‌پوشانی» ممکن نیست');
-          scheduleRender();
-          return;
+        if (isNaN(n)) return { bad: true };
+        return { n: n };
+      }
+      function makeInput(part, value) {
+        return U.h('input', {
+          class: 'sheet-cell',
+          type: 'text', dir: 'ltr', inputmode: 'decimal',
+          value: value,
+          'aria-label': part === 'start'
+            ? 'شروع بازهٔ عنصر موازی ' + otherEl.name
+            : 'پایان بازهٔ عنصر موازی ' + otherEl.name + ' چرخهٔ ' + U.formatInt(cycle.cycleNo),
+          disabled: excluded,
+          dataset: { row: String(rowIdx), col: String(colIdx), part: part },
+          style: { width: '44px' },
+        });
+      }
+      var startIn = null, endIn = null;
+
+      function liveValidate() {
+        clearError();
+        var a = readNum(startIn.value);
+        var b = readNum(endIn.value);
+        if (a.bad || b.bad) showError('مقدار عددی معتبر نیست (ارقام فارسی یا لاتین)');
+        else if ((!a.empty && a.n < 0) || (!b.empty && b.n < 0)) showError('زمان منفی مجاز نیست');
+        else if (!a.empty && !b.empty && b.n <= a.n) showError('پایان بازه باید بزرگ‌تر از شروع آن باشد');
+      }
+
+      function commitCell() {
+        liveValidate();
+        if (errEl) { scheduleRender(); return; }
+        var a = readNum(startIn.value);
+        var b = readNum(endIn.value);
+        var cell;
+        if (a.empty && b.empty) {
+          if (!obs || (obs.rawDuration === null && obs.cumulativeReading === null && obs.startOffset === null && obs.endOffset === null)) { scheduleRender(); return; }
+          cell = { cycleNo: cycle.cycleNo, workElementId: grow.otherId, rawDuration: null, cumulativeReading: null, startOffset: null, endOffset: null };
+        } else {
+          var sv = a.empty ? null : a.n;
+          var ev = b.empty ? null : b.n;
+          if (obs && obs.startOffset === sv && obs.endOffset === ev) { scheduleRender(); return; }
+          cell = { cycleNo: cycle.cycleNo, workElementId: grow.otherId, rawDuration: null, cumulativeReading: null, startOffset: sv, endOffset: ev };
         }
-        if (n > 0 && computed !== null && Math.abs(n - computed) > 1e-6) {
-          showError('مقدار واردشده (' + n + ') با هم‌پوشانی بازهٔ واقعی (' + U.formatTimeValue(computed) + ') نمی‌خواند');
-          scheduleRender();
-          return;
+        if (withUndo(sessionId, 'ثبت زمان عنصر موازی', function () { DB.putCells(sessionId, [cell]); })) {
+          invalidateSheetCache(sessionId);
         }
-        var target = n === 0
-          ? { status: 'NO_OVERLAP', overlapDuration: 0 }
-          : { status: 'OVERLAP', overlapDuration: n };
-        if (cell.status === target.status && cell.overlapDuration === target.overlapDuration) { scheduleRender(); return; }
-        if (withUndo(sessionId, 'ثبت هم‌پوشانی', function () {
-          DB.setCycleOverlaps(cycle.id, [{ relationId: rel.relationId, status: target.status, overlapDuration: target.overlapDuration }]);
-        })) invalidateSheetCache(sessionId);
         scheduleRender();
       }
 
-      var inp = null;
-      if (!editable || !canEdit) {
-        /* نمایش فقط‌خواندنی */
-        if (cell.status === 'UNREVIEWED') {
-          td.appendChild(U.h('span', {
-            class: 't2t-ov-unreviewed', title: 'بررسی‌نشده — خالی به معنی صفر نیست',
-            text: '؟',
-          }));
-        } else if (cell.status === 'NO_OVERLAP') {
-          td.appendChild(U.h('span', { class: 'num text-xs font-bold', style: { color: 'var(--green)' }, title: 'بدون هم‌پوشانی — تأییدشده', text: '۰' }));
-        } else {
-          td.appendChild(U.h('span', { class: 'num text-xs font-bold' },
-            U.formatTimeValue(cell.overlapDuration),
-            U.h('span', { style: { fontSize: '9px', color: 'var(--muted-foreground)', fontWeight: '400' }, text: ' s' })));
+      if (!editable || excluded) {
+        var txt = '';
+        if (obs && obs.startOffset !== null && obs.endOffset !== null) {
+          txt = U.formatTimeValue(obs.startOffset) + ' – ' + U.formatTimeValue(obs.endOffset);
+        } else if (obs && obs.startOffset !== null) {
+          txt = U.formatTimeValue(obs.startOffset) + ' – ؟';
+        } else if (obs && obs.endOffset !== null) {
+          txt = '؟ – ' + U.formatTimeValue(obs.endOffset);
+        }
+        row.appendChild(U.h('span', { class: 'num text-xs font-medium', text: txt || '—', style: excluded ? { textDecoration: 'line-through', color: 'var(--faint)' } : null }));
+        if (suspect && obs) {
+          td.style.cursor = 'pointer';
+          td.addEventListener('click', function () { openSuspectDialog(cycle, obs, otherEl.name); });
         }
       } else {
-        inp = U.h('input', {
-          class: 'sheet-cell', type: 'text', dir: 'ltr', inputmode: 'decimal',
-          value: cell.status === 'UNREVIEWED' ? '' : roundEdit(cell.overlapDuration),
-          'aria-label': 'هم‌پوشانی ' + grow.parent.name + ' با ' + grow.otherName + ' چرخهٔ ' + U.formatInt(cycle.cycleNo),
-          placeholder: '—',
-          dataset: { row: String(rowIdx), col: String(colIdx), part: 'ov' },
-          style: { width: '64px' },
+        startIn = makeInput('start', roundEdit(obs ? obs.startOffset : null));
+        endIn = makeInput('end', roundEdit(obs ? obs.endOffset : null));
+        [startIn, endIn].forEach(function (inp) {
+          inp.addEventListener('input', liveValidate);
+          inp.addEventListener('change', commitCell);
         });
-        inp.addEventListener('change', commitOverlap);
-        td.appendChild(inp);
+        /* گروه بصری «از/تا» — v1.5.2 §۵ جهت RTL: «از» در راست، «تا» در چپ */
+        row.appendChild(U.h('div', { class: 't2t-int-group', dir: 'rtl', role: 'group', 'aria-label': 'بازهٔ عنصر موازی ' + otherEl.name },
+          U.h('label', { class: 't2t-int-part' },
+            U.h('span', { class: 't2t-int-label', 'aria-hidden': 'true', text: 'از' }),
+            startIn),
+          U.h('span', { class: 't2t-int-sep', 'aria-hidden': 'true', text: '–' }),
+          U.h('label', { class: 't2t-int-part' },
+            U.h('span', { class: 't2t-int-label', 'aria-hidden': 'true', text: 'تا' }),
+            endIn)));
       }
-      /* پیشنهاد مقدار محاسبه‌شده از بازهٔ واقعی — §۵.۵ */
-      if (computed !== null && cell.status !== 'OVERLAP' && canEdit) {
-        td.appendChild(U.h('button', {
-          type: 'button',
-          class: 't2t-ov-suggest num',
-          title: 'هم‌پوشانی محاسبه‌شده از بازهٔ واقعی: ' + U.formatTimeValue(computed) + ' — برای اعمال کلیک کنید',
-          onclick: function (e) {
-            e.stopPropagation();
-            if (withUndo(sessionId, 'اعمال هم‌پوشانی محاسبه‌شده', function () {
-              DB.setCycleOverlaps(cycle.id, [{ relationId: rel.relationId, status: 'OVERLAP', overlapDuration: computed }]);
-            })) invalidateSheetCache(sessionId);
-            scheduleRender();
-          },
-        }, '≈ ' + U.formatTimeValue(computed)));
+
+      if (suspect && obs && editable) {
+        var suspectFlag = U.h('button', {
+          class: 't2t-suspect-flag', type: 'button',
+          title: 'تشخیص مشاهدهٔ مشکوک', 'aria-label': 'تشخیص مشاهدهٔ مشکوک',
+          onclick: function (e) { e.stopPropagation(); openSuspectDialog(cycle, obs, otherEl.name); },
+        }, U.icon('alertTriangle'));
+        row.appendChild(suspectFlag);
       }
+      if (excluded) td.appendChild(U.h('span', { class: 'cell-flag', title: 'خارج‌شده از محاسبات', style: { color: 'var(--faint)' } }, U.icon('eraser')));
+
       return td;
     }
 
@@ -1981,7 +1974,7 @@
       if (anchor.relationId) {
         (sheet.parallelRelations || []).forEach(function (r) {
           if (r.relationId === anchor.relationId) {
-            anchorName = 'هم‌پوشانی (' + anchorName + ' ↔ ' + (r.elementLowId === anchor.elementId ? r.elementHighName : r.elementLowName) + ')';
+            anchorName = 'عنصر موازی ' + (r.elementLowId === anchor.elementId ? r.elementHighName : r.elementLowName) + ' (زیر ' + anchorName + ')';
           }
         });
       }
@@ -2083,7 +2076,7 @@
               var tr = U.h('tr', null,
                 U.h('td', { class: 'font-bold text-xs' },
                   grow.kind === 'RELATION'
-                    ? U.h('span', { class: 'text-muted', style: { fontSize: '11px' }, text: '↲ هم‌پوشانی با ' + grow.otherElementName })
+                    ? U.h('span', { class: 'text-muted', style: { fontSize: '11px' }, text: '↲ موازی: ' + grow.otherElementName })
                     : grow.elementName));
               for (var ci = 0; ci < Math.max(maxCols, 1); ci++) {
                 var cell = rowCells[ci];
@@ -2095,9 +2088,6 @@
                   td.appendChild(U.h('div', { class: 'text-xs', style: { color: 'var(--red)' }, text: cell.message }));
                 } else if (cell.status === 'NO_CHANGE') {
                   td.appendChild(U.h('span', { class: 'text-faint', text: '—' }));
-                } else if (cell.relationId && cell.overlapStatus) {
-                  td.appendChild(U.h('div', { class: 'num text-xs' },
-                    cell.overlapStatus === 'NO_OVERLAP' ? '۰ (بدون هم‌پوشانی)' : U.formatTimeValue(cell.overlapDuration)));
                 } else if (cell.interval) {
                   td.appendChild(U.h('div', { class: 'num text-xs' },
                     U.formatTimeValue(cell.interval.start) + '–' + U.formatTimeValue(cell.interval.end)));
@@ -2152,9 +2142,9 @@
           body.appendChild(U.h('div', { class: 't2t-help-row' },
             U.h('span', { class: 'text-xs text-muted' }, 'راهنما:'),
             UI.helpDot('ورود اطلاعات از Excel', {
-              what: 'ثبت هم‌زمان چند سطر و ستون از Excel در برگهٔ زمان‌سنجی — با چیدمان جدید: هر سطر داده یک ردیف شبکه (عنصر یا زیرردیف هم‌پوشانی) و هر ستون داده یک چرخه.',
+              what: 'ثبت هم‌زمان چند سطر و ستون از Excel در برگهٔ زمان‌سنجی — با چیدمان جدید: هر سطر داده یک ردیف شبکه (عنصر یا زیرردیف عنصر موازی) و هر ستون داده یک چرخه.',
               input: 'دو مسیر مستقل: (۱) محدودهٔ موردنظر را در Excel کپی کنید (Ctrl+C) و همین‌جا بچسبانید (Ctrl+V)؛ (۲) «قالب Excel» این جلسه را دانلود کنید، تکمیل کنید و فایل را بارگذاری کنید.',
-              example: 'اگر ۳ عنصر دارید و ۵ چرخه Paste می‌کنید، یک محدودهٔ ۳ سطر × ۵ ستون کپی کنید. برای عنصر هم‌زمان «۳-۹» و برای زیرردیف هم‌پوشانی خالی/۰/مقدار مثبت بنویسید.',
+              example: 'اگر ۳ عنصر دارید و ۵ چرخه Paste می‌کنید، یک محدودهٔ ۳ سطر × ۵ ستون کپی کنید. برای عنصر هم‌زمان و زیرردیف عنصر موازی، بازهٔ «۳-۹» (شروع تا پایان نسبت به مبدأ چرخه) بنویسید.',
               note: 'هیچ داده‌ای بدون پیش‌نمایش و تأیید شما ثبت نمی‌شود؛ خطای هر سلول با محل و علت دقیق نمایش داده می‌شود. بارگذاری فایل هم فقط ورودی همین مسیر را می‌سازد و به‌صورت مستقیم ذخیره نمی‌کند.',
             }),
             UI.helpDot('حالت ثبت Paste', {
@@ -2174,7 +2164,7 @@
           pasteSection.appendChild(textArea);
           pasteSection.appendChild(U.h('p', {
             class: 'hint',
-            text: 'هر سطر = یک ردیف شبکه (عنصر یا زیرردیف هم‌پوشانی) — هر ستون = یک چرخه — جداکنندهٔ ستون: Tab — اعشار: نقطه یا «٫» — بازهٔ عنصر: «۳-۹» — زیرردیف هم‌پوشانی: خالی/۰/مقدار مثبت — خالی = بدون تغییر',
+            text: 'هر سطر = یک ردیف شبکه (عنصر یا زیرردیف عنصر موازی) — هر ستون = یک چرخه — جداکنندهٔ ستون: Tab — اعشار: نقطه یا «٫» — بازهٔ از/تا: «۳-۹» (هر دو نوع ردیف) — خالی = بدون تغییر',
           }));
 
           function runPreviewFrom(text, anc) {
