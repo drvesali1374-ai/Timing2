@@ -54,8 +54,8 @@
     }
     var operators = DB.listOperators(projectId);
 
-    // ── سربرگ بخش ──
-    container.appendChild(U.h('div', { class: 'flex flex-wrap items-center justify-between gap-3' },
+    // ── سربرگ بخش — چسبان زیر نوار اصلی (v1.5.2 §۸) ──
+    container.appendChild(UI.stickyHeading(U.h('div', { class: 'flex flex-wrap items-center justify-between gap-3' },
       U.h('div', { class: 'flex items-center gap-3' },
         U.h('span', { class: 'chip-icon' }, U.icon('users')),
         U.h('div', null,
@@ -64,7 +64,7 @@
       U.h('button', {
         class: 'btn btn-brand', type: 'button',
         onclick: function () { openOperatorDialog(projectId, null); },
-      }, U.icon('plus'), 'اپراتور جدید')));
+      }, U.icon('plus'), 'اپراتور جدید'))));
 
     // ── یادآوری ──
     container.appendChild(U.h('div', { class: 'banner info mt-4' }, U.icon('info'),

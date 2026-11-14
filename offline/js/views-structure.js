@@ -19,6 +19,7 @@
 
   // ── وضعیت پایدار بین رندرها ──
   var _selectedStation = {}; // projectId -> stationId | null
+  var _selectedActivity = {}; // projectId -> activityId | null — کلیک دومانی (v1.5.2 §۲.۴)
   var _stationOpen = {};     // stationId -> bool (پیش‌فرض: باز)
   var _activityTab = {};     // activityId -> 'info' | 'elements' | 'timing' | 'analysis'
   var _activityOpenTree = {}; // فعالیت‌های باز در درخت (پیش‌فرض: بسته) — جلسه اول §۷.۲
@@ -83,24 +84,32 @@
     var style = document.createElement('style');
     style.id = 't2-structure-v2-style';
     style.textContent = [
-      // چیدمان دوستونه دسکتاپ — ستون‌های هم‌عرض (۵۰-۵۰) با عرض کامل صفحه
+      // ── چیدمان دوستونه دسکتاپ — ستون‌های هم‌عرض (۵۰-۵۰) با عرض کامل صفحه
+      // v1.5.2 §۲.۱: ستون درخت sticky نیست — همراه اسکرول اصلی صفحه حرکت می‌کند
       '@media (min-width: 1024px) {',
       '  .t2-two-col { flex-direction: row; gap: 20px; }',
       '  .t2-tree-col { width: calc(50% - 10px); }',
       '}',
-      // ── کارت ایستگاه در درخت ──
-      '.t2-station-card { border: 1px solid var(--border); border-radius: calc(var(--radius) + 5px); background: var(--card); overflow: hidden; transition: border-color .15s, background .15s, box-shadow .2s; }',
+      // ── کارت ایستگاه در درخت — سطح ۱: bg-card (v1.5.2 §۲.۲) ──
+      '.t2-station-card { border: 1px solid var(--line-strong, var(--border)); border-radius: calc(var(--radius) + 5px); background: var(--card); overflow: hidden; transition: border-color .15s, background .15s, box-shadow .2s; }',
       '.t2-station-card:hover { border-color: color-mix(in srgb, var(--brand) 40%, var(--border)); }',
       '.t2-station-card.selected { border-color: var(--brand); background: color-mix(in srgb, var(--brand-soft) 40%, var(--card)); box-shadow: 0 0 0 2px color-mix(in srgb, var(--brand) 25%, transparent), 0 6px 18px -8px rgba(114,87,255,.5); }',
       '.t2-station-head { display: flex; align-items: stretch; gap: 6px; padding: 4px 6px 4px 0; padding-inline-start: 32px; cursor: pointer; }',
       '.t2-station-head:focus-visible { outline: 2px solid var(--brand); outline-offset: -2px; }',
       '.t2-station-title { font-weight: 700; font-size: 13px; line-height: 1.45; margin: 0; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }',
       '.t2-station-meta { font-size: 11px; line-height: 1.5; color: var(--muted-foreground); margin: 2px 0 0; }',
-      // ── ردیف فعالیت — ظاهر زیرمنو (بدون قاب، پس‌زمینه رنگی) ──
-      '.t2-activity-row { display: flex; align-items: stretch; gap: 6px; padding: 2px 4px 2px 0; padding-inline-start: 32px; border-radius: var(--radius); background: color-mix(in srgb, var(--surface-2) 75%, transparent); transition: background .15s; }',
-      '.t2-activity-row:hover { background: color-mix(in srgb, var(--brand-soft) 30%, transparent); }',
+      // ── کارت فعالیت — سطح ۲: bg-surface-2 + عرض ~۷۵٪ کارت ایستگاه (§۲.۲) ──
+      '.t2-activity-row { display: flex; align-items: stretch; gap: 6px; padding: 4px 4px 4px 0; padding-inline-start: 32px; border-radius: var(--radius); border: 1px solid color-mix(in srgb, var(--border) 60%, transparent); background: color-mix(in srgb, var(--surface-2) 80%, transparent); transition: background .15s, border-color .15s; }',
+      '.t2-activity-row:hover { border-color: color-mix(in srgb, var(--brand) 35%, transparent); background: color-mix(in srgb, var(--brand-soft) 15%, var(--surface-2)); }',
+      '.t2-activity-row.selected { border-color: var(--brand); background: color-mix(in srgb, var(--brand-soft) 45%, transparent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--brand) 25%, transparent); }',
       '.t2-activity-title { font-size: 12.5px; font-weight: 500; line-height: 1.45; display: block; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; text-align: start; }',
       '.t2-activity-meta { font-size: 10.5px; line-height: 1.5; color: var(--muted-foreground); display: block; margin-top: 2px; }',
+      // ── ردیف عنصر — سطح ۳: bg-surface-3 + عرض ~۷۵٪ کارت فعالیت (§۲.۲) ──
+      '.t2-element-row { display: flex; align-items: center; gap: 5px; padding: 2px 4px 2px 0; padding-inline-start: 24px; border-radius: calc(var(--radius) - 4px); background: color-mix(in srgb, var(--surface-3) 60%, transparent); transition: background .15s; }',
+      '.t2-element-row:hover { background: color-mix(in srgb, var(--brand-soft) 25%, transparent); }',
+      // زیرشاخه فعالیت‌ها/عناصر — عرض ~۷۵٪ (موبایل ۸۵٪) — v1.5.2 §۲.۲
+      '.t2-acts, .t2-elements-list { width: 85%; min-width: 0; }',
+      '@media (min-width: 640px) { .t2-acts, .t2-elements-list { width: 75%; } }',
       // ستون عملیات عمودی (ویرایش بالا، حذف پایین) چسبیده به راست
       '.t2-actions-col { display: flex; flex-direction: column; justify-content: center; gap: 2px; flex-shrink: 0; }',
       // زیرمنوی فعالیت‌ها — تورفتگی + خط راهنمای درختی در راست
@@ -457,6 +466,16 @@
     appRefresh();
   }
 
+  /** انتخاب فعالیت در درخت — کلیک دومانی (v1.5.2 §۲.۴):
+   * کلیک اول = انتخاب (به همراه انتخاب ایستگاه والد برای پنل جزئیات)؛
+   * کلیک دوم روی کارت انتخاب‌شده = باز/بسته عناصر. درخت جمع نمی‌شود.
+   * ورود به صفحهٔ فعالیت از دکمهٔ مستقل «ورود به فعالیت» انجام می‌شود. */
+  function selectActivity(projectId, activity) {
+    _selectedActivity[projectId] = activity.id;
+    _selectedStation[projectId] = activity.stationId;
+    appRefresh();
+  }
+
   // ═══════════════════════════════════════════════════════════
   // ۱) نمای ساختار تولید — T2VIEWS.structure
   // ═══════════════════════════════════════════════════════════
@@ -487,14 +506,14 @@
       acts.forEach(function (a) { totalEls += DB.sortElements(a.id).length; });
     });
 
-    var ctx = { projectId: projectId, project: project, selectedId: sel, groupMap: groupMap };
+    var ctx = { projectId: projectId, project: project, selectedId: sel, selectedActivityId: _selectedActivity[projectId] || null, groupMap: groupMap };
 
-    // ── سربرگ ──
-    container.appendChild(U.h('div', { class: 'flex flex-wrap items-center gap-3' },
+    // ── سربرگ — چسبان زیر نوار اصلی (v1.5.2 §۸) ──
+    container.appendChild(UI.stickyHeading(U.h('div', { class: 'flex flex-wrap items-center gap-3' },
       U.h('span', { class: 'chip-icon' }, U.icon('listTree')),
       U.h('div', null,
         U.h('h1', { class: 'text-xl font-extrabold', text: 'ساختار تولید' }),
-        U.h('p', { class: 'text-sm text-muted num', text: U.formatInt(stations.length) + ' ایستگاه · ' + U.formatInt(totalActs) + ' فعالیت · ' + U.formatInt(totalEls) + ' عنصر کاری' }))));
+        U.h('p', { class: 'text-sm text-muted num', text: U.formatInt(stations.length) + ' ایستگاه · ' + U.formatInt(totalActs) + ' فعالیت · ' + U.formatInt(totalEls) + ' عنصر کاری' })))));
 
     // ── بدنه: درخت + جزئیات — دو ستون هم‌عرض (۵۰-۵۰) ──
     var treeCol = U.h('div', { class: 'w-full shrink-0 t2-tree-col' }, buildTreeCard(ctx, stations));
@@ -523,8 +542,8 @@
     var project = ctx.project;
     var card = U.h('div', { class: 'card overflow-hidden' });
 
-    // ریشه درخت: نام پروژه + خط تولید + محصول — §۷.۱
-    card.appendChild(U.h('div', { class: 'flex items-center gap-2 p-3', style: { background: 'linear-gradient(to left, color-mix(in srgb, var(--brand-soft) 70%, transparent), transparent 65%)', borderBottom: '1px solid var(--border)' } },
+    // ریشه درخت: نام پروژه + خط تولید + محصول — §۷.۱؛ هدر یکدست بدون گرادیان (v1.5.2 §۷)
+    card.appendChild(U.h('div', { class: 'flex items-center gap-2 p-3', style: { background: 'color-mix(in srgb, var(--surface-2) 60%, transparent)', borderBottom: '1px solid var(--border)' } },
       U.h('span', { class: 'chip-icon' }, U.icon('factory')),
       U.h('div', { class: 'flex-1 min-w-0' },
         U.h('p', { class: 'font-extrabold text-sm truncate', title: project.name || undefined, text: project.name || 'پروژه' }),
@@ -575,8 +594,9 @@
     // فهرست ایستگاه‌ها — قابل مرتب‌سازی با Drag & Drop + فیلتر جست‌وجو
     // ⚠ بازبینی تکمیلی ج۱ (§۴): رندر اولیه و بازنویسی از یک تابع مشترک؛
     // هنگام جست‌وجو مرتب‌سازی قفل و راهنما نمایش داده می‌شود.
+    // v1.5.2 §۲.۱: محدودیت ارتفاع و اسکرول داخلی حذف شد — ارتفاع طبیعی.
     function renderStationList() {
-      var wrap = U.h('div', { class: 'flex flex-col gap-2 p-3 scroll-slim', style: { maxHeight: 'min(26rem, calc(100vh - 23rem))', overflowY: 'auto' } });
+      var wrap = U.h('div', { class: 'flex flex-col gap-2 p-3' });
       var q = (_treeSearch[ctx.projectId] || '').trim();
       var has = q.length > 0;
       var vis = has ? stations.filter(function (s) { return stationMatches(s, q); }) : stations;
@@ -622,10 +642,11 @@
     return DB.sortElements(a.id).some(function (e) { return e.name.indexOf(q) >= 0; });
   }
 
-  // ── گره ایستگاه در درخت — کلیک نام = فقط انتخاب؛ ──
-  // chevron = فقط باز/بسته — دو رفتار مستقل (§۷.۲)
+  // ── گره ایستگاه در درخت — کلیک دومانی (v1.5.2 §۲.۴) ──
+  // کلیک اول = فقط انتخاب و نمایش جزئیات؛ کلیک دوم روی کارت
+  // انتخاب‌شده = باز/بسته زیرشاخه؛ chevron = فقط باز/بسته.
   // دستگیره درگ داخل کارت چسبیده به لبه راست؛ عملیات ویرایش/حذف
-  // عمودی در راست؛ عنوان تا دو خط؛ شمارش فرزندان کنار گره (§۷.۴)
+  // عمودی در راست؛ شمارش فرزندان در خط مجزا زیر عنوان (§۲.۳)
   function stationNode(st, stations, ctx, hasSearch) {
     var q = (_treeSearch[ctx.projectId] || '').trim();
     var isOpen = hasSearch || _stationOpen[st.id] !== false;
@@ -634,16 +655,17 @@
     var isSelected = ctx.selectedId === st.id;
     var elsCount = allActs.reduce(function (n, a) { return n + DB.sortElements(a.id).length; }, 0);
 
-    function selectOnly() {
-      _selectedStation[ctx.projectId] = st.id;
-      appRefresh();
-    }
     function toggleOpen() {
       _stationOpen[st.id] = !isOpen;
       appRefresh();
     }
+    /** کلیک دومانی: انتخاب ← باز/بسته (v1.5.2 §۲.۴) */
+    function bodyClick() {
+      if (isSelected) toggleOpen();
+      else selectStation(ctx.projectId, st.id);
+    }
 
-    // chevron — فقط باز/بسته (§۷.۲)
+    // chevron — فقط باز/بسته؛ مستقل از انتخاب (§۲.۴)
     var chevron = U.h('button', {
       class: 't2-chevron', type: 'button',
       'data-open': isOpen ? 'true' : 'false',
@@ -652,20 +674,18 @@
       onclick: function (e) { e.stopPropagation(); toggleOpen(); },
     }, U.icon('chevronDown'));
 
-    // سربرگ کارت — کلیک = فقط انتخاب (§۷.۲)
+    // سربرگ کارت — کلیک بدنه = رفتار دومانی (v1.5.2 §۲.۴)
     var head = U.h('div', {
       class: 't2-station-head',
       role: 'button', tabindex: '0',
       'aria-current': isSelected ? 'true' : null,
+      'aria-expanded': isSelected ? (isOpen ? 'true' : 'false') : null,
     },
       chevron,
       U.h('div', { class: 'min-w-0 flex-1', role: 'button', tabindex: '0' },
-        U.h('div', { class: 'flex items-center gap-1.5' },
-          U.h('p', { class: 't2-station-title min-w-0 flex-1', 'data-station-name': st.id, title: st.name, text: st.name }),
-          numBadge(U.formatInt(allActs.length), 'muted')),
-        isSelected
-          ? U.h('p', { class: 't2-station-meta num', text: U.formatInt(allActs.length) + ' فعالیت · ' + U.formatInt(elsCount) + ' عنصر کاری' })
-          : null),
+        U.h('p', { class: 't2-station-title min-w-0 flex-1', 'data-station-name': st.id, title: st.name, text: st.name }),
+        // شمارش فرزندان در خط مجزا زیر عنوان — همیشه نمایان (§۲.۳)
+        U.h('p', { class: 't2-station-meta num', text: U.formatInt(allActs.length) + ' فعالیت · ' + U.formatInt(elsCount) + ' عنصر کاری' })),
       actionButtons(
         { label: 'ویرایش ایستگاه ' + st.name, title: 'ویرایش ایستگاه', fn: function () { openStationEditDialog(st); } },
         { label: 'حذف ایستگاه ' + st.name, title: 'حذف ایستگاه', fn: function () { confirmDeleteStation(st, ctx); } }
@@ -673,12 +693,12 @@
 
     head.addEventListener('click', function (e) {
       if (e.target.closest('button')) return;
-      selectOnly();
+      bodyClick();
     });
     head.addEventListener('keydown', function (e) {
       if (e.key === 'Enter' || e.key === ' ') {
         e.preventDefault();
-        if (e.target === head) selectOnly();
+        if (e.target === head) bodyClick();
       }
     });
 
@@ -724,19 +744,20 @@
     return wrap;
   }
 
-  // ── ردیف فعالیت در درخت — chevron باز/بسته عناصر؛ کلیک نام = صفحه فعالیت ──
-  // badge نوع فرایند کنار نام (§۷.۶)؛ شمارش فرزندان کنار گره (§۷.۴)
+  // ── ردیف فعالیت در درخت — کلیک دومانی (v1.5.2 §۲.۴) ──
+  // کلیک اول = انتخاب فعالیت؛ کلیک دوم = باز/بسته عناصر؛
+  // chevron مستقل؛ ورود به صفحهٔ فعالیت از دکمهٔ ثانویه واضح.
+  // شمارش عناصر در خط مجزا زیر عنوان (§۲.۳)
   function activityTreeRow(a, acts, station, ctx, hasSearch) {
     var group = ctx.groupMap[a.groupId];
     var els = DB.sortElements(a.id);
     var elsCount = els.length;
-    var parentSelected = ctx.selectedId === station.id;
+    var isSelected = ctx.selectedActivityId === a.id;
     var q = (_treeSearch[ctx.projectId] || '').trim();
     var isOpen = hasSearch || _activityOpenTree[a.id] === true;
     var visibleEls = hasSearch ? els.filter(function (e) { return e.name.indexOf(q) >= 0; }) : els;
 
-    function toggleOpen(e) {
-      e.stopPropagation();
+    function toggleOpen() {
       _activityOpenTree[a.id] = !isOpen;
       appRefresh();
     }
@@ -747,33 +768,60 @@
       'aria-expanded': isOpen ? 'true' : 'false',
       'aria-label': (isOpen ? 'بستن' : 'باز کردن') + ' عناصر کاری فعالیت ' + a.name,
       title: 'عناصر کاری',
-      onclick: toggleOpen,
+      onclick: function (e) { e.stopPropagation(); toggleOpen(); },
     }, U.icon('chevronDown'));
 
-    var row = U.h('div', { class: 't2-activity-row t2-sort' + (hasSearch ? ' t2-sort-locked' : ''), title: 'نوع رویداد فرایندی: ' + processLabelOf(a.processType) + (group ? ' · گروه: ' + group.name : '') + ' · ' + U.formatInt(elsCount) + ' عنصر' },
+    // بدنه — کلیک دومانی: انتخاب ← باز/بسته عناصر (v1.5.2 §۲.۴)
+    var body = U.h('div', {
+      class: 't2-activity-head-btn',
+      role: 'button', tabindex: '0',
+      'aria-current': isSelected ? 'true' : null,
+      'aria-expanded': isSelected ? (isOpen ? 'true' : 'false') : null,
+    },
+      U.h('span', { class: 'min-w-0 flex-1' },
+        U.h('span', { class: 't2-activity-title', text: a.name }),
+        // شمارش عناصر در خط مجزا زیر عنوان — همیشه نمایان (§۲.۳)
+        U.h('span', { class: 't2-activity-meta num', text: U.formatInt(elsCount) + ' عنصر کاری' + (group ? ' · گروه: ' + group.name : '') })),
+      // نماد نوع فرایند — بدون قاب اضافه (v1.5.2 §۳)
+      U.h('span', {
+        class: 'shrink-0',
+        'aria-label': 'نوع فرایند: ' + processLabelOf(a.processType),
+        html: UI.processSymbol(a.processType, 'sm'),
+      }));
+    body.addEventListener('click', function (e) {
+      e.stopPropagation();
+      if (isSelected) toggleOpen();
+      else selectActivity(ctx.projectId, a);
+    });
+    body.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        if (isSelected) toggleOpen();
+        else selectActivity(ctx.projectId, a);
+      }
+    });
+
+    var row = U.h('div', { class: 't2-activity-row t2-sort' + (isSelected ? ' selected' : '') + (hasSearch ? ' t2-sort-locked' : ''), title: 'نوع رویداد فرایندی: ' + processLabelOf(a.processType) + ' · ' + U.formatInt(elsCount) + ' عنصر کاری' },
       dragHandleEl(hasSearch),
       chevron,
-      U.h('button', {
-        type: 'button',
-        class: 't2-activity-head-btn',
-        'aria-label': 'باز کردن صفحه فعالیت ' + a.name,
-        onclick: function (e) { e.stopPropagation(); appNavigate('/p/' + ctx.projectId + '/activity/' + a.id); },
-      },
-        U.h('span', { class: 'min-w-0 flex-1' },
-          U.h('span', { class: 't2-activity-title', text: a.name }),
-          parentSelected
-            ? U.h('span', { class: 't2-activity-meta num', text: U.formatInt(elsCount) + ' عنصر' + (group ? ' · ' + group.name : '') })
-            : null),
-        U.h('span', {
-          class: 'shrink-0',
-          'aria-label': 'نوع فرایند: ' + processLabelOf(a.processType),
-          html: UI.processSymbol(a.processType, 'sm'),
-        }),
-        numBadge(U.formatInt(elsCount), 'muted')),
-      actionButtons(
-        { label: 'ویرایش فعالیت ' + a.name, title: 'ویرایش فعالیت', fn: function () { openActivityDialog(ctx, station, a); } },
-        { label: 'حذف فعالیت ' + a.name, title: 'حذف فعالیت', fn: function () { confirmDeleteActivity(a, ctx, false); } }
-      ));
+      body,
+      // عملیات: ورود به فعالیت + ویرایش/حذف — v1.5.2 §۲.۴
+      U.h('div', { class: 't2-actions-col' },
+        U.h('button', {
+          class: 'icon-btn sm shrink-0', type: 'button', style: { color: 'var(--brand)' },
+          'aria-label': 'ورود به صفحه فعالیت ' + a.name, title: 'ورود به صفحه فعالیت',
+          onclick: function (e) { e.stopPropagation(); appNavigate('/p/' + ctx.projectId + '/activity/' + a.id); },
+        }, U.icon('squareArrowOutUpRight')),
+        U.h('button', {
+          class: 'icon-btn sm shrink-0', type: 'button',
+          'aria-label': 'ویرایش فعالیت ' + a.name, title: 'ویرایش فعالیت',
+          onclick: function (e) { e.stopPropagation(); openActivityDialog(ctx, station, a); },
+        }, U.icon('pencil')),
+        U.h('button', {
+          class: 'icon-btn sm danger shrink-0', type: 'button',
+          'aria-label': 'حذف فعالیت ' + a.name, title: 'حذف فعالیت',
+          onclick: function (e) { e.stopPropagation(); confirmDeleteActivity(a, ctx, false); },
+        }, U.icon('trash'))));
 
     var node = U.h('div', null, row);
     if (isOpen) {

@@ -121,11 +121,11 @@
     function render() {
       if (!root.isConnected) return;
       U.clear(root);
-      root.appendChild(U.h('header', { class: 'flex items-center gap-3' },
+      root.appendChild(UI.stickyHeading(U.h('header', { class: 'flex items-center gap-3' },
         U.h('span', { class: 'chip-icon' }, U.icon('databaseBackup')),
         U.h('div', { class: 'min-w-0' },
           U.h('h1', { class: 'text-xl font-extrabold', text: 'داده و پشتیبان' }),
-          U.h('p', { class: 'text-sm text-muted', text: 'پشتیبان‌گیری، بازیابی، بستهٔ پروژه و تاریخچهٔ تغییرات' }))));
+          U.h('p', { class: 'text-sm text-muted', text: 'پشتیبان‌گیری، بازیابی، بستهٔ پروژه و تاریخچهٔ تغییرات' })))));
       root.appendChild(UI.tabsBar([
         { key: 'backup', label: 'پشتیبان‌گیری', icon: 'databaseBackup' },
         { key: 'package', label: 'بستهٔ پروژه', icon: 'package' },

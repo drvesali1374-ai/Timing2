@@ -132,9 +132,12 @@
 
     var activeRelations = matrix.relations.filter(function (r) { return r.isActive; });
 
-    /* ── کارت اصلی ── */
-    var card = U.h('section', { class: 'card overflow-hidden', 'aria-label': 'ماتریس هم‌پوشانی عناصر کاری' });
-    card.appendChild(U.h('div', { class: 'card-head' },
+    /* ── کارت اصلی ──
+       v1.5.2 §۸: overflow-hidden حذف شد تا هدر چسبان درون کارت کار کند
+       (جدول ماتریس قاب و radius خودش را دارد). */
+    var card = U.h('section', { class: 'card', 'aria-label': 'ماتریس هم‌پوشانی عناصر کاری' });
+    // هدر کارت بخش اصلی در top-14 چسبان می‌ماند — دسترسی دائم به «افزودن رابطهٔ موازی» (v1.5.2 §۸)
+    card.appendChild(UI.stickyHeading(U.h('div', { class: 'card-head' },
       U.h('div', { class: 'flex flex-wrap items-center justify-between gap-2 p-4 pb-3' },
         U.h('div', { class: 'flex items-center gap-2' },
           U.h('span', { class: 'chip-icon' }, U.icon('network')),
@@ -143,7 +146,7 @@
         U.h('button', {
           class: 'btn btn-brand btn-sm', type: 'button',
           onclick: function () { openAddRelationDialog(projectId, matrix); },
-        }, U.icon('plus'), 'افزودن رابطهٔ موازی'))));
+        }, U.icon('plus'), 'افزودن رابطهٔ موازی')))));
 
     var content = U.h('div', { class: 'p-4 flex flex-col gap-4' });
     card.appendChild(content);
