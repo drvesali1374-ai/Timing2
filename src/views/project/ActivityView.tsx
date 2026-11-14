@@ -306,10 +306,10 @@ function ActivityScreen({ projectId, activityId }: { projectId: string; activity
           </nav>
           {activity ? (
             <Badge
-              className="shrink-0 border-0 bg-brand-soft text-brand"
+              className="shrink-0 gap-1.5 border-0 bg-brand-soft text-brand"
               title={`نوع رویداد فرایندی: ${processLabelOf(activity.processType)}`}
             >
-              <span className="num font-bold"><ProcessSymbol type={activity.processType} size="sm" /></span>
+              <ProcessSymbol type={activity.processType} size="sm" />
               {processLabelOf(activity.processType)}
             </Badge>
           ) : (

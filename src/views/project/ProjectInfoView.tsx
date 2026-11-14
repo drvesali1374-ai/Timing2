@@ -42,6 +42,7 @@ import {
 import { Skeleton } from '@/components/ui/skeleton'
 import { Textarea } from '@/components/ui/textarea'
 import { HelpDot } from '@/components/common/HelpDot'
+import { SectionHeading } from '@/components/common/SectionHeading'
 import { ConfirmDeleteDialog, EmptyState } from '@/components/common/Feedback'
 import { SaveIndicator } from '@/components/common/SaveIndicator'
 import { useAutosave } from '@/hooks/use-autosave'
@@ -157,16 +158,18 @@ export default function ProjectInfoView({ projectId }: { projectId: string }) {
 
   return (
     <div className="animate-view-in mx-auto max-w-3xl space-y-5">
-      {/* سربرگ */}
-      <div className="flex items-center gap-3">
-        <div className="chip-icon bg-brand-soft text-brand">
-          <Settings2 className="size-6" aria-hidden />
+      {/* سربرگ — چسبان زیر نوار اصلی (v1.5.2 §۸) */}
+      <SectionHeading>
+        <div className="flex items-center gap-3">
+          <div className="chip-icon bg-brand-soft text-brand">
+            <Settings2 className="size-6" aria-hidden />
+          </div>
+          <div>
+            <h1 className="text-xl font-extrabold">مشخصات پروژه</h1>
+            <p className="text-xs text-muted-foreground">مشخصات مطالعه، تنظیمات محاسبات و عملیات پروژه</p>
+          </div>
         </div>
-        <div>
-          <h1 className="text-xl font-extrabold">مشخصات پروژه</h1>
-          <p className="text-xs text-muted-foreground">مشخصات مطالعه، تنظیمات محاسبات و عملیات پروژه</p>
-        </div>
-      </div>
+      </SectionHeading>
 
       {isLoading ? (
         <div className="space-y-4">

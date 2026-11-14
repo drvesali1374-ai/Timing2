@@ -41,6 +41,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { HelpDot, type HelpContent } from '@/components/common/HelpDot'
+import { SectionHeading } from '@/components/common/SectionHeading'
 import { ConfirmDeleteDialog, EmptyState } from '@/components/common/Feedback'
 import { SaveIndicator } from '@/components/common/SaveIndicator'
 import { PersianNumberInput } from '@/components/common/PersianNumberInput'
@@ -196,21 +197,23 @@ export default function WestinghouseView({ projectId }: { projectId: string }) {
 
   return (
     <div className="animate-view-in mx-auto max-w-6xl space-y-5">
-      {/* سربرگ بخش */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <div className="chip-icon bg-brand-soft text-brand">
-            <Gauge className="size-6" aria-hidden />
-          </div>
-          <div>
-            <h1 className="text-xl font-extrabold">ارزیابی وستینگهاوس</h1>
-            <p className="num text-xs text-muted-foreground">
-              R = 1 + مهارت + تلاش + شرایط + یکنواختی — {formatInt(ratedCount, prefs)} از{' '}
-              {formatInt(allElements.length, prefs)} عنصر ارزیابی شده
-            </p>
+      {/* سربرگ بخش — چسبان زیر نوار اصلی (v1.5.2 §۸) */}
+      <SectionHeading>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="chip-icon bg-brand-soft text-brand">
+              <Gauge className="size-6" aria-hidden />
+            </div>
+            <div>
+              <h1 className="text-xl font-extrabold">ارزیابی وستینگهاوس</h1>
+              <p className="num text-xs text-muted-foreground">
+                R = 1 + مهارت + تلاش + شرایط + یکنواختی — {formatInt(ratedCount, prefs)} از{' '}
+                {formatInt(allElements.length, prefs)} عنصر ارزیابی شده
+              </p>
+            </div>
           </div>
         </div>
-      </div>
+      </SectionHeading>
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as 'assess' | 'tables')} dir="rtl">
         <TabsList>
@@ -507,7 +510,8 @@ function ActivityElements({
 
   return (
     <div className="border-t first:border-t-0">
-      <div className="flex flex-wrap items-center justify-between gap-2 bg-surface-2/40 px-4 py-2.5">
+      {/* v1.5.2 §۷.۱: فاصله عمودی عنوان فعالیت از خط جداکننده هدر ایستگاه افزایش یافت */}
+      <div className="flex flex-wrap items-center justify-between gap-2 bg-surface-2/40 px-4 pb-2.5 pt-4">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           <h4 className="truncate text-sm font-bold">{activity.name}</h4>
           <span className="num rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">

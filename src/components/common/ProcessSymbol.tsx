@@ -1,18 +1,18 @@
 'use client'
 
 // ═══════════════════════════════════════════════════════════
-// رندرکنندهٔ مشترک نمادهای فرایندی — جلسه ۲ §۱۵.۲
-// یک renderer/component واحد در همهٔ نماها (StructureView، ActivityView،
-// ChartCanvas، انتخاب‌گر گره‌ها، legend) — CSS patch پراکنده ممنوع.
-// FPC پنج نماد استاندارد: ○ □ ⇨ D ▽
-// MATERIAL_INPUT گرهٔ مستقل ورودی مواد/قطعه/نیم‌ساخته است (⬡) — event فراینی نیست.
+// رندرکنندهٔ مشترک نمادهای فرایندی — بازطراحی v1.5.2 §۳
+// شکل هندسی به‌صورت SVG توپر و بزرگ رندر می‌شود؛ بدون قاب
+// مستطیلی، حاشیه و پس‌زمینهٔ بیرونی. رنگ‌آمیزی مستقیماً روی
+// خود شکل اعمال می‌شود (fill = رنگ نوع فرایند).
+// یک renderer/component واحد در همهٔ نماها (StructureView،
+// ActivityView، ChartCanvas، انتخاب‌گر گره‌ها، legend) — CSS patch
+// پراکنده ممنوع. FPC پنج نماد استاندارد: ○ □ ⇨ D ▽
+// MATERIAL_INPUT گرهٔ مستقل ورودی مواد/قطعه/نیم‌ساخته است (⬡).
 // ═══════════════════════════════════════════════════════════
+import type { ReactNode } from 'react'
 import { cn } from '@/lib/utils'
-import {
-  PROCESS_TYPE_SYMBOLS,
-  MATERIAL_INPUT_SYMBOL,
-  MATERIAL_INPUT_NODE_TYPE,
-} from '@/domain/types'
+import { MATERIAL_INPUT_NODE_TYPE } from '@/domain/types'
 
 export type ProcessSymbolType = string // ProcessType | 'MATERIAL_INPUT'
 
@@ -26,31 +26,38 @@ export const PROCESS_TYPE_LABELS_WITH_INPUT: Record<string, string> = {
   [MATERIAL_INPUT_NODE_TYPE]: 'ورودی مواد/قطعات',
 }
 
-export function processSymbolOf(type: ProcessSymbolType): string {
-  if (type === MATERIAL_INPUT_NODE_TYPE) return MATERIAL_INPUT_SYMBOL
-  return PROCESS_TYPE_SYMBOLS[type as keyof typeof PROCESS_TYPE_SYMBOLS] ?? '?'
+/** رنگ خود شکل بر اساس نوع — قرارداد رنگی واحد (v1.5.2 §۳: روی خود شکل) */
+export const PROCESS_SYMBOL_COLOR: Record<string, string> = {
+  OPERATION: 'text-brand',
+  INSPECTION: 'text-amber',
+  TRANSPORT: 'text-muted-foreground',
+  DELAY: 'text-red',
+  STORAGE: 'text-green',
+  [MATERIAL_INPUT_NODE_TYPE]: 'text-cyan',
 }
 
-/** استایل قاب نماد بر اساس نوع — قرارداد رنگی واحد */
-export const PROCESS_SYMBOL_BOX: Record<string, string> = {
-  OPERATION: 'rounded-full border-2 border-brand text-brand bg-brand-soft',
-  INSPECTION: 'rounded-md border-2 border-amber text-amber bg-amber-soft',
-  TRANSPORT: 'rounded-md border-2 border-muted-foreground/60 text-muted-foreground bg-muted/40',
-  DELAY: 'rounded-md border-2 border-red text-red bg-red-soft',
-  STORAGE: 'rounded-md border-2 border-green text-green bg-green-soft',
-  [MATERIAL_INPUT_NODE_TYPE]: 'rounded-lg border-2 border-dashed border-cyan text-cyan bg-cyan-soft',
+/** شکل SVG توپر هر نوع (viewBox 24×24) — استانداردهای FPC حفظ شده‌اند */
+const PROCESS_SYMBOL_SHAPES: Record<string, ReactNode> = {
+  OPERATION: <circle cx="12" cy="12" r="8.5" />,
+  INSPECTION: <rect x="4.5" y="4.5" width="15" height="15" rx="2" />,
+  TRANSPORT: <path d="M4 11.1 12.4 4.3v4.3H20v5h-7.6v4.3z" />,
+  DELAY: <path d="M5 5h7.6a7 7 0 0 1 0 14H5z" />,
+  STORAGE: <path d="M4.5 5.5h15L12 19.6z" />,
+  [MATERIAL_INPUT_NODE_TYPE]: <path d="M12 3.6 19.7 8v8L12 20.4 4.3 16V8z" />,
 }
 
+/** اندازه‌های بازبینی‌شده — بدون قاب، خود شکل شاخص است (v1.5.2 §۳.۷) */
 const SIZES = {
-  sm: { box: 'size-6 text-sm rounded-lg', font: 'text-sm' },
-  md: { box: 'size-9 text-lg rounded-xl', font: 'text-lg' },
-  lg: { box: 'size-12 text-2xl rounded-2xl', font: 'text-2xl' },
+  sm: 'size-4',
+  md: 'size-6',
+  lg: 'size-9',
 } as const
 
 export type ProcessSymbolSize = keyof typeof SIZES
 
 /**
- * نماد فرایندی در قاب خوانا — اندازه‌های sm/md/lg.
+ * نماد فرایندی — شکل توپر بدون قاب، در اندازه‌های sm/md/lg.
+ * رنگ مستقیماً روی خود شکل اعمال می‌شود؛ تم روشن/تیره پشتیبانی می‌شود.
  * استفاده در همهٔ نماها به‌جای glyph خام یا CSS محلی.
  */
 export function ProcessSymbol({
@@ -64,19 +71,22 @@ export function ProcessSymbol({
   className?: string
   title?: string
 }) {
-  const s = SIZES[size] ?? SIZES.md
   return (
-    <span
+    <svg
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      xmlns="http://www.w3.org/2000/svg"
       className={cn(
-        'inline-flex shrink-0 items-center justify-center font-bold leading-none select-none',
-        PROCESS_SYMBOL_BOX[type] ?? PROCESS_SYMBOL_BOX.OPERATION,
-        s.box,
+        'inline-block shrink-0 align-middle select-none',
+        PROCESS_SYMBOL_COLOR[type] ?? PROCESS_SYMBOL_COLOR.OPERATION,
+        SIZES[size] ?? SIZES.md,
         className
       )}
-      title={title ?? PROCESS_TYPE_LABELS_WITH_INPUT[type] ?? type}
-      aria-hidden
+      role="img"
+      aria-label={title ?? PROCESS_TYPE_LABELS_WITH_INPUT[type] ?? type}
     >
-      {processSymbolOf(type)}
-    </span>
+      {title ? <title>{title}</title> : null}
+      {PROCESS_SYMBOL_SHAPES[type] ?? PROCESS_SYMBOL_SHAPES.OPERATION}
+    </svg>
   )
 }

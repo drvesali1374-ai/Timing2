@@ -14,7 +14,7 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Archive, FolderTree, Layers, ListPlus, Loader2, Pencil, Plus, Tags, Trash2 } from 'lucide-react'
+import { Archive, ChevronDown, ChevronUp, Layers, ListTree, Loader2, Pencil, Percent, Plus, SlidersHorizontal, Trash2 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -33,6 +33,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { HelpDot } from '@/components/common/HelpDot'
+import { SectionHeading } from '@/components/common/SectionHeading'
 import { ConfirmDeleteDialog, EmptyState } from '@/components/common/Feedback'
 import { SaveIndicator } from '@/components/common/SaveIndicator'
 import { PercentInput, PersianNumberInput } from '@/components/common/PersianNumberInput'
@@ -97,22 +98,25 @@ export default function GroupsView({ projectId }: { projectId: string }) {
 
   return (
     <div className="animate-view-in w-full space-y-5">
-      {/* سربرگ بخش */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <div className="chip-icon bg-brand-soft text-brand">
-            <Tags className="size-6" aria-hidden />
-          </div>
-          <div>
-            <h1 className="text-xl font-extrabold">مجازها و الونس‌ها</h1>
-            <p className="num text-xs text-muted-foreground">
-              {activeCount} تعریف فعال
-              {archivedCount > 0 ? ` · ${archivedCount} بایگانی‌شده` : ''} ·{' '}
-              {groupsQ.data?.items.length ?? 0} گروه فعالیت
-            </p>
+      {/* سربرگ بخش — چسبان زیر نوار اصلی (v1.5.2 §۸) */}
+      <SectionHeading>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="chip-icon bg-brand-soft text-brand">
+              {/* v1.5.2 §۴.۳/§۵.۴: آیکون Percent برای بخش الونس‌ها */}
+              <Percent className="size-6" aria-hidden />
+            </div>
+            <div>
+              <h1 className="text-xl font-extrabold">مجازها و الونس‌ها</h1>
+              <p className="num text-xs text-muted-foreground">
+                {activeCount} تعریف فعال
+                {archivedCount > 0 ? ` · ${archivedCount} بایگانی‌شده` : ''} ·{' '}
+                {groupsQ.data?.items.length ?? 0} گروه فعالیت
+              </p>
+            </div>
           </div>
         </div>
-      </div>
+      </SectionHeading>
 
       <Tabs dir="rtl" value={tab} onValueChange={(v) => setTab(v as typeof tab)}>
         <TabsList className="h-auto w-full flex-wrap justify-start gap-1 bg-surface-2/70 p-1">
@@ -121,11 +125,13 @@ export default function GroupsView({ projectId }: { projectId: string }) {
             تعریف‌های مرکزی
           </TabsTrigger>
           <TabsTrigger value="project" className="gap-1.5">
-            <ListPlus className="size-4" aria-hidden />
+            {/* v1.5.2 §۵.۴: آیکون SlidersHorizontal برای الونس‌های خط تولید */}
+            <SlidersHorizontal className="size-4" aria-hidden />
             الونس‌های خط تولید
           </TabsTrigger>
           <TabsTrigger value="groups" className="gap-1.5">
-            <FolderTree className="size-4" aria-hidden />
+            {/* v1.5.2 §۵.۴: آیکون ListTree برای گروه‌های فعالیت */}
+            <ListTree className="size-4" aria-hidden />
             گروه‌های فعالیت
           </TabsTrigger>
         </TabsList>
@@ -133,17 +139,15 @@ export default function GroupsView({ projectId }: { projectId: string }) {
         <TabsContent value="definitions" className="mt-4">
           <DefinitionsTab projectId={projectId} prefs={prefs} />
         </TabsContent>
-        <TabsContent value="project" className="mt-4 space-y-4">
-          <div className="card-premium p-4">
-            <div className="flex flex-wrap items-start justify-between gap-2">
-              <div className="flex items-center gap-2 text-xs leading-6 text-muted-foreground">
-                <HelpDot label="الونس‌های سطح خط تولید" content={PROJECT_SCOPE_HELP} />
-                <span>
-                  این الونس‌ها به تمام ایستگاه‌ها، فعالیت‌ها و عناصر کاری ارث می‌رسند؛ در هر سطح پایین‌تر قابل جایگزینی
-                  یا حذف از ارث‌بری‌اند.
-                </span>
-              </div>
-            </div>
+        <TabsContent value="project" className="mt-4">
+          {/* v1.5.2 §۵.۱: کارت توضیحی مستقل حذف شد؛ راهنمای ظریف
+              در یک خط بالای محتوای تب — با HelpDot */}
+          <div className="mb-3 flex items-start gap-2 px-1 text-[11px] leading-5 text-muted-foreground">
+            <HelpDot label="الونس‌های سطح خط تولید" content={PROJECT_SCOPE_HELP} />
+            <p>
+              این الونس‌ها به تمام ایستگاه‌ها، فعالیت‌ها و عناصر کاری ارث می‌رسند؛ در هر سطح پایین‌تر قابل جایگزینی یا حذف از
+              ارث‌بری‌اند.
+            </p>
           </div>
           <AllowanceSection projectId={projectId} scopeType="PROJECT" scopeId={projectId} />
         </TabsContent>
@@ -755,10 +759,97 @@ function DefinitionFormDialog({
 }
 
 // ═══════════════ زبانه گروه‌های فعالیت — فقط طبقه‌بندی ═══════════════
+// v1.5.2 §۵.۲: فهرست کامل فعالیت‌ها با «نمایش همه / نمایش کمتر»؛
+// نام فعالیت‌ها بدون بریده‌شدن (wrap) و تایپوگرافی بازطراحی‌شده.
+
+/** آستانه نمایش فهرست جمع‌وجور قبل از دکمهٔ «نمایش همه» */
+const GROUP_COLLAPSED_COUNT = 5
+
+function GroupCard({
+  g,
+  prefs,
+  projectId,
+  onDelete,
+}: {
+  g: GroupDto
+  prefs: Prefs
+  projectId: string
+  onDelete: (g: GroupDto) => void
+}) {
+  const navigate = useAppStore((s) => s.navigate)
+  const [expanded, setExpanded] = useState(false)
+  const showAll = expanded || g.activities.length <= GROUP_COLLAPSED_COUNT
+  const visibleActivities = showAll ? g.activities : g.activities.slice(0, GROUP_COLLAPSED_COUNT)
+  const hiddenCount = g.activities.length - visibleActivities.length
+
+  return (
+    <div className="flex flex-col rounded-xl border border-border/60 bg-surface-2/50 p-4">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          <p className="text-[15px] font-bold leading-6">{g.name}</p>
+          {g.description && (
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">{g.description}</p>
+          )}
+          <p className="num mt-1.5 text-[11px] leading-4 text-faint">
+            {g.activities.length.toLocaleString('fa-IR')} فعالیت · ساخته‌شده {formatDateTime(g.createdAt, prefs)}
+          </p>
+        </div>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="size-7 shrink-0 text-red hover:text-red"
+          aria-label={`حذف گروه ${g.name}`}
+          onClick={() => onDelete(g)}
+        >
+          <Trash2 className="size-3.5" aria-hidden />
+        </Button>
+      </div>
+      {g.activities.length > 0 && (
+        <ul className="mt-3 space-y-1 border-t border-border/50 pt-3">
+          {visibleActivities.map((a) => (
+            <li key={a.id}>
+              <button
+                type="button"
+                className="flex w-full items-baseline gap-1.5 rounded-md px-1.5 py-1 text-right text-xs leading-5 transition-colors hover:bg-brand-soft/40"
+                onClick={() => navigate({ name: 'activity', projectId, activityId: a.id })}
+              >
+                {/* نام فعالیت با wrap کامل — بدون بریده‌شدن (v1.5.2 §۵.۲) */}
+                <span className="min-w-0 flex-1 break-words">{a.name}</span>
+                <span className="shrink-0 text-faint">— {a.station.name}</span>
+              </button>
+            </li>
+          ))}
+          {/* نمایش همه فعالیت‌ها / نمایش کمتر — دسترسی به فهرست کامل (§۵.۲) */}
+          {g.activities.length > GROUP_COLLAPSED_COUNT && (
+            <li>
+              <button
+                type="button"
+                className="num flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-[11px] font-bold text-brand transition-colors hover:bg-brand-soft/40"
+                aria-expanded={expanded}
+                onClick={() => setExpanded((s) => !s)}
+              >
+                {expanded ? (
+                  <>
+                    <ChevronUp className="size-3.5" aria-hidden />
+                    نمایش کمتر
+                  </>
+                ) : (
+                  <>
+                    <ChevronDown className="size-3.5" aria-hidden />
+                    نمایش همه فعالیت‌ها ({hiddenCount.toLocaleString('fa-IR')} مورد دیگر)
+                  </>
+                )}
+              </button>
+            </li>
+          )}
+        </ul>
+      )}
+    </div>
+  )
+}
 
 function GroupsTab({ projectId, prefs }: { projectId: string; prefs: Prefs }) {
   const qc = useQueryClient()
-  const navigate = useAppStore((s) => s.navigate)
   const [createOpen, setCreateOpen] = useState(false)
   const [createForm, setCreateForm] = useState<{ name: string; description: string }>({ name: '', description: '' })
   const [creating, setCreating] = useState(false)
@@ -819,7 +910,8 @@ function GroupsTab({ projectId, prefs }: { projectId: string; prefs: Prefs }) {
       <div className="card-head flex flex-wrap items-center justify-between gap-3 p-4 pb-3">
         <div className="flex items-center gap-2.5">
           <span className="chip-icon bg-cyan-soft text-cyan">
-            <FolderTree className="size-5" aria-hidden />
+            {/* v1.5.2 §۵.۴: ListTree — آیکون یکپارچهٔ گروه‌های فعالیت */}
+            <ListTree className="size-5" aria-hidden />
           </span>
           <div>
             <h2 className="text-sm font-extrabold">گروه‌های فعالیت</h2>
@@ -862,52 +954,9 @@ function GroupsTab({ projectId, prefs }: { projectId: string; prefs: Prefs }) {
             </Button>
           </div>
         ) : (
-          <div className="grid gap-2 sm:grid-cols-2">
+          <div className="grid gap-3 sm:grid-cols-2">
             {groups.map((g) => (
-              <div key={g.id} className="rounded-xl border border-border/60 bg-surface-2/50 p-3.5">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-bold">{g.name}</p>
-                    {g.description && (
-                      <p className="mt-0.5 line-clamp-2 text-xs leading-5 text-muted-foreground">{g.description}</p>
-                    )}
-                    <p className="num mt-1.5 text-[11px] text-faint">
-                      {g.activities.length.toLocaleString('fa-IR')} فعالیت · ساخته‌شده{' '}
-                      {formatDateTime(g.createdAt, prefs)}
-                    </p>
-                  </div>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="size-7 shrink-0 text-red hover:text-red"
-                    aria-label={`حذف گروه ${g.name}`}
-                    onClick={() => setDeleting(g)}
-                  >
-                    <Trash2 className="size-3.5" aria-hidden />
-                  </Button>
-                </div>
-                {g.activities.length > 0 && (
-                  <ul className="mt-2.5 space-y-1 border-t border-border/50 pt-2">
-                    {g.activities.slice(0, 4).map((a) => (
-                      <li key={a.id}>
-                        <button
-                          type="button"
-                          className="w-full truncate rounded-md px-1.5 py-1 text-right text-xs transition-colors hover:bg-brand-soft/40"
-                          onClick={() => navigate({ name: 'activity', projectId, activityId: a.id })}
-                        >
-                          {a.name}
-                          <span className="text-faint"> — {a.station.name}</span>
-                        </button>
-                      </li>
-                    ))}
-                    {g.activities.length > 4 && (
-                      <li className="num px-1.5 text-[10px] text-faint">
-                        و {(g.activities.length - 4).toLocaleString('fa-IR')} فعالیت دیگر…
-                      </li>
-                    )}
-                  </ul>
-                )}
-              </div>
+              <GroupCard key={g.id} g={g} prefs={prefs} projectId={projectId} onDelete={setDeleting} />
             ))}
           </div>
         )}

@@ -23,6 +23,7 @@ import {
 } from '@/components/ui/dialog'
 import { Skeleton } from '@/components/ui/skeleton'
 import { HelpDot } from '@/components/common/HelpDot'
+import { SectionHeading } from '@/components/common/SectionHeading'
 import { ConfirmDeleteDialog, EmptyState } from '@/components/common/Feedback'
 import { SaveIndicator } from '@/components/common/SaveIndicator'
 import { useAutosave } from '@/hooks/use-autosave'
@@ -130,27 +131,29 @@ export default function OperatorsView({ projectId }: { projectId: string }) {
 
   return (
     <div className="animate-view-in mx-auto max-w-5xl space-y-5">
-      {/* سربرگ بخش */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <div className="chip-icon bg-brand-soft text-brand">
-            <Users className="size-6" aria-hidden />
+      {/* سربرگ بخش — چسبان زیر نوار اصلی (v1.5.2 §۸) */}
+      <SectionHeading>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="chip-icon bg-brand-soft text-brand">
+              <Users className="size-6" aria-hidden />
+            </div>
+            <div>
+              <h1 className="text-xl font-extrabold">اپراتورها</h1>
+              <p className="num text-xs text-muted-foreground">
+                {formatInt(operators.length, prefs)} اپراتور در این مطالعه
+              </p>
+            </div>
           </div>
-          <div>
-            <h1 className="text-xl font-extrabold">اپراتورها</h1>
-            <p className="num text-xs text-muted-foreground">
-              {formatInt(operators.length, prefs)} اپراتور در این مطالعه
-            </p>
+          <div className="flex items-center gap-3">
+            <SaveIndicator status={autoStatus} onRetry={retry} />
+            <Button onClick={openCreate} className="btn-brand gap-1.5 border-0">
+              <Plus className="size-4" aria-hidden />
+              اپراتور جدید
+            </Button>
           </div>
         </div>
-        <div className="flex items-center gap-3">
-          <SaveIndicator status={autoStatus} onRetry={retry} />
-          <Button onClick={openCreate} className="btn-brand gap-1.5 border-0">
-            <Plus className="size-4" aria-hidden />
-            اپراتور جدید
-          </Button>
-        </div>
-      </div>
+      </SectionHeading>
 
       {/* محتوا */}
       {isLoading ? (
