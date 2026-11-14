@@ -3905,6 +3905,8 @@
     getSheet: getSheet, addCycles: addCycles, deleteCycle: deleteCycle, updateCycleNotes: updateCycleNotes,
     putCells: putCells, parseCellInput: parseCellInput, pastePreview: pastePreview, pasteCommit: pasteCommit,
     setObservationValidity: setObservationValidity,
+    /* v1.5.2 §۹ — مدل ردیف‌های شبکه برای قالب Excel */
+    sheetGridRows: sheetGridRows,
 
     getOutlierConfig: getOutlierConfig, setOutlierConfig: setOutlierConfig,
     refreshOutliersForElement: refreshOutliersForElement, refreshOutliersForActivity: refreshOutliersForActivity,
