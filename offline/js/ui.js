@@ -579,9 +579,11 @@
     return barChart({ data: data, ariaLabel: ariaLabel || 'هیستوگرام توزیع', formatValue: function (v) { return String(Math.round(v)); }, maxBarSize: 64 });
   }
 
-  // ── نماد فرایندی (ProcessSymbol) — بازطراحی v1.5.2 §۳ ──
+  // ── نماد فرایندی (ProcessSymbol) — v1.5.2 Part-3 §۴ ──
   // renderer واحد در همهٔ نماها (ساختار، فعالیت، ماتریس، نمودار)؛ CSS patch پراکنده ممنوع.
-  // شکل SVG توپر بدون قاب/حاشیه/پس‌زمینهٔ بیرونی؛ رنگ مستقیماً روی خود شکل.
+  // شکل SVG «خط‌دار»: خط دور (stroke) با رنگ کامل نوع فرایند + داخلِ تینت‌شده
+  // (~۱۲٪ همان رنگ) — استایل در app.css (.psym). اندازه‌ها ~۳ برابر:
+  // sm=۴۸ · md=۷۲ · lg=۹۶px — عیناً هم‌ارز نسخهٔ وب (§۴.۳ parity).
   // رشتهٔ HTML برمی‌گرداند — با U.h('span', { html: UI.processSymbol(...) }) استفاده کنید.
   var PROCESS_SYMBOL_META = {
     OPERATION: { label: 'عملیات' },
@@ -591,7 +593,8 @@
     STORAGE: { label: 'انبارش' },
     MATERIAL_INPUT: { label: 'ورودی مواد/قطعات' },
   };
-  /** مسیر SVG توپر هر شکل (viewBox 24×24) — عیناً هم‌ارز نسخهٔ وب */
+  /** مسیر SVG هر شکل (viewBox 24×24) — عیناً هم‌ارز نسخهٔ وب؛
+      fill/stroke از طریق CSS روی .psym اعمال می‌شود */
   var PROCESS_SYMBOL_SHAPES = {
     OPERATION: '<circle cx="12" cy="12" r="8.5"/>',
     INSPECTION: '<rect x="4.5" y="4.5" width="15" height="15" rx="2"/>',
@@ -600,7 +603,7 @@
     STORAGE: '<path d="M4.5 5.5h15L12 19.6z"/>',
     MATERIAL_INPUT: '<path d="M12 3.6 19.7 8v8L12 20.4 4.3 16V8z"/>',
   };
-  /** رنگ خود شکل بر اساس نوع — قرارداد رنگی واحد (v1.5.2 §۳: روی خود شکل) */
+  /** رنگ نماد بر اساس نوع — قرارداد رنگی واحد (stroke کامل + تینت داخل) */
   var PROCESS_SYMBOL_COLOR = {
     OPERATION: 'var(--brand)',
     INSPECTION: 'var(--amber)',
@@ -613,7 +616,7 @@
     var s = size === 'sm' || size === 'md' || size === 'lg' ? size : 'md';
     var key = PROCESS_SYMBOL_META[nodeType] ? nodeType : 'OPERATION';
     var label = titleOverride || PROCESS_SYMBOL_META[key].label;
-    return '<svg viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg" class="psym psym-' + s +
+    return '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" class="psym psym-' + s +
       '" style="color:' + PROCESS_SYMBOL_COLOR[key] + '" role="img" aria-label="' + U.escapeHtml(label) + '">' +
       '<title>' + U.escapeHtml(label) + '</title>' + PROCESS_SYMBOL_SHAPES[key] + '</svg>';
   }

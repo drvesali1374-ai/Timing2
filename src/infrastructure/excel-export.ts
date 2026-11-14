@@ -185,12 +185,14 @@ function buildOverviewSheet(wb: ExcelJS.Workbook, report: StudyReportDto, prefs:
 // ── ۲) خلاصهٔ محاسبات (عناصر) ──
 function buildSummarySheet(wb: ExcelJS.Workbook, report: StudyReportDto, prefs: DatePrefs) {
   const ws = wb.addWorksheet('خلاصهٔ محاسبات', { views: [{ rightToLeft: true }] })
+  // §۷ (v1.5.2): ستون «نوع» (elementType) در v1.5.0 حذف شد — عرض ستونِ
+  // جامانده و گسترهٔ عنوان سربرگ نیز به شمار ستون‌های جدید (۱۴) تنظیم شد.
   ws.columns = [
-    { width: 22 }, { width: 26 }, { width: 14 }, { width: 8 }, { width: 12 },
-    { width: 12 }, { width: 12 }, { width: 12 }, { width: 12 }, { width: 12 },
-    { width: 10 }, { width: 12 }, { width: 12 }, { width: 12 }, { width: 34 },
+    { width: 22 }, { width: 26 }, { width: 14 }, { width: 12 }, { width: 12 },
+    { width: 12 }, { width: 12 }, { width: 12 }, { width: 12 }, { width: 10 },
+    { width: 12 }, { width: 12 }, { width: 12 }, { width: 34 },
   ]
-  styleTitleRow(ws, 1, 15)
+  styleTitleRow(ws, 1, 14)
   ws.getCell(1, 1).value = `خلاصهٔ محاسبات عناصر — ${report.project.name}`
   addMetaRows(ws, [
     ['تاریخ گزارش', formatReportDate(report.reportMeta.generatedAt, prefs)],
@@ -284,6 +286,11 @@ function buildSummarySheet(wb: ExcelJS.Workbook, report: StudyReportDto, prefs: 
   ws3.getCell(1, 1).value = `الونس‌های مؤثر — ${report.project.name}`
   const h3 = 3
   const headers3 = ['فعالیت', 'عنوان الونس', 'نوع', 'مقدار مؤثر', 'مبدأ', 'وضعیت', 'مبنا']
+  // §۷ (v1.5.2): نوشتن سرستون‌ها پیش از استایل — این سطر در بازسازی جلسهٔ ۱
+  // به‌تصادف حذف شده بود و شیت «دسته‌های مجاز» بدون سرستون (۰ سرستون در برابر
+  // ۷ سلول در هر ردیف) تولید می‌شد؛ ستون «نوع» این شیت نوعِ مقدار الونس است
+  // (درصدی/زمان ثابت) و مطابق §۷-۵ باید بماند.
+  headers3.forEach((h, i) => (ws3.getCell(h3, i + 1).value = h))
   styleHeaderRow(ws3, h3)
   let r3 = h3 + 1
   const seen = new Set<string>()

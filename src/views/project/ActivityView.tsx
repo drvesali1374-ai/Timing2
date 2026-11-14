@@ -306,10 +306,14 @@ function ActivityScreen({ projectId, activityId }: { projectId: string; activity
           </nav>
           {activity ? (
             <Badge
-              className="shrink-0 gap-1.5 border-0 bg-brand-soft text-brand"
+              className="shrink-0 gap-2 border-border/60 bg-surface-2/70 px-3 py-1.5 text-sm font-bold"
               title={`نوع رویداد فرایندی: ${processLabelOf(activity.processType)}`}
             >
-              <ProcessSymbol type={activity.processType} size="sm" />
+              {/* نماد خط‌دار بزرگ‌شده — v1.5.2 Part-3 §۴؛ داخل span تا
+                  قاعدهٔ [&>svg]:size-3 چیپ آن را کوچک نکند */}
+              <span className="inline-flex shrink-0">
+                <ProcessSymbol type={activity.processType} size="sm" />
+              </span>
               {processLabelOf(activity.processType)}
             </Badge>
           ) : (
@@ -573,7 +577,10 @@ function ActivityInfoForm({
               <SelectContent>
                 {PROCESS_TYPES.map((pt) => (
                   <SelectItem key={pt} value={pt}>
-                    <ProcessSymbol type={pt} size="sm" /> {PROCESS_TYPE_LABELS[pt]}
+                    <span className="flex items-center gap-2">
+                      <ProcessSymbol type={pt} size="sm" className="size-5" />
+                      {PROCESS_TYPE_LABELS[pt]}
+                    </span>
                   </SelectItem>
                 ))}
               </SelectContent>

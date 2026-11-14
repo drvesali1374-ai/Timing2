@@ -71,38 +71,98 @@ function anchorPoint(p: Position, a: AnchorSide): Position {
   return { x: p.x + ANCHOR_POS[a].x, y: p.y + ANCHOR_POS[a].y }
 }
 
-/** انتخاب خودکار anchor بر اساس جهت نسبی دو گره */
-function autoAnchors(s: Position, t: Position): [AnchorSide, AnchorSide] {
-  const sc = { x: s.x + NODE_W / 2, y: s.y + NODE_H / 2 }
-  const tc = { x: t.x + NODE_W / 2, y: t.y + NODE_H / 2 }
-  const dx = tc.x - sc.x
-  const dy = tc.y - sc.y
-  if (Math.abs(dy) >= Math.abs(dx)) {
-    return dy >= 0 ? ['bottom', 'top'] : ['top', 'bottom']
+/** v1.5.2 §۶-۱ — انتخاب خودکار جفت anchor از میان «همهٔ ترکیب‌ها» (۴×۴).
+ *  بر خلاف نسخهٔ قبل که فقط زوج‌های هم‌جهت (top-bottom / left-right) را
+ *  می‌ساخت، اکنون نزدیک‌ترین زوج نقطهٔ مناسب از هر دو مستطیل انتخاب
+ *  می‌شود — حتی ترکیب‌های متقاطع مثل left-top یا right-bottom.
+ *  معیار: طول مسیر elbow + جریمهٔ سنگین برای عبور از داخل گره‌ها. */
+const ALL_SIDES: AnchorSide[] = ['top', 'bottom', 'left', 'right']
+
+/** تقاطع پاره‌خط با مستطیل (برای جریمهٔ عبور از داخل گره) */
+function segmentHitsRect(a: Position, b: Position, r: { x: number; y: number; w: number; h: number }): boolean {
+  // نمونه‌گیری چندنقطه‌ای روی پاره‌خط — کافی و ارزان
+  const steps = 12
+  for (let i = 0; i <= steps; i++) {
+    const k = i / steps
+    const x = a.x + (b.x - a.x) * k
+    const y = a.y + (b.y - a.y) * k
+    if (x > r.x + 1 && x < r.x + r.w - 1 && y > r.y + 1 && y < r.y + r.h - 1) return true
   }
-  return dx >= 0 ? ['right', 'left'] : ['left', 'right']
+  return false
+}
+
+/** نقاط مسیر elbow از anchor مبدأ به anchor مقصد — v1.5.2 §۶-۱/§۶-۲ */
+function elbowPoints(s: Position, sa: AnchorSide, t: Position, ta: AnchorSide): Position[] {
+  const sA = anchorPoint(s, sa)
+  const tA = anchorPoint(t, ta)
+  const stub = 22
+  const sOut = { x: sA.x + ANCHOR_NORMAL[sa].x * stub, y: sA.y + ANCHOR_NORMAL[sa].y * stub }
+  const tIn = { x: tA.x - ANCHOR_NORMAL[ta].x * stub, y: tA.y - ANCHOR_NORMAL[ta].y * stub }
+  const pts: Position[] = [sA, sOut]
+  const vSrc = sa === 'bottom' || sa === 'top'
+  const vDst = ta === 'bottom' || ta === 'top'
+  if (Math.abs(sOut.x - tIn.x) > 1 && Math.abs(sOut.y - tIn.y) > 1) {
+    if (vSrc && vDst) {
+      const midY = (sOut.y + tIn.y) / 2
+      pts.push({ x: sOut.x, y: midY }, { x: tIn.x, y: midY })
+    } else if (!vSrc && !vDst) {
+      const midX = (sOut.x + tIn.x) / 2
+      pts.push({ x: midX, y: sOut.y }, { x: midX, y: tIn.y })
+    } else if (vSrc && !vDst) {
+      // مبدأ عمودی → مقصد افقی: خم در سطح ورودی افقی مقصد
+      pts.push({ x: sOut.x, y: tIn.y })
+    } else {
+      // مبدأ افقی → مقصد عمودی: خم در سطح خروجی افقی مبدأ
+      pts.push({ x: tIn.x, y: sOut.y })
+    }
+  }
+  pts.push(tIn, tA)
+  return pts
+}
+
+/** امتیاز یک زوج anchor: طول مسیر + جریمهٔ عبور از داخل گره‌ها (§۶-۱) */
+function anchorPairScore(
+  s: Position, sa: AnchorSide, t: Position, ta: AnchorSide,
+  srcRect: { x: number; y: number; w: number; h: number },
+  dstRect: { x: number; y: number; w: number; h: number },
+): number {
+  const pts = elbowPoints(s, sa, t, ta)
+  let len = 0
+  for (let i = 1; i < pts.length; i++) {
+    len += Math.abs(pts[i].x - pts[i - 1].x) + Math.abs(pts[i].y - pts[i - 1].y)
+  }
+  let penalty = 0
+  for (let i = 1; i < pts.length; i++) {
+    if (segmentHitsRect(pts[i - 1], pts[i], srcRect)) penalty += 400
+    if (segmentHitsRect(pts[i - 1], pts[i], dstRect)) penalty += 400
+  }
+  return len + penalty
+}
+
+/** بهترین جفت anchor از میان همهٔ ۱۶ ترکیب (§۶-۱) */
+function autoAnchors(s: Position, t: Position): [AnchorSide, AnchorSide] {
+  const srcRect = { x: s.x, y: s.y, w: NODE_W, h: NODE_H }
+  const dstRect = { x: t.x, y: t.y, w: NODE_W, h: NODE_H }
+  let best: [AnchorSide, AnchorSide] = ['bottom', 'top']
+  let bestScore = Infinity
+  for (const sa of ALL_SIDES) {
+    for (const ta of ALL_SIDES) {
+      if (sa === ta) continue
+      const score = anchorPairScore(s, sa, t, ta, srcRect, dstRect)
+      if (score < bestScore) {
+        bestScore = score
+        best = [sa, ta]
+      }
+    }
+  }
+  return best
 }
 
 /** مسیر orthogonal/elbow از anchor مبدأ به anchor مقصد — بدون عبور از داخل گره */
 function orthogonalPath(s: Position, sa: AnchorSide, t: Position, ta: AnchorSide): string {
-  const sA = anchorPoint(s, sa)
-  const tA = anchorPoint(t, ta)
-  const stub = 20
-  const sOut = { x: sA.x + ANCHOR_NORMAL[sa].x * stub, y: sA.y + ANCHOR_NORMAL[sa].y * stub }
-  const tIn = { x: tA.x - ANCHOR_NORMAL[ta].x * stub, y: tA.y - ANCHOR_NORMAL[ta].y * stub }
-  const pts: Position[] = [sA, sOut]
-  const verticalSource = sa === 'bottom' || sa === 'top'
-  if (Math.abs(sOut.x - tIn.x) > 1 && Math.abs(sOut.y - tIn.y) > 1) {
-    if (verticalSource) {
-      const midY = (sOut.y + tIn.y) / 2
-      pts.push({ x: sOut.x, y: midY }, { x: tIn.x, y: midY })
-    } else {
-      const midX = (sOut.x + tIn.x) / 2
-      pts.push({ x: midX, y: sOut.y }, { x: midX, y: tIn.y })
-    }
-  }
-  pts.push(tIn, tA)
-  return pts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${Math.round(p.x)} ${Math.round(p.y)}`).join(' ')
+  return elbowPoints(s, sa, t, ta)
+    .map((p, i) => `${i === 0 ? 'M' : 'L'} ${Math.round(p.x)} ${Math.round(p.y)}`)
+    .join(' ')
 }
 
 const OPC_ALLOWED: string[] = ['OPERATION', 'INSPECTION', MATERIAL_INPUT_NODE_TYPE, 'STORAGE']
@@ -145,6 +205,8 @@ export default function ChartCanvas({ projectId, chartType }: { projectId: strin
   const [infoNode, setInfoNode] = useState<ChartNodeDto | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<ChartNodeDto | null>(null)
   const [edgeTarget, setEdgeTarget] = useState<ChartEdgeDto | null>(null)
+  /** v1.5.2 §۶-۶ — یال انتخاب‌شده (کلیک روی یال → هایلایت + دکمه/کلید حذف) */
+  const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null)
   const [pdfOpen, setPdfOpen] = useState(false)
   const [canvasOpen, setCanvasOpen] = useState(false)
   const dragMovedRef = useRef(false)
@@ -155,6 +217,8 @@ export default function ChartCanvas({ projectId, chartType }: { projectId: strin
   const nodes = useMemo(() => data?.nodes ?? [], [data])
   const edges = useMemo(() => data?.edges ?? [], [data])
   const nodeById = useMemo(() => new Map(nodes.map((n) => [n.id, n])), [nodes])
+  /** §۶-۶ — یال انتخاب‌شدهٔ فعلی (اگر هنوز موجود باشد) */
+  const selectedEdge = useMemo(() => edges.find((e) => e.id === selectedEdgeId) ?? null, [edges, selectedEdgeId])
 
   useEffect(() => {
     if (data) {
@@ -354,14 +418,14 @@ export default function ChartCanvas({ projectId, chartType }: { projectId: strin
     })
   }, [])
 
+  /** v1.5.2 §۶-۴ — چرخ ماوس روی بوم همیشه Zoom است (نزدیک نشانگر)؛
+   *  صفحه اسکرول نمی‌شود و بوم با چرخ جابه‌جا (Pan) نمی‌شود.
+   *  جابه‌جایی فقط با درگ زمینه. Ctrl/Meta+چرخ نیز زوم می‌ماند
+   *  (رفتار اشاره‌ای pinch ترک‌پد حفظ شده است). */
   const onWheel = (e: React.WheelEvent) => {
-    if (e.ctrlKey || e.metaKey) {
-      e.preventDefault()
-      zoomAt(e.clientX, e.clientY, e.deltaY < 0 ? 1.1 : 1 / 1.1)
-    } else {
-      // pan با wheel/trackpad — رفتار قابل پیش‌بینی
-      setPan((p) => ({ x: p.x - e.deltaX, y: p.y - e.deltaY }))
-    }
+    e.preventDefault()
+    const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1
+    zoomAt(e.clientX, e.clientY, factor)
   }
 
   const fitToView = () => {
@@ -395,6 +459,24 @@ export default function ChartCanvas({ projectId, chartType }: { projectId: strin
     const pt = toChartCoords(e.clientX, e.clientY)
     setConnecting({ sourceId: node.id, sourceAnchor: anchor, x: pt.x, y: pt.y })
   }
+
+  // ── §۶-۶ — حذف یال انتخاب‌شده با Delete/Backspace (فقط وقتی یال
+  //    انتخاب شده و کاربر داخل فیلد متنی تایپ نمی‌کند) ──
+  useEffect(() => {
+    if (!selectedEdgeId) return
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.key !== 'Delete' && ev.key !== 'Backspace') return
+      const t = ev.target as HTMLElement | null
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return
+      if (document.querySelector('[data-state="open"] [role="dialog"]')) return // دیالوگ باز است
+      const edge = edges.find((e) => e.id === selectedEdgeId)
+      if (!edge) return
+      ev.preventDefault()
+      setEdgeTarget(edge) // تأییدیهٔ حذف باز می‌شود
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [selectedEdgeId, edges])
 
   useEffect(() => {
     if (!connecting) return
@@ -495,6 +577,42 @@ export default function ChartCanvas({ projectId, chartType }: { projectId: strin
   }
   const effCanvas = { w: canvasW, h: canvasH }
 
+  /** §۶-۵ — محدودهٔ واقعی محتوای نمودار (گره‌ها + یال‌ها + پیکان‌ها):
+   *  خروجی PDF فقط همین محدوده را شامل می‌شود، نه کل فضای خالی بوم.
+   *  مختصات ذخیره‌شده گره‌ها هرگز تغییر نمی‌کند — فقط برش نمایشی. */
+  const contentBBox = (() => {
+    if (nodes.length === 0) return null
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+    const expand = (x: number, y: number) => {
+      if (x < minX) minX = x
+      if (y < minY) minY = y
+      if (x > maxX) maxX = x
+      if (y > maxY) maxY = y
+    }
+    const PAD = 48 // فاصلهٔ امن اطراف محتوا (شامل پیکان‌ها و سایهٔ گره‌ها)
+    for (const n of nodes) {
+      const p = pos(n)
+      expand(p.x - PAD, p.y - PAD)
+      expand(p.x + NODE_W + PAD, p.y + NODE_H + PAD)
+    }
+    for (const e of edges) {
+      const sn = nodeById.get(e.sourceNodeId)
+      const tn = nodeById.get(e.targetNodeId)
+      if (!sn || !tn) continue
+      const sp = pos(sn)
+      const tp = pos(tn)
+      const sa = (e.sourceAnchor as AnchorSide | null) ?? autoAnchors(sp, tp)[0]
+      const ta = (e.targetAnchor as AnchorSide | null) ?? autoAnchors(sp, tp)[1]
+      for (const pt of elbowPoints(sp, sa, tp, ta)) {
+        expand(pt.x - PAD, pt.y - PAD)
+        expand(pt.x + PAD, pt.y + PAD)
+      }
+    }
+    if (!Number.isFinite(minX)) return null
+    // مختصات منفی/چیدمان نامتعارف نیز درست پشتیبانی می‌شود
+    return { x: Math.min(minX, 0) === 0 ? Math.max(0, minX) : minX, y: Math.min(minY, 0) === 0 ? Math.max(0, minY) : minY, w: maxX - minX, h: maxY - minY, maxX, maxY }
+  })()
+
   const unconnected = nodes.filter(
     (n) => !edges.some((e) => e.sourceNodeId === n.id || e.targetNodeId === n.id)
   ).length
@@ -564,6 +682,20 @@ export default function ChartCanvas({ projectId, chartType }: { projectId: strin
           </Button>
         </div>
 
+        {/* §۶-۶ — حذف یال انتخاب‌شده از نوار ابزار */}
+        {selectedEdge && (
+          <Button
+            size="sm"
+            variant="destructive"
+            className="gap-1.5"
+            onClick={() => setEdgeTarget(selectedEdge)}
+            title="حذف اتصال انتخاب‌شده (یا کلید Delete)"
+          >
+            <Trash2 className="size-4" aria-hidden />
+            حذف اتصال انتخاب‌شده
+          </Button>
+        )}
+
         <div className="ms-auto flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
           {isExtendedOpc && (
             <span className="inline-flex items-center gap-1 rounded-full border border-cyan/50 bg-cyan-soft px-2 py-0.5 font-bold text-cyan">
@@ -630,7 +762,12 @@ export default function ChartCanvas({ projectId, chartType }: { projectId: strin
             {/* یال‌ها — مسیر orthogonal از anchorها */}
             <svg className="pointer-events-none absolute inset-0" width={effCanvas.w} height={effCanvas.h} aria-hidden>
               <defs>
-                <marker id={`arrow-${chartType}`} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                {/* §۶-۳ — پیکان جهت جریان در انتهای مسیر (سمت مقصد)؛
+                    اندازه/رنگ به‌اندازهٔ کافی واضح و هم‌رنگ خط */}
+                <marker id={`arrow-${chartType}`} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+                  <path d="M 0 0 L 10 5 L 0 10 z" className="fill-brand" />
+                </marker>
+                <marker id={`arrow-selected-${chartType}`} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse">
                   <path d="M 0 0 L 10 5 L 0 10 z" className="fill-brand" />
                 </marker>
               </defs>
@@ -643,19 +780,26 @@ export default function ChartCanvas({ projectId, chartType }: { projectId: strin
                 const sa = (e.sourceAnchor as AnchorSide | null) ?? autoAnchors(sp, tp)[0]
                 const ta = (e.targetAnchor as AnchorSide | null) ?? autoAnchors(sp, tp)[1]
                 const d = orthogonalPath(sp, sa, tp, ta)
+                const isSelected = selectedEdgeId === e.id
                 return (
-                  <g key={e.id} className="pointer-events-auto cursor-pointer" onClick={() => setEdgeTarget(e)}>
-                    <title>حذف اتصال</title>
-                    <path d={d} className="fill-none stroke-transparent" strokeWidth={14} />
+                  <g
+                    key={e.id}
+                    className="pointer-events-auto cursor-pointer"
+                    onClick={() => setSelectedEdgeId((prev) => (prev === e.id ? null : e.id))}
+                    aria-label={`اتصال ${s!.label} به ${t!.label}${isSelected ? ' — انتخاب‌شده' : ''}`}
+                  >
+                    <title>{isSelected ? 'اتصال انتخاب‌شده — حذف با دکمهٔ نوار ابزار یا کلید Delete' : 'کلیک: انتخاب اتصال'}</title>
+                    <path d={d} className="fill-none stroke-transparent" strokeWidth={16} />
                     <path
                       d={d}
                       className={cn(
-                        'fill-none transition-colors hover:stroke-red',
-                        e.isChain ? 'stroke-brand/55' : 'stroke-brand-2/70'
+                        'fill-none transition-colors',
+                        isSelected ? 'stroke-brand' : 'hover:stroke-red',
+                        !isSelected && (e.isChain ? 'stroke-brand/55' : 'stroke-brand-2/70'),
                       )}
-                      strokeWidth={2}
-                      strokeDasharray={e.isChain ? undefined : '6 4'}
-                      markerEnd={`url(#arrow-${chartType})`}
+                      strokeWidth={isSelected ? 3.5 : 2}
+                      strokeDasharray={e.isChain || isSelected ? undefined : '6 4'}
+                      markerEnd={`url(#arrow${isSelected ? '-selected' : ''}-${chartType})`}
                     />
                   </g>
                 )
@@ -809,7 +953,7 @@ export default function ChartCanvas({ projectId, chartType }: { projectId: strin
 
         {/* راهنمای زوم/پن */}
         <div className="pointer-events-none absolute bottom-2 left-2 rounded-lg bg-background/85 px-2 py-1 text-[10px] text-muted-foreground shadow-sm" dir="rtl">
-          درگ زمینه = جابه‌جایی · Ctrl+چرخ ماوس = زوم · کشیدن از لنگر گردِ گره = اتصال
+          چرخ ماوس = زوم · درگ زمینه = جابه‌جایی · کشیدن از لنگر گردِ گره = اتصال
         </div>
       </div>
 
@@ -910,8 +1054,11 @@ export default function ChartCanvas({ projectId, chartType }: { projectId: strin
           contentRef.current
             ? {
                 contentEl: contentRef.current,
-                chartWidth: effCanvas.w,
-                chartHeight: effCanvas.h,
+                chartWidth: contentBBox ? Math.ceil(contentBBox.w) : effCanvas.w,
+                chartHeight: contentBBox ? Math.ceil(contentBBox.h) : effCanvas.h,
+                /** §۶-۵ — برش به محدودهٔ واقعی محتوا: محتوا با آفست منفی
+                 *  درون قاب برش‌خورده قرار می‌گیرد (بدون تغییر مختصات پروژه) */
+                cropOffset: contentBBox ? { x: -Math.floor(contentBBox.x), y: -Math.floor(contentBBox.y) } : null,
                 chartTitle: `${data.chartType === 'OPC' ? 'نمودار فرایند عملیات (OPC)' : 'نمودار فرایند جریان (FPC)'}${isExtendedOpc ? ' — توسعه‌یافته' : ''}`,
               }
             : null
@@ -971,7 +1118,7 @@ function ManualNodeDialog({
                 {allowed.map((t) => (
                   <SelectItem key={t} value={t}>
                     <span className="flex items-center gap-2">
-                      <ProcessSymbol type={t} size="sm" />
+                      <ProcessSymbol type={t} size="sm" className="size-5" />
                       {PROCESS_TYPE_LABELS_WITH_INPUT[t]}
                       {chartType === 'OPC' && (t === MATERIAL_INPUT_NODE_TYPE || t === 'STORAGE') ? ' (توسعهٔ اختیاری)' : ''}
                     </span>

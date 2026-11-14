@@ -14,7 +14,7 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Archive, ChevronDown, ChevronUp, Layers, ListTree, Loader2, Pencil, Percent, Plus, SlidersHorizontal, Trash2 } from 'lucide-react'
+import { Archive, ChevronDown, ChevronUp, Factory, Layers, ListTree, Loader2, Pencil, Percent, Plus, SlidersHorizontal, Trash2 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -759,8 +759,13 @@ function DefinitionFormDialog({
 }
 
 // ═══════════════ زبانه گروه‌های فعالیت — فقط طبقه‌بندی ═══════════════
-// v1.5.2 §۵.۲: فهرست کامل فعالیت‌ها با «نمایش همه / نمایش کمتر»؛
-// نام فعالیت‌ها بدون بریده‌شدن (wrap) و تایپوگرافی بازطراحی‌شده.
+// v1.5.2 §۸ — بازطراحی کارت‌های گروه:
+// • §۸-۱ سیستم تایپوگرافی منسجم: عنوان ۱۵px/۷۰۰، توضیح ۱۲px/۴۰۰،
+//   متادیتا ۱۱px، نام فعالیت ۱۲px/۶۰۰ — بدون جهش نامنظم اندازه
+// • §۸-۲ هر فعالیت یک زیرکارت با پس‌زمینهٔ ملایمِ متمایز از کارت گروه
+// • §۸-۳ self-start + items-start — ارتفاع طبیعی بر اساس محتوا
+// • §۸-۴ نام فعالیت + نام ایستگاه با چیدمان مشخص و wrap بدون سرریز؛
+//   «نمایش همه / نمایش کمتر» برای فهرست‌های بلند
 
 /** آستانه نمایش فهرست جمع‌وجور قبل از دکمهٔ «نمایش همه» */
 const GROUP_COLLAPSED_COUNT = 5
@@ -783,14 +788,16 @@ function GroupCard({
   const hiddenCount = g.activities.length - visibleActivities.length
 
   return (
-    <div className="flex flex-col rounded-xl border border-border/60 bg-surface-2/50 p-4">
+    // §۸-۳: self-start — کارت به ارتفاع همسایهٔ خودش کشیده نمی‌شود
+    <article className="flex flex-col self-start rounded-xl border border-border/60 bg-surface-2/50 p-4">
+      {/* سربرگ گروه — تایپوگرافی سلسله‌مراتبی (§۸-۱) */}
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
-          <p className="text-[15px] font-bold leading-6">{g.name}</p>
+          <h3 className="break-words text-[15px] font-bold leading-6">{g.name}</h3>
           {g.description && (
-            <p className="mt-1 text-xs leading-5 text-muted-foreground">{g.description}</p>
+            <p className="mt-1 break-words text-xs leading-5 text-muted-foreground">{g.description}</p>
           )}
-          <p className="num mt-1.5 text-[11px] leading-4 text-faint">
+          <p className="num mt-2 text-[11px] leading-5 text-faint">
             {g.activities.length.toLocaleString('fa-IR')} فعالیت · ساخته‌شده {formatDateTime(g.createdAt, prefs)}
           </p>
         </div>
@@ -804,27 +811,43 @@ function GroupCard({
           <Trash2 className="size-3.5" aria-hidden />
         </Button>
       </div>
-      {g.activities.length > 0 && (
-        <ul className="mt-3 space-y-1 border-t border-border/50 pt-3">
+      {g.activities.length > 0 ? (
+        /* فاصلهٔ کافی سربرگ ← فهرست + جداکنندهٔ ظریف (§۸-۲) */
+        <ul className="mt-4 space-y-2 border-t border-border/50 pt-4">
           {visibleActivities.map((a) => (
             <li key={a.id}>
+              {/* زیرکارت فعالیت — پس‌زمینهٔ نرم متمایز از کارت گروه (§۸-۲)؛
+                  موبایل: نام و ایستگاه پشته‌ای، دسکتاپ: هم‌ردیف (§۸-۵) */}
               <button
                 type="button"
-                className="flex w-full items-baseline gap-1.5 rounded-md px-1.5 py-1 text-right text-xs leading-5 transition-colors hover:bg-brand-soft/40"
+                className="
+                  flex w-full flex-col gap-1 rounded-lg border border-border/50 bg-card/80 px-3 py-2 text-right
+                  transition-colors hover:border-brand/40 hover:bg-brand-soft/40
+                  sm:flex-row sm:items-start sm:justify-between sm:gap-3
+                "
                 onClick={() => navigate({ name: 'activity', projectId, activityId: a.id })}
               >
-                {/* نام فعالیت با wrap کامل — بدون بریده‌شدن (v1.5.2 §۵.۲) */}
-                <span className="min-w-0 flex-1 break-words">{a.name}</span>
-                <span className="shrink-0 text-faint">— {a.station.name}</span>
+                {/* نام فعالیت — wrap کامل؛ بدون بریده‌شدن (§۸-۱) */}
+                <span className="min-w-0 break-words text-xs font-semibold leading-5">{a.name}</span>
+                {/* ایستگاهِ فعالیت — همراهی مشخص با آیکون، بدون سرریز (§۸-۴) */}
+                <span
+                  className="
+                    flex w-fit shrink-0 items-start gap-1 self-start text-[11px] leading-5 text-muted-foreground
+                    sm:max-w-[55%]
+                  "
+                >
+                  <Factory className="mt-[3px] size-3.5 shrink-0 text-faint" aria-hidden />
+                  <span className="min-w-0 break-words">{a.station.name}</span>
+                </span>
               </button>
             </li>
           ))}
-          {/* نمایش همه فعالیت‌ها / نمایش کمتر — دسترسی به فهرست کامل (§۵.۲) */}
+          {/* نمایش همه فعالیت‌ها / نمایش کمتر — دسترسی به فهرست کامل (§۸-۴) */}
           {g.activities.length > GROUP_COLLAPSED_COUNT && (
             <li>
               <button
                 type="button"
-                className="num flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-[11px] font-bold text-brand transition-colors hover:bg-brand-soft/40"
+                className="num flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[11px] font-bold text-brand transition-colors hover:bg-brand-soft/40"
                 aria-expanded={expanded}
                 onClick={() => setExpanded((s) => !s)}
               >
@@ -843,8 +866,15 @@ function GroupCard({
             </li>
           )}
         </ul>
+      ) : (
+        /* گروه بدون فعالیت — جای‌نگهدار ظریف به‌جای فضای خالی (§۸-۳) */
+        <div className="mt-4 border-t border-border/50 pt-4">
+          <p className="rounded-lg border border-dashed border-border/70 px-3 py-2.5 text-center text-[11px] leading-5 text-muted-foreground">
+            فعالیتی به این گروه نسبت داده نشده است
+          </p>
+        </div>
       )}
-    </div>
+    </article>
   )
 }
 
@@ -925,7 +955,8 @@ function GroupsTab({ projectId, prefs }: { projectId: string; prefs: Prefs }) {
         </Button>
       </div>
 
-      <div className="p-4 pt-3">
+      {/* فاصلهٔ محتوا از سربرگ بخش — نه چسبیده، نه شلوغ (v1.5.2 §۸) */}
+      <div className="p-4 pt-4">
         {groupsQ.isLoading ? (
           <div className="space-y-2">
             <Skeleton className="h-14 w-full rounded-xl" />
@@ -954,7 +985,8 @@ function GroupsTab({ projectId, prefs }: { projectId: string; prefs: Prefs }) {
             </Button>
           </div>
         ) : (
-          <div className="grid gap-3 sm:grid-cols-2">
+          /* §۸-۳: items-start — کارت‌های هم‌ردیف به ارتفاع هم کشیده نمی‌شوند */
+          <div className="grid items-start gap-4 sm:grid-cols-2">
             {groups.map((g) => (
               <GroupCard key={g.id} g={g} prefs={prefs} projectId={projectId} onDelete={setDeleting} />
             ))}

@@ -39,6 +39,9 @@ export interface ChartPdfSource {
   chartWidth: number
   chartHeight: number
   chartTitle: string
+  /** v1.5.2 §۶-۵ — برش به محدودهٔ واقعی محتوا: آفست جابه‌جایی محتوا
+   *  درون قاب برش (null = بدون برش، کل بوم). مختصات پروژه تغییر نمی‌کند. */
+  cropOffset?: { x: number; y: number } | null
 }
 
 export default function PdfExportDialog({
@@ -123,10 +126,13 @@ export default function PdfExportDialog({
       </div>`
 
     const content = source.contentEl.outerHTML
+    // §۶-۵ — برش به محدودهٔ واقعی محتوا: محتوا با آفست برش داخل قاب می‌نشیند
+    const crop = source.cropOffset ?? { x: 0, y: 0 }
+    const cropped = `<div style="position:absolute;left:${crop.x}px;top:${crop.y}px">${content}</div>`
     if (mode === 'fit') {
       const offX = Math.max(0, (frame.w - source.chartWidth * s) / 2)
       const offY = Math.max(0, (frame.h - source.chartHeight * s) / 2)
-      const inner = `<div style="position:absolute;left:${offX}px;top:${offY}px;width:${source.chartWidth}px;height:${source.chartHeight}px;transform:scale(${s});transform-origin:0 0">${content}</div>`
+      const inner = `<div style="position:absolute;left:${offX}px;top:${offY}px;width:${source.chartWidth}px;height:${source.chartHeight}px;transform:scale(${s});transform-origin:0 0">${cropped}</div>`
       pages.push(mkPage(0, 0, 1, 1, inner))
     } else {
       const vw = frame.w - tiled.overlapPx
@@ -136,7 +142,7 @@ export default function PdfExportDialog({
         for (let col = 0; col < tiled.cols; col++) {
           const tx = -(col * vw) / s
           const ty = -(row * vh) / s
-          const inner = `<div style="position:absolute;left:0;top:0;width:${source.chartWidth}px;height:${source.chartHeight}px;transform:translate(${tx}px,${ty}px) scale(${s});transform-origin:0 0">${content}</div>`
+          const inner = `<div style="position:absolute;left:0;top:0;width:${source.chartWidth}px;height:${source.chartHeight}px;transform:translate(${tx}px,${ty}px) scale(${s});transform-origin:0 0">${cropped}</div>`
           pages.push(mkPage(col, row, idx, tiled.pages, inner))
           idx++
         }

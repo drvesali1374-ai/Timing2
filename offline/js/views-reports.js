@@ -414,7 +414,7 @@
         var dash = DB.getProjectDashboard(projectId);
         sheets.push({
           name: 'نگاه کل',
-          headers: ['ایستگاه', 'فعالیت', 'نوع', 'عناصر', 'چرخهٔ معتبر', 'هدف', 'OT جمع (ثانیه)', 'ST (ثانیه)', 'وضعیت ST', 'مشکوک در انتظار'],
+          headers: ['ایستگاه', 'فعالیت', 'نوع فرایند', 'عناصر', 'چرخهٔ معتبر', 'هدف', 'OT جمع (ثانیه)', 'ST (ثانیه)', 'وضعیت ST', 'مشکوک در انتظار'],
           rows: dash.activities
             .filter(function (r) { return !flt.activity || r.activityId === flt.activity; })
             .map(function (r) {
@@ -680,10 +680,13 @@
           }))));
       }
 
-      /* جدول عناصر — با فیلتر اپراتور، زمان‌ها میانگین همان اپراتور است */
+      /* جدول عناصر — با فیلتر اپراتور، زمان‌ها میانگین همان اپراتور است.
+         §۷ (v1.5.2): ستون «نوع» حذف شد — پارامتر elementType از
+         مدل داده در v1.5.0 برداشته شده و سلول داده‌ای نداشت؛ تعداد
+         سرستون‌ها اکنون دقیقاً برابر تعداد سلول‌های هر ردیف است. */
       sec.appendChild(U.h('p', { class: 'pr-meta font-bold mt-2 mb-1', text: 'عناصر کاری:' }));
       sec.appendChild(U.h('div', { class: 'overflow-x-auto' }, prTable(
-        ['عنصر', 'نوع', 'n', 'میانگین', 'SD', 'CV٪', 'OT', 'وستینگهاوس (S/E/C/Cons)', 'R', 'NT', 'ST'],
+        ['عنصر', 'n', 'میانگین', 'SD', 'CV٪', 'OT', 'وستینگهاوس (S/E/C/Cons)', 'R', 'NT', 'ST'],
         an.elements.map(function (el) {
           var rating = DB.getElementRating(el.id);
           var rVal = rating && rating.assessment ? rating.assessment.totalFactor : null;

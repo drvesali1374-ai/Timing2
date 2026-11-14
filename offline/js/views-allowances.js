@@ -318,8 +318,13 @@
   }
 
   // ═══════════════ زبانه گروه‌های فعالیت — فقط طبقه‌بندی ═══════════════
-  // v1.5.2 §۵.۲: فهرست کامل فعالیت‌ها با «نمایش همه / نمایش کمتر»؛
-  // نام فعالیت‌ها بدون بریده‌شدن (wrap) و تایپوگرافی بازطراحی‌شده.
+  // v1.5.2 §۸ — بازطراحی کارت‌های گروه (هم‌ارز GroupsView.tsx):
+  // • §۸-۱ تایپوگرافی منسجم: عنوان ۱۵px/۷۰۰، توضیح ۱۲px، متادیتا ۱۱px،
+  //   نام فعالیت ۱۲px/۶۰۰ — بدون جهش نامنظم اندازه
+  // • §۸-۲ هر فعالیت یک زیرکارت gc-act با پس‌زمینهٔ ملایمِ متمایز
+  // • §۸-۳ gc-grid با items-start — ارتفاع طبیعی بر اساس محتوا
+  // • §۸-۴ نام فعالیت + نام ایستگاه (با آیکون factory) و wrap کامل؛
+  //   «نمایش همه / نمایش کمتر» برای فهرست‌های بلند
 
   /** آستانه نمایش فهرست جمع‌وجور قبل از دکمهٔ «نمایش همه» */
   var GROUP_COLLAPSED_COUNT = 5;
@@ -332,41 +337,54 @@
     var visibleActs = showAll ? acts : acts.slice(0, GROUP_COLLAPSED_COUNT);
     var hiddenCount = acts.length - visibleActs.length;
 
-    var actList = U.h('ul', { class: 'mt-3 space-y-1 pt-3', style: { borderTop: '1px solid var(--border)' } });
-    visibleActs.forEach(function (a) {
-      actList.appendChild(U.h('li', null,
-        U.h('button', {
-          class: 'flex w-full items-baseline gap-1.5 rounded-md px-1.5 py-1 text-right text-xs leading-5 hover:bg-brand-soft',
-          onclick: function () { g.T2APP.navigate('/p/' + projectId + '/activity/' + a.id); },
-        },
-          // نام فعالیت با wrap کامل — بدون بریده‌شدن (v1.5.2 §۵.۲)
-          U.h('span', { class: 'min-w-0 flex-1 break-words', text: a.name }),
-          U.h('span', { class: 'shrink-0 text-faint', text: '— ' + a.stationName }))));
-    });
-    // نمایش همه فعالیت‌ها / نمایش کمتر — دسترسی به فهرست کامل (§۵.۲)
-    if (acts.length > GROUP_COLLAPSED_COUNT) {
-      actList.appendChild(U.h('li', null,
-        U.h('button', {
-          class: 'num flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-[11px] font-bold',
-          style: { color: 'var(--brand)' },
-          'aria-expanded': String(expanded),
-          onclick: function () { _groupExpanded[grp.id] = !expanded; redraw(); },
-        },
-          U.icon(expanded ? 'chevronUp' : 'chevronDown'),
-          expanded ? 'نمایش کمتر' : 'نمایش همه فعالیت‌ها (' + hiddenCount.toLocaleString('fa-IR') + ' مورد دیگر)')));
+    // فهرست فعالیت‌ها — فاصلهٔ کافی از سربرگ + جداکنندهٔ ظریف (§۸-۲)
+    var list;
+    if (acts.length > 0) {
+      list = U.h('ul', { class: 'gc-list' });
+      visibleActs.forEach(function (a) {
+        list.appendChild(U.h('li', null,
+          // زیرکارت فعالیت — موبایل: پشته‌ای؛ ≥sm: هم‌ردیف (§۸-۵)
+          U.h('button', {
+            class: 'gc-act',
+            onclick: function () { g.T2APP.navigate('/p/' + projectId + '/activity/' + a.id); },
+          },
+            // نام فعالیت — wrap کامل؛ بدون بریده‌شدن (§۸-۱)
+            U.h('span', { class: 'gc-act-name', text: a.name }),
+            // ایستگاهِ فعالیت — همراهی مشخص با آیکون، بدون سرریز (§۸-۴)
+            U.h('span', { class: 'gc-act-station' },
+              U.icon('factory'),
+              U.h('span', { text: a.stationName })))));
+      });
+      // نمایش همه فعالیت‌ها / نمایش کمتر — دسترسی به فهرست کامل (§۸-۴)
+      if (acts.length > GROUP_COLLAPSED_COUNT) {
+        list.appendChild(U.h('li', null,
+          U.h('button', {
+            class: 'gc-more num',
+            'aria-expanded': String(expanded),
+            onclick: function () { _groupExpanded[grp.id] = !expanded; redraw(); },
+          },
+            U.icon(expanded ? 'chevronUp' : 'chevronDown'),
+            expanded ? 'نمایش کمتر' : 'نمایش همه فعالیت‌ها (' + hiddenCount.toLocaleString('fa-IR') + ' مورد دیگر)')));
+      }
+    } else {
+      // گروه بدون فعالیت — جای‌نگهدار ظریف به‌جای فضای خالی (§۸-۳)
+      list = U.h('div', { class: 'gc-list' },
+        U.h('p', { class: 'gc-empty', text: 'فعالیتی به این گروه نسبت داده نشده است' }));
     }
 
-    return U.h('div', { class: 'flex flex-col rounded-xl p-4', style: { border: '1px solid color-mix(in srgb, var(--border) 60%, transparent)', background: 'color-mix(in srgb, var(--surface-2) 50%, transparent)' } },
+    // §۸-۳: gc-card داخل gc-grid با align-items:start — ارتفاع طبیعی
+    return U.h('article', { class: 'gc-card' },
       U.h('div', { class: 'flex items-start justify-between gap-2' },
         U.h('div', { class: 'min-w-0 flex-1' },
-          U.h('p', { class: 'text-[15px] font-bold leading-6', text: grp.name }),
-          grp.description ? U.h('p', { class: 'mt-1 text-xs leading-5 text-muted', text: grp.description }) : null,
-          U.h('p', { class: 'num mt-1.5 text-[11px] leading-4 text-faint', text: acts.length.toLocaleString('fa-IR') + ' فعالیت · ساخته‌شده ' + U.formatDateTime(grp.createdAt) })),
+          // تایپوگرافی سلسله‌مراتبی (§۸-۱)
+          U.h('h3', { class: 'gc-title', text: grp.name }),
+          grp.description ? U.h('p', { class: 'gc-desc', text: grp.description }) : null,
+          U.h('p', { class: 'num gc-meta', text: acts.length.toLocaleString('fa-IR') + ' فعالیت · ساخته‌شده ' + U.formatDateTime(grp.createdAt) })),
         U.h('button', {
           class: 'icon-btn sm danger shrink-0', 'aria-label': 'حذف گروه ' + grp.name,
           onclick: function () { onDelete(grp, acts); },
         }, U.icon('trash'))),
-      acts.length > 0 ? actList : null);
+      list);
   }
 
   function renderGroupsTab(body, projectId) {
@@ -396,14 +414,16 @@
         U.h('button', { class: 'btn btn-brand btn-sm gap-1.5', type: 'button', onclick: openCreateGroup },
           U.icon('plus'), 'گروه جدید'));
 
-      var content = U.h('div', { class: 'p-4 pt-3' });
+      // فاصلهٔ محتوا از سربرگ بخش — نه چسبیده، نه شلوغ (v1.5.2 §۸)
+      var content = U.h('div', { class: 'p-4 pt-4' });
       if (groups.length === 0) {
         content.appendChild(U.h('div', { class: 'rounded-xl border border-dashed p-6 text-center', style: { borderColor: 'var(--border)' } },
           U.h('p', { class: 'text-sm font-bold', text: 'هنوز گروه فعالیتی ثبت نشده است' }),
           U.h('p', { class: 'mx-auto mt-1 max-w-lg text-xs leading-5 text-muted', text: 'گروه‌ها صرفاً برچسب طبقه‌بندی فعالیت‌ها هستند؛ الونس‌ها از مدل سلسله‌مراتبی (خط → ایستگاه → فعالیت → عنصر) اعمال می‌شوند.' }),
           U.h('button', { class: 'btn btn-brand btn-sm mt-3 gap-1.5', type: 'button', onclick: openCreateGroup }, U.icon('plus'), 'اولین گروه')));
       } else {
-        var grid = U.h('div', { class: 'grid gap-3 sm:grid-cols-2' });
+        // §۸-۳: gc-grid با align-items:start — کارت‌های هم‌ردیف به ارتفاع هم کشیده نمی‌شوند
+        var grid = U.h('div', { class: 'gc-grid' });
         groups.forEach(function (grp) {
           var acts = actsByGroup[grp.id] || [];
           grid.appendChild(groupCard(grp, acts, projectId, function (g2, acts2) { confirmDeleteGroup(g2, acts2, draw); }, draw));

@@ -90,8 +90,10 @@
       '  .t2-two-col { flex-direction: row; gap: 20px; }',
       '  .t2-tree-col { width: calc(50% - 10px); }',
       '}',
-      // ── کارت ایستگاه در درخت — سطح ۱: bg-card (v1.5.2 §۲.۲) ──
-      '.t2-station-card { border: 1px solid var(--line-strong, var(--border)); border-radius: calc(var(--radius) + 5px); background: var(--card); overflow: hidden; transition: border-color .15s, background .15s, box-shadow .2s; }',
+      // ── کارت ایستگاه در درخت — ظرف بیرونی متمایز همهٔ فعالیت‌ها/عناصر
+      // (v1.5.2 Part-3 §۳-۳): پس‌زمینهٔ نرم متمایز از زمینهٔ صفحه +
+      // حاشیهٔ قابل‌تشخیص (نه ضخیم) + سایهٔ ملایم — هر دو تم ──
+      '.t2-station-card { border: 1px solid var(--line-strong, var(--border)); border-radius: calc(var(--radius) + 5px); background: color-mix(in srgb, var(--surface-2) 60%, var(--card)); box-shadow: var(--shadow-1); overflow: hidden; transition: border-color .15s, background .15s, box-shadow .2s; }',
       '.t2-station-card:hover { border-color: color-mix(in srgb, var(--brand) 40%, var(--border)); }',
       '.t2-station-card.selected { border-color: var(--brand); background: color-mix(in srgb, var(--brand-soft) 40%, var(--card)); box-shadow: 0 0 0 2px color-mix(in srgb, var(--brand) 25%, transparent), 0 6px 18px -8px rgba(114,87,255,.5); }',
       '.t2-station-head { display: flex; align-items: stretch; gap: 6px; padding: 4px 6px 4px 0; padding-inline-start: 32px; cursor: pointer; }',
@@ -110,10 +112,19 @@
       // زیرشاخه فعالیت‌ها/عناصر — عرض ~۷۵٪ (موبایل ۸۵٪) — v1.5.2 §۲.۲
       '.t2-acts, .t2-elements-list { width: 85%; min-width: 0; }',
       '@media (min-width: 640px) { .t2-acts, .t2-elements-list { width: 75%; } }',
-      // ستون عملیات عمودی (ویرایش بالا، حذف پایین) چسبیده به راست
-      '.t2-actions-col { display: flex; flex-direction: column; justify-content: center; gap: 2px; flex-shrink: 0; }',
-      // زیرمنوی فعالیت‌ها — تورفتگی + خط راهنمای درختی در راست
-      '.t2-acts { margin: 4px 8px 8px 0; margin-inline-start: 8px; padding-inline-start: 10px; border-inline-start: 2px dashed color-mix(in srgb, var(--brand) 25%, transparent); display: flex; flex-direction: column; gap: 4px; }',
+      // ردیف عملیات افقی (ویرایش/حذف/ورود) — v1.5.2 Part-3 §۳-۱/۳-۲:
+      // یک ردیف، اندازه/فاصلهٔ یکدست، ناحیهٔ کلیک مستقل؛ در عرض کم می‌شکند
+      '.t2-actions-row { display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; justify-content: center; gap: 4px; flex-shrink: 0; }',
+      // زیرشاخه فعالیت‌ها — چاهک نرم داخل ظرف ایستگاه (Part-3 §۳-۳):
+      // پس‌زمینهٔ روشن‌تر از ایستگاه + حاشیهٔ ظریف؛ سلسله‌مراتب متمایز
+      '.t2-acts { margin: 4px 8px 8px 0; margin-inline-start: 8px; padding: 6px; border: 1px solid color-mix(in srgb, var(--border) 60%, transparent); border-radius: calc(var(--radius) + 2px); background: color-mix(in srgb, var(--card) 70%, transparent); display: flex; flex-direction: column; gap: 4px; }',
+      // دکمهٔ افزودن واضح (add-action) — v1.5.2 Part-3 §۳-۴:
+      // تینت نرم + حاشیهٔ پیداست + حالت hover/focus؛ عرض هم‌تراز با ناحیهٔ فعالیت‌ها
+      '.t2-add-action { background: color-mix(in srgb, var(--brand-soft) 60%, transparent) !important; border: 1px solid color-mix(in srgb, var(--brand) 30%, transparent) !important; color: var(--brand) !important; font-weight: 700; justify-content: center; }',
+      '.t2-add-action:hover { background: var(--brand-soft) !important; border-color: color-mix(in srgb, var(--brand) 50%, transparent) !important; }',
+      '.t2-add-action--sm { background: color-mix(in srgb, var(--brand-soft) 40%, transparent) !important; border-color: color-mix(in srgb, var(--brand) 25%, transparent) !important; }',
+      // چیپ نوع فرایند در هدر صفحهٔ فعالیت — خنثی تا رنگ نماد بدرخشد (§۴)
+      '.t2-process-badge { background: color-mix(in srgb, var(--surface-2) 70%, transparent); border-color: color-mix(in srgb, var(--border) 60%, transparent); color: var(--foreground); font-size: 13px; font-weight: 700; padding: 6px 12px; gap: 8px; }',
       // ردیف جمع A در انتهای جدول مجازها
       'table.table tfoot td { border-top: 2px solid var(--border); border-bottom: none; background: color-mix(in srgb, var(--surface-2) 70%, transparent); }',
       // دکمه پیوندی مسیر (breadcrumb)
@@ -151,9 +162,10 @@
     return U.h('span', { class: 'badge ' + (variant || 'muted') + ' num shrink-0', text: text });
   }
 
-  /** کاشی نماد نوع رویداد فرایندی (ASCME) — رندر واحد از طریق UI.processSymbol (§۱۵.۲) */
+  /** کاشی نماد نوع رویداد فرایندی (ASCME) — رندر واحد از طریق UI.processSymbol (§۱۵.۲)؛
+      v1.5.2 Part-3 §۴: نماد خط‌دار ۴۸px — خودش لنگر بصری است */
   function symbolTile(processType, title) {
-    return U.h('span', { html: UI.processSymbol(processType, 'sm', title), 'aria-hidden': 'true' });
+    return U.h('span', { class: 'shrink-0', html: UI.processSymbol(processType, 'sm', title), 'aria-hidden': 'true' });
   }
 
   function dragHandleEl(locked) {
@@ -172,9 +184,9 @@
       U.h('span', { text: SORT_LOCK_HINT }));
   }
 
-  /** ستون عملیات عمودی — ویرایش بالا، حذف پایین؛ چسبیده به راست کارت */
+  /** ردیف عملیات افقی — ویرایش/حذف کنار هم (Part-3 §۳-۱)؛ چسبیده به چپ کارت RTL */
   function actionButtons(edit, del) {
-    return U.h('div', { class: 't2-actions-col' },
+    return U.h('div', { class: 't2-actions-row' },
       U.h('button', {
         class: 'icon-btn sm shrink-0', type: 'button',
         'aria-label': edit.label, title: edit.title,
@@ -738,7 +750,8 @@
       acts.forEach(function (a) { wrap.push(activityTreeRow(a, allActs, station, ctx, hasSearch)); });
     }
     wrap.push(U.h('button', {
-      class: 'btn btn-ghost btn-sm w-full', type: 'button',
+      class: 'btn btn-sm w-full t2-add-action', type: 'button',
+      style: { marginTop: '8px' },
       onclick: function (e) { e.stopPropagation(); openActivityDialog(ctx, station, null); },
     }, U.icon('plus'), 'فعالیت جدید'));
     return wrap;
@@ -805,8 +818,9 @@
       dragHandleEl(hasSearch),
       chevron,
       body,
-      // عملیات: ورود به فعالیت + ویرایش/حذف — v1.5.2 §۲.۴
-      U.h('div', { class: 't2-actions-col' },
+      // عملیات: ورود به فعالیت + ویرایش + حذف در یک ردیف افقی —
+      // v1.5.2 Part-3 §۳-۲؛ کلیک مستقل از رفتار دومانی کارت
+      U.h('div', { class: 't2-actions-row' },
         U.h('button', {
           class: 'icon-btn sm shrink-0', type: 'button', style: { color: 'var(--brand)' },
           'aria-label': 'ورود به صفحه فعالیت ' + a.name, title: 'ورود به صفحه فعالیت',
@@ -833,8 +847,8 @@
         visibleEls.forEach(function (e) { elsList.appendChild(elementTreeRow(e, els, a, ctx, hasSearch)); });
       }
       elsList.appendChild(U.h('button', {
-        class: 'btn btn-ghost btn-sm w-full', type: 'button',
-        style: { marginTop: '2px', fontSize: '11px', justifyContent: 'start', paddingInlineStart: '8px' },
+        class: 'btn btn-sm w-full t2-add-action t2-add-action--sm', type: 'button',
+        style: { marginTop: '6px', fontSize: '11px', justifyContent: 'start', paddingInlineStart: '8px' },
         onclick: function (ev) { ev.stopPropagation(); openTreeElementDialog(ctx, a, null); },
       }, U.icon('plus'), 'عنصر جدید'));
       node.appendChild(elsList);
@@ -1048,7 +1062,7 @@
         var group = ctx.groupMap[a.groupId];
         grid.appendChild(U.h('button', {
           class: 'card card-premium card-hover p-3', type: 'button',
-          style: { textAlign: 'start', width: '100%' },
+          style: { textAlign: 'start', width: '100%', display: 'flex', alignItems: 'center', gap: '10px' },
           'aria-label': 'باز کردن صفحه فعالیت ' + a.name,
           onclick: function () { appNavigate('/p/' + ctx.projectId + '/activity/' + a.id); },
         },
@@ -1254,7 +1268,7 @@
       }, U.icon('arrowRight')),
       U.h('h1', { class: 'text-xl font-extrabold truncate', text: activity.name }),
       U.h('span', {
-        class: 'badge brand shrink-0 flex items-center gap-1',
+        class: 'badge t2-process-badge shrink-0 flex items-center',
         title: 'نوع رویداد فرایندی: ' + processLabel,
       },
         U.h('span', { class: 'inline-flex', html: UI.processSymbol(activity.processType, 'sm') }),

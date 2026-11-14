@@ -899,7 +899,10 @@ export default function StructureView({ projectId }: { projectId: string }) {
                       <SelectContent dir="rtl">
                         {PROCESS_TYPES.map((pt) => (
                           <SelectItem key={pt} value={pt}>
-                            <ProcessSymbol type={pt} size="sm" /> {processLabelOf(pt)}
+                            <span className="flex items-center gap-2">
+                              <ProcessSymbol type={pt} size="sm" className="size-5" />
+                              {processLabelOf(pt)}
+                            </span>
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -1338,11 +1341,12 @@ function StationNode(p: StationNodeProps) {
     >
       <div
         className={cn(
-          // کارت ایستگاه — سطح ۱: پس‌زمینه card (روشن‌ترین سطح سلسله‌مراتب §۲.۲)
+          // کارت ایستگاه — ظرف بیرونی متمایز همهٔ فعالیت‌ها و عناصر (Part-3 §۳-۳):
+          // پس‌زمینهٔ نرمِ متمایز از زمینهٔ صفحه + حاشیهٔ قابل‌تشخیص (نه ضخیم)
           'overflow-hidden rounded-xl border transition-all',
           isSelected
             ? 'border-brand bg-brand-soft/40 shadow-[0_6px_18px_-8px_rgba(114,87,255,0.5)] ring-2 ring-brand/25'
-            : 'border-line-strong bg-card hover:border-brand/40'
+            : 'border-line-strong bg-surface-2/60 shadow-sm hover:border-brand/40'
         )}
       >
         {/* سربرگ کارت: chevron مستقل + بدنه دو مرحله‌ای + عملیات چپ — v1.5.2 §۲.۴ */}
@@ -1388,8 +1392,9 @@ function StationNode(p: StationNodeProps) {
               {formatInt(station.activities.length, prefs)} فعالیت · {formatInt(elementCount, prefs)} عنصر کاری
             </p>
           </div>
-          {/* عملیات ویرایش/حذف عمودی در چپ ردیف RTL — §۷.۵ */}
-          <div className="flex shrink-0 flex-col justify-center gap-0.5">
+          {/* عملیات ویرایش/حذف در یک ردیف افقی — v1.5.2 Part-3 §۳-۱:
+              اندازه‌های استاندارد، ناحیهٔ کلیک مستقل، بدون افزایش ارتفاع کارت */}
+          <div className="flex shrink-0 flex-row items-center justify-center gap-1">
             <Button
               variant="ghost"
               size="icon"
@@ -1417,9 +1422,10 @@ function StationNode(p: StationNodeProps) {
           </div>
         </div>
 
-        {/* زیرشاخه فعالیت‌ها — خط راهنمای سلسله‌مراتبی + عرض ~۷۵٪ کارت ایستگاه (v1.5.2 §۲.۲) */}
+        {/* زیرشاخه فعالیت‌ها — چاهک نرم داخل ظرف ایستگاه؛ عرض ~۷۵٪ کارت
+            (v1.5.2 §۲.۲ + Part-3 §۳-۳: سلسله‌مراتب ایستگاه ← فعالیت ← عنصر) */}
         <CollapsibleContent>
-          <div className="mb-2 mt-1 ms-2 w-[85%] min-w-0 border-s-2 border-dashed border-brand/25 pb-1 ps-2.5 sm:w-3/4">
+          <div className="mb-2 mt-1.5 ms-2 w-[85%] min-w-0 rounded-xl border border-border/60 bg-card/70 p-1.5 sm:w-3/4">
             {p.activities.length === 0 ? (
               <p className="px-1 py-1.5 text-[11px] text-faint">
                 {hasSearch ? 'فعالیت منطبقی نیست' : 'فعالیتی ثبت نشده است'}
@@ -1458,14 +1464,15 @@ function StationNode(p: StationNodeProps) {
                 }}
               />
             )}
-            {/* افزودن فعالیت — §۷.۶ variant متمایز */}
+            {/* افزودن فعالیت — add-action واضح: تینت نرم + حاشیهٔ پیداست
+                (v1.5.2 Part-3 §۳-۴)؛ عرض هم‌تراز با ناحیهٔ فعالیت‌ها */}
             <Button
-              variant="ghost"
+              variant="outline"
               size="sm"
-              className="mt-1 w-full gap-1.5 text-muted-foreground"
+              className="mt-2 w-full justify-center gap-1.5 border-brand/30 bg-brand-soft/60 font-bold text-brand hover:border-brand/50 hover:bg-brand-soft focus-visible:ring-brand/30"
               onClick={() => p.onNewActivity(station.id)}
             >
-              <Plus className="size-3.5" aria-hidden />
+              <Plus className="size-4" aria-hidden />
               فعالیت جدید
             </Button>
           </div>
@@ -1559,22 +1566,24 @@ function ActivityNode(p: ActivityNodeProps) {
               }
             }}
           >
-            <div className="flex min-w-0 items-center gap-1.5">
+            <div className="flex min-w-0 items-center gap-2">
               <span className="line-clamp-2 min-w-0 flex-1 text-[13px] font-medium leading-4.5">{activity.name}</span>
-              {/* نماد نوع فرایند — بدون قاب اضافه (v1.5.2 §۳) */}
-              <ProcessSymbol type={activity.processType} size="sm" className="size-4" />
+              {/* نماد نوع فرایند — خط‌دار و بزرگ‌شده (v1.5.2 Part-3 §۴) */}
+              <ProcessSymbol type={activity.processType} size="sm" />
             </div>
             {/* شمارش عناصر در خط مجزا زیر عنوان — همیشه نمایان (v1.5.2 §۲.۳) */}
             <p className="num text-[10.5px] leading-4 text-muted-foreground">
               {formatInt(elementCount, prefs)} عنصر کاری{groupLabel ? ` · گروه: ${groupLabel}` : ''}
             </p>
           </div>
-          {/* عملیات: ورود به فعالیت + ویرایش/حذف عمودی در چپ — v1.5.2 §۲.۴ */}
-          <div className="flex shrink-0 flex-col justify-center gap-0.5">
+          {/* عملیات: ورود به فعالیت + ویرایش + حذف در یک ردیف افقی —
+              v1.5.2 Part-3 §۳-۲؛ اندازه/فاصلهٔ یکدست، کلیک مستقل از
+              رفتار دومانی کارت (stopPropagation حفظ شده)؛ در عرض کم می‌شکند */}
+          <div className="flex shrink-0 flex-row flex-wrap items-center justify-center gap-1">
             <Button
               variant="ghost"
               size="icon"
-              className="size-6 text-brand hover:text-brand"
+              className="size-7 text-brand hover:text-brand"
               aria-label={`ورود به صفحه فعالیت ${activity.name}`}
               title="ورود به صفحه فعالیت"
               onClick={(e) => {
@@ -1582,31 +1591,31 @@ function ActivityNode(p: ActivityNodeProps) {
                 p.onOpenActivity(activity.id)
               }}
             >
-              <SquareArrowOutUpRight className="size-3.5" aria-hidden />
+              <SquareArrowOutUpRight className="size-4" aria-hidden />
             </Button>
             <Button
               variant="ghost"
               size="icon"
-              className="size-6"
+              className="size-7"
               aria-label={`ویرایش فعالیت ${activity.name}`}
               onClick={(e) => {
                 e.stopPropagation()
                 p.onEditActivity(activity)
               }}
             >
-              <Pencil className="size-3" aria-hidden />
+              <Pencil className="size-4" aria-hidden />
             </Button>
             <Button
               variant="ghost"
               size="icon"
-              className="size-6 text-red hover:text-red"
+              className="size-7 text-red hover:text-red"
               aria-label={`حذف فعالیت ${activity.name}`}
               onClick={(e) => {
                 e.stopPropagation()
                 p.onDeleteActivity(activity)
               }}
             >
-              <Trash2 className="size-3" aria-hidden />
+              <Trash2 className="size-4" aria-hidden />
             </Button>
           </div>
         </div>
@@ -1674,12 +1683,12 @@ function ActivityNode(p: ActivityNodeProps) {
               />
             )}
             <Button
-              variant="ghost"
+              variant="outline"
               size="sm"
-              className="mt-0.5 w-full gap-1 justify-start ps-2 text-[11px] text-muted-foreground"
+              className="mt-1.5 w-full justify-start gap-1.5 border-brand/25 bg-brand-soft/40 ps-2.5 text-[11px] font-bold text-brand hover:border-brand/45 hover:bg-brand-soft focus-visible:ring-brand/30"
               onClick={() => p.onNewElement(activity)}
             >
-              <Plus className="size-3" aria-hidden />
+              <Plus className="size-3.5" aria-hidden />
               عنصر جدید
             </Button>
           </div>
@@ -1843,13 +1852,9 @@ function StationDetailsPanel({
                   onClick={() => onOpenActivity(a.id)}
                   aria-label={`باز کردن صفحه فعالیت ${a.name}`}
                 >
-                  <span
-                    className="num size-9 shrink-0 rounded-lg bg-brand-soft text-base font-bold text-brand"
-                    title={processLabelOf(a.processType)}
-                    aria-hidden
-                  >
-                    <ProcessSymbol type={a.processType} size="sm" />
-                  </span>
+                  {/* نماد نوع فرایند — خط‌دار و بزرگ‌شده (v1.5.2 Part-3 §۴)؛
+                      خود نماد لنگر بصری است و قاب اضافه ندارد */}
+                  <ProcessSymbol type={a.processType} size="sm" />
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-sm font-bold">{a.name}</span>
                     <span className="num block truncate text-[11px] text-muted-foreground">
@@ -1971,7 +1976,10 @@ function ActivityEditForm({
               <SelectContent dir="rtl">
                 {PROCESS_TYPES.map((pt) => (
                   <SelectItem key={pt} value={pt}>
-                    <ProcessSymbol type={pt} size="sm" /> {processLabelOf(pt)}
+                    <span className="flex items-center gap-2">
+                      <ProcessSymbol type={pt} size="sm" className="size-5" />
+                      {processLabelOf(pt)}
+                    </span>
                   </SelectItem>
                 ))}
               </SelectContent>
