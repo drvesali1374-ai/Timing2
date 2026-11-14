@@ -78,3 +78,38 @@ export const api = {
     request<T>(path, { method: 'PATCH', body, changeId }),
   del: <T>(path: string, changeId?: string) => request<T>(path, { method: 'DELETE', changeId }),
 }
+
+/** ارسال فایل (multipart/form-data) با همان مدیریت خطای ساختاریافته — v1.5.2 §۹ */
+export async function postFile<T>(path: string, file: File, field = 'file'): Promise<T> {
+  const fd = new FormData()
+  fd.append(field, file)
+  let res: Response
+  try {
+    res = await fetch(path, { method: 'POST', body: fd, cache: 'no-store' })
+  } catch {
+    throw new ApiError(
+      'NETWORK_ERROR',
+      'ارتباط با سرور برقرار نشد. فایل را دوباره بارگذاری کنید.',
+      0,
+    )
+  }
+  const text = await res.text()
+  let data: unknown = null
+  if (text) {
+    try {
+      data = JSON.parse(text)
+    } catch {
+      data = null
+    }
+  }
+  if (!res.ok) {
+    const err = (data as { error?: { code?: string; message?: string; details?: unknown } })?.error
+    throw new ApiError(
+      err?.code ?? 'HTTP_ERROR',
+      err?.message ?? `خطای سرور (کد ${res.status})`,
+      res.status,
+      err?.details,
+    )
+  }
+  return data as T
+}

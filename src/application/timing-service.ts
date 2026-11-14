@@ -1136,7 +1136,8 @@ export interface GridModelRow {
  *  مرتبط با این Activity زیر هر endpoint حاضر (به ترتیب عنصر مقصد) — §۵.۱/§۹.۱.
  *  v1.5.1 §۷ — روابط بین‌فعالیت نیز زیر endpoint حاضر در این Activity می‌آیند؛
  *  نام عنصر خارجی از اطلاعات کامل پروژه (batch) حل می‌شود. */
-async function buildGridRows(activityId: string, projectId: string) {
+/** ساخت ردیف‌های شبکهٔ برگه — v1.5.2 §۹: صادرشده برای قالب Excel */
+export async function buildGridRows(activityId: string, projectId: string) {
   const elements = await loadActivityElements(activityId)
   const elementIds = elements.map((e) => e.id)
   const relations =

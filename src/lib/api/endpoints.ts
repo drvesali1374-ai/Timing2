@@ -1,7 +1,7 @@
 // ═══════════════════════════════════════════════════════════
 // توابع تایپ‌شده‌ی کلاینت API — قرارداد کامل فاز ۱ و ۲
 // ═══════════════════════════════════════════════════════════
-import { api } from '../api-client'
+import { api, postFile } from '../api-client'
 
 // ── انواع مشترک ──
 export interface ProjectSummaryItem {
@@ -465,6 +465,22 @@ export interface PastePreviewDto {
   createdCycles: number
 }
 
+/** v1.5.2 §۹ — پاسخ بارگذاری قالب Excel: شبکهٔ داده + لنگر مبدأ؛
+ *  وارد همان مسیر پیش‌نمایش/Commit موجود Paste می‌شود (ذخیرهٔ مستقیم ندارد) */
+export interface ExcelTemplateParseDto {
+  /** سطرها = ردیف‌های شبکهٔ برگه، ستون‌ها = چرخه‌ها (از مبدأ) */
+  data: string[][]
+  /** چرخهٔ مبدأ نگاشت ستون‌ها */
+  startCycleNo: number
+  /** شناسهٔ ردیف مبدأ (همیشه اولین ردیف شبکه = اولین عنصر) */
+  startElementId: string
+  startRelationId: string | null
+  /** هشدارهای ساختاری (مثلاً ستون‌های خالی انتهایی) */
+  warnings: string[]
+  /** نام فایل مبدأ برای نمایش */
+  sourceName: string | null
+}
+
 export interface RemovedCycleDataDto {
   cycle: {
     cycleNo: number
@@ -540,6 +556,11 @@ export const timingApi = {
       `/api/sessions/${sessionId}/paste-commit`,
       body
     ),
+
+  // v1.5.2 §۹ — قالب Excel جلسه: دانلود و بارگذاری
+  excelTemplateUrl: (sessionId: string) => `/api/sessions/${sessionId}/excel-template`,
+  parseExcelTemplate: (sessionId: string, file: File) =>
+    postFile<{ result: ExcelTemplateParseDto }>(`/api/sessions/${sessionId}/excel-template`, file),
 
   setValidity: (observationId: string, body: { validityStatus: 'VALID' | 'EXCLUDED'; exclusionReason?: string | null }) =>
     api.put<{
