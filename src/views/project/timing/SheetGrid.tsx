@@ -674,8 +674,10 @@ export function SheetGrid({
                           {isEditing && editing.kind === 'ELEMENT' ? (
                             column.entryMode === 'INT' ? (
                               // گروه بصری «از/تا» برای ورودی بازه‌ای — §۱۲.۲
+                              // v1.5.2 §۵ — جهت گروه RTL: «از» در راست، «تا» در چپ؛
+                              // خود ورودی‌های عددی LTR می‌مانند
                               <span
-                                dir="ltr"
+                                dir="rtl"
                                 className="inline-flex items-end justify-center gap-0.5 rounded-md border bg-background px-1 py-0.5 focus-within:border-brand focus-within:ring-1 focus-within:ring-brand"
                               >
                                 <label className="flex min-w-0 flex-col items-center">
@@ -757,8 +759,26 @@ export function SheetGrid({
                             )
                           ) : (
                             <>
-                              <span className="block truncate text-xs font-medium">
-                                {cellDisplayValue(obs, method, prefs)}
+                              {/* v1.5.2 §۷ — آیکون هشدار مشکوک در مجاورت عدد،
+                                  نه گوشهٔ سلول؛ محدودهٔ کلیک مستقل می‌ماند */}
+                              <span className="flex min-w-0 flex-wrap items-center justify-center gap-1">
+                                <span className="min-w-0 truncate text-xs font-medium">
+                                  {cellDisplayValue(obs, method, prefs)}
+                                </span>
+                                {suspect && obs && (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      openDiag(cycle, obs, row.name)
+                                    }}
+                                    className="flex size-4 shrink-0 items-center justify-center rounded-sm text-amber transition-colors hover:bg-amber-soft focus-visible:outline-2 focus-visible:outline-ring"
+                                    aria-label="تشخیص مشاهدهٔ مشکوک"
+                                    title="تشخیص مشاهدهٔ مشکوک"
+                                  >
+                                    <AlertTriangle className="size-3" aria-hidden />
+                                  </button>
+                                )}
                               </span>
                               {/* مدت تفاضلی زیر قرائت — FR-09 */}
                               {method === 'CONTINUOUS' && obs?.cumulativeReading != null && obs?.derivedDuration != null && (
@@ -772,20 +792,6 @@ export function SheetGrid({
                                 </span>
                               )}
                               {excluded && <Eraser className="absolute left-1 top-1 size-3 text-faint" aria-hidden />}
-                              {suspect && obs && (
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation()
-                                    openDiag(cycle, obs, row.name)
-                                  }}
-                                  className="absolute left-1 top-1 flex size-4 items-center justify-center rounded-sm text-amber transition-colors hover:bg-amber-soft focus-visible:outline-2 focus-visible:outline-ring"
-                                  aria-label="تشخیص مشاهدهٔ مشکوک"
-                                  title="تشخیص مشاهدهٔ مشکوک"
-                                >
-                                  <AlertTriangle className="size-3" aria-hidden />
-                                </button>
-                              )}
                               {(invalid || err) && <XCircle className="absolute left-1 top-1 size-3 text-red" aria-hidden />}
                             </>
                           )}
@@ -813,13 +819,15 @@ export function SheetGrid({
                 >
                   <div className="flex items-center justify-between gap-1">
                     <div className="flex min-w-0 items-center gap-1">
-                      {/* اتصال بصری ظریف به عنصر والد — §۹.۱ */}
-                      <span className="h-4 w-2 shrink-0 rounded-e border-b-2 border-l-2 border-brand/30" aria-hidden />
+                      {/* اتصال بصری ظریف به عنصر والد — §۹.۱ / v1.5.2 §۸:
+                          قلاب رو به چپ (خط عمودی در راست زیر والد + خم به چپ) */}
+                      <span className="h-4 w-2 shrink-0 rounded-es border-b-2 border-r-2 border-brand/30" aria-hidden />
                       <p
                         className="flex min-w-0 items-center gap-1 truncate text-[11px] font-bold text-muted-foreground"
                         title={`هم‌پوشانی با ${row.otherName}${row.crossActivity ? ` (فعالیت ${row.otherActivityName ?? '؟'} / ایستگاه ${row.otherStationName ?? '؟'})` : ''}`}
                       >
-                        <span className="truncate">↳ هم‌پوشانی با {row.otherName}</span>
+                        {/* v1.5.2 §۸ — فلش رو به چپ و به طرف عنصر والد */}
+                        <span className="truncate">↲ هم‌پوشانی با {row.otherName}</span>
                         {row.crossActivity && (
                           <span
                             className="shrink-0 rounded-md border border-amber/70 bg-amber-soft/40 px-1 py-px text-[8px] font-bold"

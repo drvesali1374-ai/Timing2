@@ -445,7 +445,8 @@ function MobileElementCell({
         </button>
       ) : editable ? (
         column.entryMode === 'INT' ? (
-          <span dir="ltr" className="inline-flex items-end justify-center gap-0.5 rounded-md border bg-background px-0.5 py-0.5">
+          // v1.5.2 §۵ — جهت گروه RTL: «از» در راست، «تا» در چپ؛ ورودی‌ها LTR
+          <span dir="rtl" className="inline-flex items-end justify-center gap-0.5 rounded-md border bg-background px-0.5 py-0.5">
             <input
               value={start}
               onChange={(e) => setStart(e.target.value)}
@@ -520,12 +521,13 @@ function MobileParallelRow({
       <th scope="row" className="sticky right-0 z-10 border-b border-l bg-surface-2/50 px-2 py-1 text-right backdrop-blur">
         <div className="flex items-center justify-between gap-1">
           <div className="flex min-w-0 items-center gap-1">
-            <span className="h-4 w-2 shrink-0 rounded-e border-b-2 border-l-2 border-brand/30" aria-hidden />
+            {/* v1.5.2 §۸ — قلاب رو به چپ به طرف عنصر والد + فلش ↲ */}
+            <span className="h-4 w-2 shrink-0 rounded-es border-b-2 border-r-2 border-brand/30" aria-hidden />
             <p
               className="flex min-w-0 items-center gap-1 truncate text-[10px] font-bold text-muted-foreground"
               title={`هم‌پوشانی با ${row.otherName}${row.crossActivity ? ` (فعالیت ${row.otherActivityName ?? '؟'} / ایستگاه ${row.otherStationName ?? '؟'})` : ''}`}
             >
-              <span className="truncate">↳ {row.otherName}</span>
+              <span className="truncate">↲ {row.otherName}</span>
               {row.crossActivity && (
                 <span
                   className="shrink-0 rounded-md border border-amber/70 bg-amber-soft/40 px-1 py-px text-[8px] font-bold"
