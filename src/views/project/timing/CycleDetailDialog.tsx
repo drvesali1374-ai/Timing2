@@ -15,6 +15,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { Label } from '@/components/ui/label'
 import type { CycleRowDto, ObservationCellDto, SessionSheetDto } from '@/lib/api/endpoints'
 import type { DisplayPrefs as Prefs } from '@/lib/format'
 import { formatTimeValue } from '@/lib/format'
@@ -149,10 +150,17 @@ export function CycleDetailDialog({
                 </table>
               </div>
 
-              {/* یادداشت چرخه */}
-              <div className="space-y-1">
-                <p className="text-[11px] font-bold text-muted-foreground">یادداشت چرخه (رویدادهای ویژه، وقفه‌ها و …)</p>
+              {/* یادداشت چرخه — v1.5.2 §۶: راست‌چین کامل با فاصلهٔ مناسب */}
+              <div className="space-y-1.5 text-right">
+                <Label
+                  htmlFor={`cycle-notes-${cycle.id}`}
+                  className="text-[11px] font-bold text-muted-foreground"
+                >
+                  یادداشت چرخه (رویدادهای ویژه، وقفه‌ها و …)
+                </Label>
                 <textarea
+                  id={`cycle-notes-${cycle.id}`}
+                  dir="rtl"
                   value={notes}
                   onChange={(e) => {
                     setNotes(e.target.value)
