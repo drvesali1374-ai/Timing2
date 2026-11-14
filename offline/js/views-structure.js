@@ -1245,7 +1245,7 @@
       U.icon('chevronLeft'),
       U.h('span', { class: 'font-semibold truncate', style: { color: 'var(--foreground)' }, text: activity.name })));
 
-    // ── ردیف بالا: بازگشت + عنوان + نوع فرایندی + وضعیت ──
+    // ── ردیف بالا: بازگشت + عنوان + نوع فرایندی + حذف + وضعیت ──
     container.appendChild(U.h('div', { class: 'flex flex-wrap items-center gap-2' },
       U.h('button', {
         class: 'icon-btn shrink-0', type: 'button',
@@ -1259,6 +1259,13 @@
       },
         U.h('span', { class: 'inline-flex', html: UI.processSymbol(activity.processType, 'sm') }),
         U.h('span', { text: processLabel })),
+      /* v1.5.2 §۳ — حذف فعالیت در هدر اصلی؛ در همهٔ زبانه‌ها در دسترس */
+      U.h('button', {
+        class: 'icon-btn danger shrink-0', type: 'button',
+        'aria-label': 'حذف این فعالیت',
+        title: 'حذف این فعالیت — دائمی است؛ شمارش وابستگی‌ها پیش از تأیید نمایش داده می‌شود',
+        onclick: function () { confirmDeleteActivity(activity, ctx, true); },
+      }, U.icon('trash')),
       spacer(),
       U.h('span', { class: 'text-xs text-muted num shrink-0', text: 'وضعیت: ' + U.formatInt(ratedCount) + ' از ' + U.formatInt(elements.length) + ' عنصر ارزیابی‌شده' })));
 
@@ -1282,10 +1289,10 @@
 
     // ── محتوای زبانه انتخاب‌شده ──
     if (tab === 'info') {
+      /* v1.5.2 §۳ — کارت «عملیات» حذف شد؛ دکمهٔ حذف در هدر اصلی است */
       container.appendChild(U.h('div', { class: 'flex flex-col gap-4 mt-4' },
         activityInfoCard(activity, ctx),
-        allowancesCard(activity, ctx),
-        dangerCard(activity, ctx)));
+        allowancesCard(activity, ctx)));
     } else if (tab === 'elements') {
       container.appendChild(elementsTab(activity, ctx));
     } else if (tab === 'timing') {
@@ -1387,21 +1394,7 @@
     return wrap;
   }
 
-  // ── کارت عملیات خطرناک ──
-  function dangerCard(activity, ctx) {
-    return U.h('section', { class: 'card p-4 border-red', 'aria-label': 'عملیات' },
-      U.h('div', { class: 'flex flex-wrap items-center gap-2' },
-        U.h('span', { class: 'chip-icon red' }, U.icon('trash')),
-        U.h('h3', { class: 'font-bold', text: 'عملیات' })),
-      U.h('div', { class: 'mt-3 flex flex-wrap items-center justify-between gap-3' },
-        U.h('div', { class: 'min-w-0' },
-          U.h('p', { class: 'font-semibold', text: 'حذف این فعالیت' }),
-          U.h('p', { class: 'text-xs text-muted mt-1', text: 'حذف فعالیت و همه داده‌های وابسته به آن.' })),
-        U.h('button', {
-          class: 'btn btn-destructive shrink-0', type: 'button',
-          onclick: function () { confirmDeleteActivity(activity, ctx, true); },
-        }, U.icon('trash'), 'حذف دائمی')));
-  }
+  // ── کارت عملیات خطرناک — v1.5.2 §۳: حذف شد؛ دکمهٔ حذف به هدر اصلی صفحه منتقل شد ──
 
   // ── زبانه ۲: عناصر کاری ──
 
@@ -1490,9 +1483,10 @@
     UI.dialog({
       title: isEdit ? 'ویرایش عنصر کاری' : 'عنصر کاری جدید',
       desc: isEdit ? 'مشخصات ذخیره می‌شوند؛ الونس‌های اختصاصی این عنصر در بخش پایین.' : null,
-      size: isEdit ? 'lg' : '',
+      /* v1.5.2 §۲ — عرض زیاد: ~۹۴٪ صفحه با سقف ۱۲۰۰px برای جدول‌های الونس/روابط */
+      size: isEdit ? 'wide' : '',
       bodyBuilder: function (body) {
-        body.appendChild(U.h('div', { class: 'space-y-4' },
+        body.appendChild(U.h('div', { class: 'flex flex-col gap-6' },
           UI.field('نام عنصر کاری', nameInput, ELEMENT_NAME_HELP),
           UI.field('شرح عنصر (اختیاری)', descInput),
           isEdit && ctx && g.T2VIEWS._allowanceSection ? U.h('div', { id: 'tab-element-allowances' }) : null,

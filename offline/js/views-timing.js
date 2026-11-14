@@ -109,12 +109,8 @@
         if (n > 0) chips.appendChild(chip(op.displayName, op.id, n));
       });
       bar.appendChild(chips);
-    } else if (opts.variant === 'sheet' && opts.activeOperatorName) {
-      /* نشان برجستهٔ یکتای اپراتور جلسهٔ فعال */
-      bar.appendChild(U.h('span', { class: 't2t-sub-op-chip', title: 'اپراتور جلسهٔ فعال' },
-        U.icon('users'),
-        U.h('span', { class: 'truncate', text: opts.activeOperatorName })));
     }
+    /* v1.5.2 §۴ — حالت sheet حذف شد؛ هدر واحد برگه در renderSheet ساخته می‌شود */
 
     /* دکمهٔ کوچک «جلسهٔ جدید» — انتهای نوار */
     if (opts.canCreate) {
@@ -692,25 +688,9 @@
       ctx.render();
     }
 
-    /* ۱) زیرهدر چسبان — §۱۲.۱: عنوان فعالیت/ایستگاه، فهرست فعالیت‌ها،
-          نشان اپراتور جلسهٔ فعال (نشان برجستهٔ یکتا) و جلسهٔ جدید */
-    wrap.appendChild(buildSubheader(ctx, {
-      variant: 'sheet',
-      activityName: sheet.activity.name,
-      stationName: sheet.activity.stationName || '—',
-      activeOperatorName: sheet.operator.displayName,
-      canCreate: elements.length > 0 && DB.listOperators(ctx.projectId).length > 0,
-    }));
-
-    /* ۲) بنر جلسهٔ بسته */
-    if (!editable) {
-      wrap.appendChild(U.h('div', { class: 'banner info mb-3' }, U.icon('lock'),
-        U.h('div', { class: 'flex flex-wrap items-center gap-2' },
-          U.h('span', { text: 'این جلسه بسته است؛ برگه فقط‌خواندنی است. برای ثبت داده، جلسهٔ جدید ایجاد کنید.' }),
-          U.h('button', { class: 'btn btn-sm btn-outline shrink-0', type: 'button', onclick: reopen }, U.icon('lockOpen'), 'بازگشایی'))));
-    }
-
-    /* راهنمای برگه — نزدیک عنوان برگه (منتقل‌شده از نوار ابزار) */
+    /* ۱) هدر واحد برگه — v1.5.2 §۴: ادغام زیرهدر فعالیت و سربرگ برگه
+          در یک نوار چسبان — ردیف ۱: هویت/بازگشت/اپراتور/روش/وضعیت/
+          ذخیره/جلسهٔ جدید/بستن؛ ردیف ۲: عنوان برگه + شمار چرخه + ابزار */
     var sheetHelp = {
       what: 'جدول زمان‌سنجی: هر ردیف یک عنصر کاری و هر ستون یک چرخه؛ زیر هر عنصر، رابطه‌های موازی آن به‌صورت زیرردیف نمایش داده می‌شود.',
       input: method === 'CONTINUOUS'
@@ -720,42 +700,75 @@
       note: 'زمان سپری‌شدهٔ چرخه در کارهای هم‌زمان، گستره (دیرترین پایان − زودترین شروع) است نه جمع مدت‌ها. زیرردیف‌های هم‌پوشانی در هر دو سمت از یک رکورد واحد خوانده می‌شوند؛ دادهٔ خام هرگز حذف نمی‌شود؛ خروج از محاسبه فقط وضعیت را عوض می‌کند.',
     };
 
-    /* ۳) سربرگ لاغر برگه — §۱۲.۱: عنوان فعالیت/ایستگاه و اپراتور
-          فقط در زیرهدر چسبان بالای صفحه نمایش داده می‌شوند */
-    wrap.appendChild(U.h('div', { class: 'card mb-3', style: { padding: '10px 14px' } },
-      U.h('div', { class: 'flex flex-wrap items-center gap-2' },
-        U.h('button', {
-          class: 'btn btn-sm btn-outline shrink-0', type: 'button',
-          onclick: function () { selectedSession[ctx.activityId] = null; ctx.render(); },
-        }, U.icon('arrowRight'), 'بازگشت به جلسات'),
-        U.h('h2', { class: 'font-bold shrink-0', style: { fontSize: '14px' } },
-          'برگهٔ زمان‌سنجی',
-          UI.helpDot('برگهٔ زمان‌سنجی', sheetHelp)),
-        UI.badge(methodLabel, method === 'SNAPBACK' ? 'cyan' : 'brand'),
-        !editable ? UI.badge('بسته', 'muted', 'lock') : null,
-        U.h('span', { class: 'num text-xs text-muted shrink-0' }, U.formatInt(stats.sessionCycles) + ' چرخه در این جلسه'),
-        U.h('div', { class: 'spacer' }),
-        editable
-          ? U.h('button', {
-              class: 'btn btn-sm btn-outline shrink-0', type: 'button',
-              onclick: function () {
-                UI.confirmDialog({
-                  title: 'بستن جلسهٔ زمان‌سنجی؟',
-                  desc: 'پس از بستن، برگهٔ این جلسه فقط‌خواندنی می‌شود. برای ادامهٔ ثبت داده (یا تغییر روش اندازه‌گیری) باید جلسهٔ جدیدی ایجاد کنید؛ جلسهٔ جدید مستقل است و مبنای قرائت پیوسته از نو آغاز می‌شود. می‌توانید جلسه را بعداً بازگشایی کنید؛ روش اندازه‌گیری هرگز تغییر نمی‌کند.',
-                  confirmLabel: 'بستن جلسه',
-                  destructive: false,
-                }).then(function (ok) {
-                  if (!ok) return;
-                  DB.closeSession(sessionId);
-                  invalidateSheetCache(sessionId);
-                  UI.toast('جلسه بسته شد؛ برگه فقط‌خواندنی است');
-                  ctx.render();
-                });
-              },
-            }, U.icon('lock'), 'بستن جلسه')
-          : U.h('button', { class: 'btn btn-sm btn-outline shrink-0', type: 'button', onclick: reopen }, U.icon('lockOpen'), 'بازگشایی'))));
+    var canCreate = elements.length > 0 && DB.listOperators(ctx.projectId).length > 0;
+    var closedBadgeTitle = 'این جلسه بسته است؛ برگه فقط‌خواندنی است. برای ثبت داده، جلسهٔ جدیدی ایجاد کنید یا این جلسه را بازگشایی کنید.';
 
-    /* ۴) نوار ابزار */
+    var row1 = U.h('div', { class: 't2t-sheet-row' });
+    /* هویت فعالیت — تنها محل نمایش آن */
+    row1.appendChild(U.h('div', { class: 'flex items-center gap-2 min-w-0' },
+      U.h('span', { class: 'chip-icon shrink-0', style: { width: '32px', height: '32px' } }, U.icon('timer')),
+      U.h('div', { class: 'min-w-0' },
+        U.h('p', { class: 'font-bold truncate', style: { fontSize: '13px', lineHeight: '1.45' }, text: sheet.activity.name }),
+        U.h('p', { class: 'truncate', style: { fontSize: '11px', lineHeight: '1.45', color: 'var(--muted-foreground)' }, text: 'ایستگاه ' + (sheet.activity.stationName || '—') }))));
+
+    /* §۴-۲ — بازگشت به فهرست جلساتِ همان فعالیت (انتخاب فعالیت حفظ می‌شود) */
+    row1.appendChild(U.h('button', {
+      class: 'btn btn-sm btn-outline shrink-0', type: 'button',
+      onclick: function () { selectedSession[ctx.activityId] = null; ctx.render(); },
+    }, U.icon('listTree'), 'بازگشت به جلسات'));
+
+    /* نشان برجستهٔ یکتای اپراتور جلسهٔ فعال */
+    row1.appendChild(U.h('span', { class: 't2t-sub-op-chip', title: 'اپراتور جلسهٔ فعال' },
+      U.icon('users'),
+      U.h('span', { class: 'truncate', text: sheet.operator.displayName })));
+
+    row1.appendChild(UI.badge(methodLabel, method === 'SNAPBACK' ? 'cyan' : 'brand'));
+    if (!editable) {
+      var closedBadge = UI.badge('بسته', 'muted', 'lock');
+      closedBadge.title = closedBadgeTitle;
+      row1.appendChild(closedBadge);
+    }
+
+    var actions1 = U.h('div', { class: 'flex flex-wrap items-center gap-2 shrink-0', style: { marginInlineStart: 'auto' } });
+    /* آفلاین: ذخیرهٔ لحظه‌ای محلی — نشان پایدار «ذخیره شد» */
+    actions1.appendChild(UI.saveIndicator('saved'));
+    if (canCreate) {
+      actions1.appendChild(U.h('button', {
+        class: 'btn btn-sm btn-brand shrink-0', type: 'button',
+        onclick: function () { openCreateSessionDialog(ctx); },
+      }, U.icon('plus'), 'جلسهٔ جدید'));
+    }
+    /* §۴-۳ — بستن این جلسه؛ مستقل از «بازگشت به جلسات» */
+    if (editable) {
+      actions1.appendChild(U.h('button', {
+        class: 'btn btn-sm btn-outline shrink-0', type: 'button',
+        onclick: function () {
+          UI.confirmDialog({
+            title: 'بستن جلسهٔ زمان‌سنجی؟',
+            desc: 'پس از بستن، برگهٔ این جلسه فقط‌خواندنی می‌شود. برای ادامهٔ ثبت داده (یا تغییر روش اندازه‌گیری) باید جلسهٔ جدیدی ایجاد کنید؛ جلسهٔ جدید مستقل است و مبنای قرائت پیوسته از نو آغاز می‌شود. می‌توانید جلسه را بعداً بازگشایی کنید؛ روش اندازه‌گیری هرگز تغییر نمی‌کند.',
+            confirmLabel: 'بستن جلسه',
+            destructive: false,
+          }).then(function (ok) {
+            if (!ok) return;
+            DB.closeSession(sessionId);
+            invalidateSheetCache(sessionId);
+            UI.toast('جلسه بسته شد؛ برگه فقط‌خواندنی است');
+            ctx.render();
+          });
+        },
+      }, U.icon('lock'), 'بستن این جلسه'));
+    } else {
+      actions1.appendChild(U.h('button', { class: 'btn btn-sm btn-outline shrink-0', type: 'button', onclick: reopen }, U.icon('lockOpen'), 'بازگشایی'));
+    }
+    row1.appendChild(actions1);
+
+    /* ردیف ۲ — عنوان برگه + شمار چرخه + نوار ابزار */
+    var row2 = U.h('div', { class: 't2t-sheet-row' });
+    row2.appendChild(U.h('h2', { class: 'font-bold shrink-0', style: { fontSize: '14px' } },
+      'برگهٔ زمان‌سنجی',
+      UI.helpDot('برگهٔ زمان‌سنجی', sheetHelp)));
+    row2.appendChild(U.h('span', { class: 'num text-xs text-muted shrink-0' }, U.formatInt(stats.sessionCycles) + ' چرخه در این جلسه'));
+
     var closedHint = 'جلسه بسته است؛ برای ثبت داده، جلسهٔ جدید ایجاد کنید.';
     var addDd = UI.dropdownMenu(
       [[1, '۱ چرخه'], [5, '۵ چرخه'], [10, '۱۰ چرخه'], [20, '۲۰ چرخه']].map(function (it) {
@@ -774,7 +787,7 @@
     var addBtn = addDd.querySelector('button');
     if (addBtn) addBtn.appendChild(U.h('span', { text: 'افزودن چرخه' }));
 
-    var toolbar = U.h('div', { class: 'flex flex-wrap items-center gap-2 mb-3' },
+    var tools = U.h('div', { class: 'flex flex-wrap items-center gap-2', style: { marginInlineStart: 'auto' } },
       U.h('button', {
         class: 'icon-btn', type: 'button', 'aria-label': 'واگردانی (Ctrl+Z)',
         title: histState.undo.length ? histState.undo[histState.undo.length - 1].label : 'واگردانی',
@@ -794,8 +807,18 @@
         class: 'btn btn-sm btn-outline', type: 'button', disabled: !editable, title: editable ? null : closedHint,
         onclick: function () { openPasteDialog(); },
       }, U.icon('clipboardPaste'), 'Paste از Excel'),
-      U.h('span', { class: 'text-xs text-faint' }, 'Tab/Enter حرکت • F2 یا کلیک ویرایش • Ctrl+Z واگردانی'));
-    wrap.appendChild(toolbar);
+      /* v1.5.2 §۹ — دانلود قالب Excel مخصوص همین جلسه */
+      U.h('button', {
+        class: 'btn btn-sm btn-outline', type: 'button',
+        title: 'دانلود قالب Excel متناسب با این جلسه — تکمیل و بارگذاری یا کپی/Paste',
+        onclick: function () { g.T2EXCEL.downloadTemplate(sessionId); },
+      }, U.icon('fileSpreadsheet'), 'قالب Excel'),
+      U.h('span', { class: 'text-xs text-faint hidden-sm' }, 'Tab/Enter حرکت • F2 یا کلیک ویرایش • Ctrl+Z واگردانی'));
+    row2.appendChild(tools);
+
+    var unifiedHeader = U.h('div', { class: 't2t-sheet-header', role: 'region', 'aria-label': 'هدر واحد برگهٔ زمان‌سنجی' },
+      row1, row2);
+    wrap.appendChild(unifiedHeader);
 
     /* ۵) کارت پیشرفت نمونه */
     var valid = stats.activityValidCycles;
@@ -1096,7 +1119,7 @@
       return th;
     }
 
-    /* ── سربرگ زیرردیف رابطه (چسبان راست) — «↳ هم‌پوشانی با X» + حذف §۶.۱ ──
+    /* ── سربرگ زیرردیف رابطه (چسبان راست) — «↲ هم‌پوشانی با X» + حذف §۶.۱ ──
        v1.5.1 §۷ — روابط بین‌فعالیت با برچسب فعالیت/ایستگاه عنصر مقابل */
     function parallelRowHeader(grow) {
       var th = U.h('th', { class: 'sticky-col t2t-row-head t2t-subrow-head', scope: 'row' });
@@ -1106,7 +1129,7 @@
         U.h('span', {
           class: 'font-bold truncate', style: { fontSize: '11px', color: 'var(--muted-foreground)' },
           title: 'هم‌پوشانی با ' + grow.otherName + (grow.crossActivity ? ' (فعالیت ' + (grow.otherActivityName || '؟') + ' / ایستگاه ' + (grow.otherStationName || '؟') + ')' : ''),
-          text: '↳ هم‌پوشانی با ' + grow.otherName,
+          text: '↲ هم‌پوشانی با ' + grow.otherName,
         }),
         grow.crossActivity
           ? U.h('span', {
@@ -1428,8 +1451,9 @@
           inp.addEventListener('change', commitCell);
         });
         /* گروه بصری «از/تا» برای دو ورودی ۴۴px بازه‌ای — §۱۲.۲:
-           برچسب کوچک هر ورودی + قاب واحد گردگوشه؛ ورودی‌ها LTR می‌مانند */
-        row.appendChild(U.h('div', { class: 't2t-int-group', dir: 'ltr', role: 'group', 'aria-label': 'بازهٔ ' + el.name },
+           برچسب کوچک هر ورودی + قاب واحد گردگوشه؛ ورودی‌ها LTR می‌مانند.
+           v1.5.2 §۵ — جهت گروه RTL: «از» در راست، «تا» در چپ */
+        row.appendChild(U.h('div', { class: 't2t-int-group', dir: 'rtl', role: 'group', 'aria-label': 'بازهٔ ' + el.name },
           U.h('label', { class: 't2t-int-part' },
             U.h('span', { class: 't2t-int-label', 'aria-hidden': 'true', text: 'از' }),
             startIn),
@@ -1445,22 +1469,18 @@
         row.appendChild(seqIn);
       }
 
-      /* پرچم‌های وضعیت — پرچم مشکوک با کلیک دیالوگ تشخیص را باز می‌کند — §۱۲.۳ */
-      var flags = [];
-      if (excluded) flags.push(U.h('span', { class: 'cell-flag', title: 'خارج‌شده از محاسبات', style: { color: 'var(--faint)' } }, U.icon('eraser')));
-      if (suspect && obs) flags.push(U.h('span', {
-        class: 'cell-flag', role: 'button', tabindex: '0',
-        title: 'تشخیص مشاهدهٔ مشکوک', 'aria-label': 'تشخیص مشاهدهٔ مشکوک',
-        style: { color: 'var(--amber)', cursor: 'pointer' },
-        onclick: function (e) { e.stopPropagation(); openSuspectDialog(cycle, obs, el.name); },
-        onkeydown: function (e) {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault();
-            openSuspectDialog(cycle, obs, el.name);
-          }
-        },
-      }, U.icon('alertTriangle')));
-      flags.forEach(function (f) { td.appendChild(f); });
+      /* پرچم‌های وضعیت — v1.5.2 §۷: پرچم مشکوک در مجاورت مقدار (داخل ردیف
+         افقی سلول) قرار می‌گیرد، نه گوشهٔ سلول؛ کلیک مستقل دیالوگ تشخیص را
+         باز می‌کند — §۱۲.۳. پرچم خارج‌شده همچنان گوشه‌ای است */
+      if (suspect && obs) {
+        var suspectFlag = U.h('button', {
+          class: 't2t-suspect-flag', type: 'button',
+          title: 'تشخیص مشاهدهٔ مشکوک', 'aria-label': 'تشخیص مشاهدهٔ مشکوک',
+          onclick: function (e) { e.stopPropagation(); openSuspectDialog(cycle, obs, el.name); },
+        }, U.icon('alertTriangle'));
+        row.appendChild(suspectFlag);
+      }
+      if (excluded) td.appendChild(U.h('span', { class: 'cell-flag', title: 'خارج‌شده از محاسبات', style: { color: 'var(--faint)' } }, U.icon('eraser')));
 
       return td;
     }
@@ -1970,6 +1990,9 @@
       var commitBtn = null;
       var previewWrap = null;
       var textArea = null;
+      /* v1.5.2 §۹ — منبع فایل قالب + لنگر پیش‌فرض دیالوگ */
+      var fileTsv = null;
+      var defaultAnchor = anchor;
 
       function updateCommitBtn() {
         if (!commitBtn) return;
@@ -2060,7 +2083,7 @@
               var tr = U.h('tr', null,
                 U.h('td', { class: 'font-bold text-xs' },
                   grow.kind === 'RELATION'
-                    ? U.h('span', { class: 'text-muted', style: { fontSize: '11px' }, text: '↳ هم‌پوشانی با ' + grow.otherElementName })
+                    ? U.h('span', { class: 'text-muted', style: { fontSize: '11px' }, text: '↲ هم‌پوشانی با ' + grow.otherElementName })
                     : grow.elementName));
               for (var ci = 0; ci < Math.max(maxCols, 1); ci++) {
                 var cell = rowCells[ci];
@@ -2122,17 +2145,17 @@
       }
 
       UI.dialog({
-        title: 'Paste چندسلولی از Excel',
+        title: 'ورود اطلاعات از Excel',
         desc: 'مبدأ: چرخهٔ ' + U.formatInt(anchor.cycleNo) + '، ردیف «' + anchorName + '» — هر سطر داده یک ردیف شبکه و هر ستون یک چرخه.',
-        size: 'lg',
+        size: 'xl4',
         bodyBuilder: function (body) {
           body.appendChild(U.h('div', { class: 't2t-help-row' },
             U.h('span', { class: 'text-xs text-muted' }, 'راهنما:'),
-            UI.helpDot('Paste چندسلولی', {
-              what: 'کپی چند سطر و ستون از Excel و ثبت هم‌زمان آن‌ها در برگهٔ زمان‌سنجی — با چیدمان جدید: هر سطر داده یک ردیف شبکه (عنصر یا زیرردیف هم‌پوشانی) و هر ستون داده یک چرخه.',
-              input: 'محدودهٔ موردنظر را در Excel کپی کنید (Ctrl+C) و همین‌جا بچسبانید (Ctrl+V). سطرها از ردیفی که سلول فعال روی آن است و ستون‌ها از چرخهٔ همان ستون شروع می‌شوند.',
+            UI.helpDot('ورود اطلاعات از Excel', {
+              what: 'ثبت هم‌زمان چند سطر و ستون از Excel در برگهٔ زمان‌سنجی — با چیدمان جدید: هر سطر داده یک ردیف شبکه (عنصر یا زیرردیف هم‌پوشانی) و هر ستون داده یک چرخه.',
+              input: 'دو مسیر مستقل: (۱) محدودهٔ موردنظر را در Excel کپی کنید (Ctrl+C) و همین‌جا بچسبانید (Ctrl+V)؛ (۲) «قالب Excel» این جلسه را دانلود کنید، تکمیل کنید و فایل را بارگذاری کنید.',
               example: 'اگر ۳ عنصر دارید و ۵ چرخه Paste می‌کنید، یک محدودهٔ ۳ سطر × ۵ ستون کپی کنید. برای عنصر هم‌زمان «۳-۹» و برای زیرردیف هم‌پوشانی خالی/۰/مقدار مثبت بنویسید.',
-              note: 'هیچ داده‌ای بدون پیش‌نمایش و تأیید شما ثبت نمی‌شود؛ خطای هر سلول با محل و علت دقیق نمایش داده می‌شود.',
+              note: 'هیچ داده‌ای بدون پیش‌نمایش و تأیید شما ثبت نمی‌شود؛ خطای هر سلول با محل و علت دقیق نمایش داده می‌شود. بارگذاری فایل هم فقط ورودی همین مسیر را می‌سازد و به‌صورت مستقیم ذخیره نمی‌کند.',
             }),
             UI.helpDot('حالت ثبت Paste', {
               what: 'رفتار سیستم هنگامی که برخی سلول‌های Paste نامعتبر باشند.',
@@ -2141,27 +2164,116 @@
               note: 'این انتخاب مطابق الزام PRD است که Paste نامعتبر نباید باعث ثبت ناقص و پنهانی کل محدوده شود.',
             })));
 
+          /* ── مسیر ۱: Paste مستقیم — v1.5.2 §۹-۱ (دست‌نخورده) ── */
+          var pasteSection = U.h('div', { class: 'flex flex-col gap-2' });
           textArea = U.h('textarea', {
             class: 'textarea t2t-mono', dir: 'ltr', rows: '7',
             placeholder: '12.5\t8.3\t9.1\n…',
           });
-          body.appendChild(U.h('div', { class: 'field-label' }, 'محتوای Excel را اینجا بچسبانید'));
-          body.appendChild(textArea);
-          body.appendChild(U.h('p', {
+          pasteSection.appendChild(U.h('div', { class: 'field-label' }, 'محتوای Excel را اینجا بچسبانید'));
+          pasteSection.appendChild(textArea);
+          pasteSection.appendChild(U.h('p', {
             class: 'hint',
             text: 'هر سطر = یک ردیف شبکه (عنصر یا زیرردیف هم‌پوشانی) — هر ستون = یک چرخه — جداکنندهٔ ستون: Tab — اعشار: نقطه یا «٫» — بازهٔ عنصر: «۳-۹» — زیرردیف هم‌پوشانی: خالی/۰/مقدار مثبت — خالی = بدون تغییر',
           }));
 
-          body.appendChild(U.h('button', {
+          function runPreviewFrom(text, anc) {
+            try {
+              preview = DB.pastePreview(sessionId, { cycleNo: anc.cycleNo, elementId: anc.elementId, relationId: anc.relationId || null }, text);
+            } catch (err) { UI.toastError(err); return; }
+            renderPreview();
+          }
+
+          pasteSection.appendChild(U.h('button', {
             class: 'btn btn-outline w-fit', type: 'button',
             onclick: function () {
               if (!textArea.value.trim()) return;
-              try {
-                preview = DB.pastePreview(sessionId, { cycleNo: anchor.cycleNo, elementId: anchor.elementId, relationId: anchor.relationId || null }, textArea.value);
-              } catch (err) { UI.toastError(err); return; }
-              renderPreview();
+              runPreviewFrom(textArea.value, anchor);
             },
           }, U.icon('clipboardPaste'), 'پیش‌نمایش و اعتبارسنجی'));
+          body.appendChild(pasteSection);
+
+          /* ── مسیر ۲: فایل قالب — v1.5.2 §۹ ── */
+          var filePanel = U.h('div', { class: 't2t-file-source', style: { display: 'none' } });
+          body.appendChild(filePanel);
+
+          function renderFilePanel(name, rows, cols) {
+            U.clear(filePanel);
+            filePanel.style.display = '';
+            filePanel.appendChild(U.h('div', { class: 't2t-file-title' },
+              U.h('span', { class: 't2t-file-name' },
+                U.icon('fileSpreadsheet'),
+                U.h('span', { class: 'truncate', text: 'فایل بارگذاری‌شده: ' + name })),
+              U.h('button', {
+                class: 'btn btn-sm btn-outline shrink-0', type: 'button', text: 'بازگشت به Paste متنی',
+                onclick: function () {
+                  fileTsv = null;
+                  anchor = defaultAnchor;
+                  filePanel.style.display = 'none';
+                  pasteSection.style.display = '';
+                  if (fileInput) fileInput.value = '';
+                  preview = null;
+                  updateCommitBtn();
+                },
+              })));
+            filePanel.appendChild(U.h('p', { class: 'text-xs num', style: { color: 'var(--muted-foreground)' },
+              text: U.formatInt(rows) + ' ردیف × ' + U.formatInt(cols) + ' چرخه خوانده شد — مبدأ نگاشت: چرخهٔ ' + U.formatInt(anchor.cycleNo) + ' از ابتدای برگه. پیش‌نمایش زیر را بررسی و پس از رفع خطاها ثبت نهایی کنید.' }));
+          }
+
+          var orSection = U.h('div', { class: 't2t-excel-or' },
+            U.h('div', { class: 't2t-or-label' },
+              U.h('span', { class: 't2t-or-badge', text: 'یا' }),
+              'ورود از طریق قالب Excel این جلسه'),
+            U.h('div', { class: 'flex flex-wrap items-center gap-2' },
+              U.h('button', {
+                class: 'btn btn-sm btn-outline', type: 'button',
+                title: 'دانلود قالب Excel متناسب با این جلسه — شامل نام واقعی عناصر، روابط موازی و چرخه‌ها',
+                onclick: function () { g.T2EXCEL.downloadTemplate(sessionId); },
+              }, U.icon('fileSpreadsheet'), 'دانلود قالب Excel'),
+              U.h('button', {
+                class: 'btn btn-sm btn-outline', type: 'button',
+                title: 'بارگذاری فایل xlsx تکمیل‌شدهٔ همان قالب — داده‌ها وارد پیش‌نمایش می‌شوند',
+                onclick: function () { fileInput.click(); },
+              }, U.icon('fileUp'), 'بارگذاری فایل Excel')));
+          var fileInput = U.h('input', { type: 'file', accept: '.xlsx', style: { display: 'none' } });
+          fileInput.addEventListener('change', function () {
+            var f = fileInput.files && fileInput.files[0];
+            if (!f) return;
+            var errBox = orSection.querySelector('.t2t-file-error');
+            if (errBox) { U.clear(errBox); errBox.style.display = 'none'; }
+            var loadBtn = orSection.querySelectorAll('button')[1];
+            if (loadBtn) loadBtn.disabled = true;
+            g.T2EXCEL.parseTemplate(sessionId, f)
+              .then(function (r) {
+                fileTsv = r.data.map(function (row) { return row.join('\t'); }).join('\n');
+                anchor = r.anchor;
+                textArea.value = '';
+                renderFilePanel(r.sourceName || f.name, r.data.length, Math.max.apply(null, r.data.map(function (row) { return row.length; })));
+                pasteSection.style.display = 'none';
+                (r.warnings || []).forEach(function (w) { UI.toast(w, { type: 'warning' }); });
+                /* پیش‌نمایش خودکار — داده‌ها پیش از Commit قابل بررسی‌اند (§۹-۶) */
+                runPreviewFrom(fileTsv, anchor);
+              })
+              .catch(function (err) {
+                fileTsv = null;
+                anchor = defaultAnchor;
+                UI.toastError(err);
+                if (errBox) {
+                  errBox.style.display = '';
+                  errBox.appendChild(U.h('div', { style: { whiteSpace: 'pre-line' }, text: String(err && err.message || err) }));
+                }
+              })
+              .finally(function () { if (loadBtn) loadBtn.disabled = false; });
+          });
+          orSection.appendChild(fileInput);
+          var fileErrorBox = U.h('div', { class: 't2t-file-error', style: { display: 'none' } });
+          orSection.appendChild(U.h('p', {
+            class: 'text-xs text-muted leading-relaxed',
+            style: { fontSize: '11px' },
+            text: 'قالب شامل نام واقعی عناصر و روابط موازی همین جلسه و ستون‌های چرخه است (شناسه‌های پایدار در شیت مخفی Metadata). پس از تکمیل، فایل را بارگذاری کنید یا محدودهٔ داده‌ها را کپی و در همان مسیر Paste بالا بچسبانید.',
+          }));
+          orSection.appendChild(fileErrorBox);
+          body.appendChild(orSection);
 
           previewWrap = U.h('div', { class: 'flex flex-col gap-3' });
           body.appendChild(previewWrap);
