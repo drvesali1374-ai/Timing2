@@ -65,3 +65,6 @@ server.log
 
 # Skills directory
 /skills/
+
+# اسکرین‌شات‌های موقت بازبینی مرورگر (نسخهٔ بایگانی‌شده در offline/parity-shots است)
+/shots/
