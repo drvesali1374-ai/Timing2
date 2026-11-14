@@ -315,6 +315,17 @@ function ActivityScreen({ projectId, activityId }: { projectId: string; activity
           ) : (
             <Skeleton className="h-6 w-24 shrink-0 rounded-full" />
           )}
+          {/* حذف فعالیت در هدر اصلی — در همهٔ زبانه‌ها در دسترس — v1.5.2 §۳ */}
+          <Button
+            variant="outline"
+            size="icon"
+            className="size-9 shrink-0 border-red/30 text-red hover:border-red/50 hover:bg-red-soft hover:text-red"
+            onClick={() => setConfirmDeleteOpen(true)}
+            aria-label="حذف این فعالیت"
+            title="حذف این فعالیت — دائمی است؛ شمارش وابستگی‌ها پیش از تأیید نمایش داده می‌شود"
+          >
+            <Trash2 className="size-4" aria-hidden />
+          </Button>
         </div>
 
         <p className="num text-xs text-muted-foreground">
@@ -428,23 +439,6 @@ function ActivityScreen({ projectId, activityId }: { projectId: string; activity
 
           {/* الونس‌ها و زمان‌های مجاز — جلسه اول (§۶) */}
           <AllowanceSection projectId={projectId} scopeType="ACTIVITY" scopeId={activityId} />
-
-          {/* عملیات */}
-          <section className="card-premium p-5" aria-label="عملیات فعالیت">
-            <h3 className="text-sm font-extrabold text-red">عملیات</h3>
-            <p className="mt-2 text-xs leading-6 text-muted-foreground">
-              حذف فعالیت دائمی است و همه عناصر کاری، مشاهدات و جلسات زمان‌سنجی آن را نیز حذف می‌کند. پیش از
-              تأیید، شمارش داده‌های وابسته نمایش داده می‌شود و پس از حذف به مرحله «ساختار تولید» بازمی‌گردید.
-            </p>
-            <Button
-              variant="outline"
-              className="mt-3 gap-1.5 text-red hover:text-red"
-              onClick={() => setConfirmDeleteOpen(true)}
-            >
-              <Trash2 className="size-4" aria-hidden />
-              حذف این فعالیت
-            </Button>
-          </section>
         </TabsContent>
 
         {/* ۲. عناصر کاری — FR-02 */}
@@ -858,9 +852,13 @@ function ElementsSection({
         </DialogContent>
       </Dialog>
 
-      {/* دیالوگ ویرایش عنصر — ذخیره خودکار + الونس‌های عنصر (§۶) */}
+      {/* دیالوگ ویرایش عنصر — ذخیره خودکار + الونس‌های عنصر (§۶)
+          v1.5.2 §۲ — عرض زیاد: ~۹۴٪ صفحه با سقف ۱۲۰۰px برای جدول‌های الونس/روابط */}
       <Dialog open={editing !== null} onOpenChange={(open) => !open && setEditing(null)}>
-        <DialogContent dir="rtl" className="max-h-[92vh] overflow-y-auto sm:max-w-2xl">
+        <DialogContent
+          dir="rtl"
+          className="max-h-[92vh] overflow-y-auto w-[calc(100vw-2rem)] sm:w-[94vw] sm:max-w-[1200px]"
+        >
           {editing ? (
             <ElementEditForm
               key={editing.id}
@@ -1005,7 +1003,8 @@ function ElementEditForm({
         <DialogTitle>ویرایش عنصر کاری</DialogTitle>
         <DialogDescription>تغییرات به‌صورت خودکار ذخیره می‌شوند.</DialogDescription>
       </DialogHeader>
-      <div className="space-y-4">
+      {/* v1.5.2 §۲-۲ — فاصله‌گذاری عمودی بخش‌ها در عرض جدید */}
+      <div className="space-y-6">
         <div className="space-y-1.5">
           <div className="flex items-center gap-1">
             <Label htmlFor={`element-edit-name-${element.id}`}>نام عنصر کاری</Label>
