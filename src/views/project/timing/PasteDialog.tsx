@@ -7,11 +7,26 @@
 // شناسهٔ ردیف و شمارهٔ چرخه است. پیش‌نمایش مشخص می‌کند هر
 // مقدار به کدام عنصر/رابطه و کدام چرخه وارد می‌شود.
 // Paste نامعتبر هرگز ثبت ناقص و پنهانی ایجاد نمی‌کند.
+//
+// v1.5.2 §۹ — دو مسیر مستقل و سازگار برای ورود اطلاعات:
+//  ۱) Paste مستقیم متن/Clipboard (مسیر قبلی — دست‌نخورده)
+//  ۲) دانلود قالب Excel اختصاصی جلسه → تکمیل → بارگذاری فایل؛
+//     خروجی بارگذاری فقط «ورودی همین مسیر پیش‌نمایش/Commit»
+//     است — هیچ ذخیرهٔ مستقیمی انجام نمی‌شود (§۹-۶).
 // ═══════════════════════════════════════════════════════════
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { AlertTriangle, CheckCircle2, ClipboardPaste, Loader2, MinusCircle, XCircle } from 'lucide-react'
+import {
+  AlertTriangle,
+  CheckCircle2,
+  ClipboardPaste,
+  FileSpreadsheet,
+  FileUp,
+  Loader2,
+  MinusCircle,
+  XCircle,
+} from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
@@ -29,6 +44,13 @@ import type { DisplayPrefs as Prefs } from '@/lib/format'
 import { formatTimeValue, formatInt } from '@/lib/format'
 import type { GridPasteAnchor } from './SheetGrid'
 import type { ElementColumn } from './shared'
+
+/** منبع فعال ورود داده — متن یا فایل قالب (v1.5.2 §۹) */
+interface FileSource {
+  data: string[][]
+  anchor: GridPasteAnchor
+  name: string
+}
 
 export function PasteDialog({
   open,
@@ -57,13 +79,21 @@ export function PasteDialog({
   const [preview, setPreview] = useState<PastePreviewDto | null>(null)
   const [previewing, setPreviewing] = useState(false)
   const [committing, setCommitting] = useState(false)
+  // v1.5.2 §۹ — بارگذاری فایل قالب
+  const [fileSource, setFileSource] = useState<FileSource | null>(null)
+  const [fileLoading, setFileLoading] = useState(false)
+  const [fileError, setFileError] = useState<string | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     if (open) {
       setText('')
       setPreview(null)
       setMode('ALL_OR_NOTHING')
+      setFileSource(null)
+      setFileError(null)
+      if (fileInputRef.current) fileInputRef.current.value = ''
       if (initialText) {
         setText(initialText)
       } else {
@@ -80,14 +110,20 @@ export function PasteDialog({
     return t.split('\n').map((line) => line.split('\t'))
   }, [text])
 
+  /** منبع فعال: فایل قالب یا متن — لنگر فایل همیشه مخصوص قالب است */
+  const activeData = fileSource ? fileSource.data : parsedData
+  const activeAnchor = fileSource ? fileSource.anchor : anchor
+
   const runPreview = useMutation({
-    mutationFn: async () => {
-      if (!parsedData) throw new Error('متن Paste خالی است')
+    mutationFn: async (override?: { data: string[][]; anchor: GridPasteAnchor }) => {
+      const d = override?.data ?? activeData
+      const a = override?.anchor ?? activeAnchor
+      if (!d) throw new Error('متن Paste خالی است')
       const res = await timingApi.pastePreview(sessionId, {
-        startCycleNo: anchor.cycleNo,
-        startElementId: anchor.elementId,
-        startRelationId: anchor.relationId ?? undefined,
-        data: parsedData,
+        startCycleNo: a.cycleNo,
+        startElementId: a.elementId,
+        startRelationId: a.relationId ?? undefined,
+        data: d,
       })
       return res.preview
     },
@@ -96,10 +132,10 @@ export function PasteDialog({
   })
 
   const doCommit = async () => {
-    if (!parsedData) return
+    if (!activeData) return
     setCommitting(true)
     try {
-      await onCommit(parsedData, mode)
+      await onCommit(activeData, mode)
       onOpenChange(false)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'ثبت Paste ناموفق بود')
@@ -117,78 +153,196 @@ export function PasteDialog({
     }
   }
 
-  const anchorRelation = anchor.relationId
-    ? sheet.parallelRelations.find((r) => r.relationId === anchor.relationId)
+  // ── v1.5.2 §۹-۶ — بارگذاری فایل قالب تکمیل‌شده ──
+  const onFileSelected = async (file: File) => {
+    setFileError(null)
+    setFileLoading(true)
+    setPreview(null)
+    setFileSource(null)
+    try {
+      const res = await timingApi.parseExcelTemplate(sessionId, file)
+      const r = res.result
+      const fileAnchor: GridPasteAnchor = {
+        cycleNo: r.startCycleNo,
+        elementId: r.startElementId,
+        relationId: r.startRelationId,
+      }
+      setFileSource({ data: r.data, anchor: fileAnchor, name: r.sourceName ?? file.name })
+      setText('')
+      for (const w of r.warnings) toast.warning(w)
+      // پیش‌نمایش خودکار — داده‌ها پیش از Commit قابل بررسی‌اند (§۹-۶)
+      await runPreview.mutateAsync({ data: r.data, anchor: fileAnchor })
+    } catch (err) {
+      setFileSource(null)
+      const msg = err instanceof Error ? err.message : 'بارگذاری فایل ناموفق بود'
+      setFileError(msg)
+      toast.error(msg)
+    } finally {
+      setFileLoading(false)
+    }
+  }
+
+  const backToText = () => {
+    setFileSource(null)
+    setFileError(null)
+    setPreview(null)
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }
+
+  const anchorRelation = activeAnchor.relationId
+    ? sheet.parallelRelations.find((r) => r.relationId === activeAnchor.relationId)
     : null
   const anchorElementName =
-    columns.find((c) => c.id === anchor.elementId)?.name ??
-    sheet.elements.find((e) => e.id === anchor.elementId)?.name
+    columns.find((c) => c.id === activeAnchor.elementId)?.name ??
+    sheet.elements.find((e) => e.id === activeAnchor.elementId)?.name
 
   const maxCols = preview ? Math.max(...preview.rows.map((r) => r.cells.length), 0) : 0
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent dir="rtl" className="max-h-[90vh] sm:max-w-3xl">
+      <DialogContent dir="rtl" className="max-h-[90vh] sm:max-w-4xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <ClipboardPaste className="size-5 text-brand" aria-hidden />
-            Paste چندسلولی از Excel
+            ورود اطلاعات از Excel
             <HelpDot
-              label="Paste چندسلولی"
+              label="ورود اطلاعات از Excel"
               content={{
-                what: 'کپی چند سطر و ستون از Excel و ثبت هم‌زمان آن‌ها در برگهٔ زمان‌سنجی — با چیدمان جدید: هر سطر داده یک ردیف شبکه (عنصر یا زیرردیف هم‌پوشانی) و هر ستون داده یک چرخه.',
-                input: 'محدودهٔ موردنظر را در Excel کپی کنید (Ctrl+C) و همین‌جا بچسبانید (Ctrl+V). سطرها از ردیفی که سلول فعال روی آن است و ستون‌ها از چرخهٔ همان ستون شروع می‌شوند.',
-                example: 'اگر ۳ عنصر دارید و ۵ چرخه Paste می‌کنید، یک محدودهٔ ۳ سطر × ۵ ستون کپی کنید. برای عنصر هم‌زمان به‌جای یک عدد «۳-۹» (شروع تا پایان) و برای زیرردیف هم‌پوشانی خالی/۰/مقدار مثبت بنویسید.',
-                note: 'هیچ داده‌ای بدون پیش‌نمایش و تأیید شما ثبت نمی‌شود؛ خطای هر سلول با محل و علت دقیق نمایش داده می‌شود.',
+                what: 'ثبت هم‌زمان چند سطر و ستون از Excel در برگهٔ زمان‌سنجی — با چیدمان جدید: هر سطر داده یک ردیف شبکه (عنصر یا زیرردیف هم‌پوشانی) و هر ستون داده یک چرخه.',
+                input:
+                  'دو مسیر مستقل: (۱) محدودهٔ موردنظر را در Excel کپی کنید (Ctrl+C) و همین‌جا بچسبانید (Ctrl+V)؛ (۲) «قالب Excel» این جلسه را دانلود کنید، تکمیل کنید و فایل را بارگذاری کنید.',
+                example:
+                  'اگر ۳ عنصر دارید و ۵ چرخه Paste می‌کنید، یک محدودهٔ ۳ سطر × ۵ ستون کپی کنید. برای عنصر هم‌زمان به‌جای یک عدد «۳-۹» (شروع تا پایان) و برای زیرردیف هم‌پوشانی خالی/۰/مقدار مثبت بنویسید.',
+                note: 'هیچ داده‌ای بدون پیش‌نمایش و تأیید شما ثبت نمی‌شود؛ خطای هر سلول با محل و علت دقیق نمایش داده می‌شود. بارگذاری فایل هم فقط ورودی همین مسیر را می‌سازد و به‌صورت مستقیم ذخیره نمی‌کند.',
               }}
             />
           </DialogTitle>
           <DialogDescription>
-            مبدأ: چرخهٔ {formatInt(anchor.cycleNo, prefs)}
-            {anchorElementName ? `، ردیف «${anchorRelation ? `هم‌پوشانی (${anchorElementName} ↔ ${anchorRelation.elementLowId === anchor.elementId ? anchorRelation.elementHighName : anchorRelation.elementLowName})` : anchorElementName}»` : '، بدون ردیف (ابتدا سلولی از برگه انتخاب کنید)'}
+            {fileSource ? (
+              <>
+                فایل قالب: «{fileSource.name}» — مبدأ نگاشت: چرخهٔ {formatInt(activeAnchor.cycleNo, prefs)} از ابتدای
+                برگه
+              </>
+            ) : (
+              <>
+                مبدأ: چرخهٔ {formatInt(activeAnchor.cycleNo, prefs)}
+                {anchorElementName
+                  ? `، ردیف «${anchorRelation ? `هم‌پوشانی (${anchorElementName} ↔ ${anchorRelation.elementLowId === activeAnchor.elementId ? anchorRelation.elementHighName : anchorRelation.elementLowName})` : anchorElementName}»`
+                  : '، بدون ردیف (ابتدا سلولی از برگه انتخاب کنید)'}
+              </>
+            )}
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 overflow-y-auto" style={{ maxHeight: '55vh' }}>
-          {/* ورودی Paste */}
-          <div className="space-y-1.5">
-            <Label htmlFor="paste-text">محتوای Excel را اینجا بچسبانید</Label>
-            <textarea
-              id="paste-text"
-              ref={textareaRef}
-              dir="ltr"
-              value={text}
-              onChange={(e) => {
-                setText(e.target.value)
-                setPreview(null)
-              }}
-              onPaste={(e) => {
-                // چسباندن واقعی از کلیپ‌بورد
-                const pasted = e.clipboardData.getData('text')
-                if (pasted) {
-                  e.preventDefault()
-                  setText(pasted)
+          {/* ── مسیر ۱: Paste مستقیم (§۹-۱ — دست‌نخورده) ── */}
+          {fileSource ? (
+            <div className="space-y-2 rounded-xl border border-brand/40 bg-brand-soft/30 p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="flex min-w-0 items-center gap-2 text-xs font-bold text-brand">
+                  <FileSpreadsheet className="size-4 shrink-0" aria-hidden />
+                  <span className="truncate">فایل بارگذاری‌شده: {fileSource.name}</span>
+                </p>
+                <Button variant="outline" size="sm" onClick={backToText} className="shrink-0">
+                  بازگشت به Paste متنی
+                </Button>
+              </div>
+              <p className="num text-xs text-muted-foreground">
+                {formatInt(fileSource.data.length, prefs)} ردیف ×{' '}
+                {formatInt(Math.max(...fileSource.data.map((r) => r.length), 0), prefs)} چرخه خوانده شد — پیش‌نمایش
+                زیر را بررسی و پس از رفع خطاها ثبت نهایی کنید.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-1.5">
+              <Label htmlFor="paste-text">محتوای Excel را اینجا بچسبانید</Label>
+              <textarea
+                id="paste-text"
+                ref={textareaRef}
+                dir="ltr"
+                value={text}
+                onChange={(e) => {
+                  setText(e.target.value)
                   setPreview(null)
-                }
-              }}
-              placeholder={'12.5\t8.3\t9.1\n11.9\t8.4\t9.0\n…'}
-              className="num min-h-24 w-full rounded-xl border bg-background p-3 font-mono text-xs focus-visible:outline-2 focus-visible:outline-ring"
-            />
-            <p className="text-[11px] text-muted-foreground">
-              هر سطر = یک ردیف شبکه (عنصر یا زیرردیف هم‌پوشانی) — هر ستون = یک چرخه — جداکنندهٔ ستون: Tab — اعشار:
-              نقطه یا «٫» — بازهٔ عنصر: «۳-۹» — زیرردیف هم‌پوشانی: خالی/۰/مقدار مثبت — خالی = بدون تغییر
-            </p>
-          </div>
+                }}
+                onPaste={(e) => {
+                  // چسباندن واقعی از کلیپبورد
+                  const pasted = e.clipboardData.getData('text')
+                  if (pasted) {
+                    e.preventDefault()
+                    setText(pasted)
+                    setPreview(null)
+                  }
+                }}
+                placeholder={'12.5\t8.3\t9.1\n11.9\t8.4\t9.0\n…'}
+                className="num min-h-24 w-full rounded-xl border bg-background p-3 font-mono text-xs focus-visible:outline-2 focus-visible:outline-ring"
+              />
+              <p className="text-[11px] text-muted-foreground">
+                هر سطر = یک ردیف شبکه (عنصر یا زیرردیف هم‌پوشانی) — هر ستون = یک چرخه — جداکنندهٔ ستون: Tab — اعشار:
+                نقطه یا «٫» — بازهٔ عنصر: «۳-۹» — زیرردیف هم‌پوشانی: خالی/۰/مقدار مثبت — خالی = بدون تغییر
+              </p>
+              <Button
+                variant="outline"
+                onClick={doPreview}
+                disabled={!parsedData || previewing || runPreview.isPending}
+                className="gap-1.5"
+              >
+                {(previewing || runPreview.isPending) && <Loader2 className="size-4 animate-spin" aria-hidden />}
+                پیش‌نمایش و اعتبارسنجی
+              </Button>
+            </div>
+          )}
 
-          <Button
-            variant="outline"
-            onClick={doPreview}
-            disabled={!parsedData || previewing || runPreview.isPending}
-            className="gap-1.5"
-          >
-            {(previewing || runPreview.isPending) && <Loader2 className="size-4 animate-spin" aria-hidden />}
-            پیش‌نمایش و اعتبارسنجی
-          </Button>
+          {/* ── مسیر ۲: قالب Excel — v1.5.2 §۹ ── */}
+          <div className="space-y-2 rounded-xl border border-dashed p-3">
+            <p className="flex items-center gap-1.5 text-xs font-bold text-muted-foreground">
+              <span className="flex size-6 items-center justify-center rounded-full bg-muted text-[11px] font-extrabold">یا</span>
+              ورود از طریق قالب Excel این جلسه
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5"
+                onClick={() => window.open(timingApi.excelTemplateUrl(sessionId))}
+                title="دانلود قالب Excel متناسب با این جلسه — شامل نام واقعی عناصر، روابط موازی و چرخه‌ها"
+              >
+                <FileSpreadsheet className="size-4" aria-hidden />
+                دانلود قالب Excel
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5"
+                disabled={fileLoading}
+                onClick={() => fileInputRef.current?.click()}
+                title="بارگذاری فایل xlsx تکمیل‌شدهٔ همان قالب — داده‌ها وارد پیش‌نمایش می‌شوند"
+              >
+                {fileLoading ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <FileUp className="size-4" aria-hidden />}
+                بارگذاری فایل Excel
+              </Button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".xlsx"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0]
+                  if (f) void onFileSelected(f)
+                }}
+              />
+            </div>
+            <p className="text-[11px] leading-5 text-muted-foreground">
+              قالب شامل نام واقعی عناصر و روابط موازی همین جلسه و ستون‌های چرخه است (شناسه‌های پایدار در شیت مخفی
+              Metadata). پس از تکمیل، فایل را بارگذاری کنید یا محدودهٔ داده‌ها را کپی و در همان مسیر Paste بالا
+              بچسبانید.
+            </p>
+            {fileError && (
+              <p className="whitespace-pre-line rounded-lg bg-red-soft/60 px-2.5 py-2 text-[11px] leading-5 text-red">
+                {fileError}
+              </p>
+            )}
+          </div>
 
           {/* پیش‌نمایش — چیدمان مطابق جدول جدید (§۸.۳) */}
           {preview && (
@@ -235,7 +389,8 @@ export function PasteDialog({
                       <tr key={row.row} className={`border-b last:border-0 ${row.kind === 'RELATION' ? 'bg-surface-2/40' : ''}`}>
                         <td className="px-2 py-1.5 font-bold">
                           {row.kind === 'RELATION' ? (
-                            <span className="text-[11px] text-muted-foreground">↳ هم‌پوشانی با {row.otherElementName}</span>
+                            /* v1.5.2 §۸ — فلش رو به چپ به طرف عنصر والد */
+                            <span className="text-[11px] text-muted-foreground">↲ هم‌پوشانی با {row.otherElementName}</span>
                           ) : (
                             row.elementName
                           )}
