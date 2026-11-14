@@ -1,14 +1,16 @@
 'use client'
 
 // ═══════════════════════════════════════════════════════════
-// زیرهدر چسبان فعالیت — §۱۲.۱ جلسه دوم
+// زیرهدر چسبان فعالیت — §۱۲.۱ جلسه دوم / v1.5.2 §۴
 // تنها نوار چسبان صفحهٔ زمان‌سنجی (زیر TopBar با ارتفاع h-14):
 // عنوان فعالیت + ایستگاه (تنها یک‌بار)، بازگشت به فهرست فعالیت‌ها،
-// فیلتر اپراتور (حالت فهرست جلسات) یا نشان اپراتور جلسهٔ فعال
-// (حالت برگه) و دکمهٔ کوچک «جلسهٔ جدید».
+// فیلتر اپراتور و دکمهٔ کوچک «جلسهٔ جدید».
+// v1.5.2 §۴ — حالت «برگهٔ فعال» حذف شد؛ هنگام بازبودن جلسه،
+// هدر واحد داخل SheetPanel (SubheaderBar یکپارچه) نمایش داده
+// می‌شود و این مؤلفه فقط برای فهرست جلسات استفاده می‌شود.
 // کارت‌های جلسه و جدول برگه هرگز چسبان نیستند.
 // ═══════════════════════════════════════════════════════════
-import { ListTree, Plus, Timer, UserRound } from 'lucide-react'
+import { ListTree, Plus, Timer } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import type { DisplayPrefs as Prefs } from '@/lib/format'
@@ -25,17 +27,13 @@ export interface TimingSubheaderProps {
   /** امکان ایجاد جلسه (عنصر و اپراتور موجود باشد) */
   canCreateSession: boolean
   onCreateSession: () => void
-  /** حالت نمایش: فهرست جلسات یا برگهٔ فعال */
-  variant: 'list' | 'sheet'
-  /** فقط حالت list — وضعیت فیلتر اپراتور */
+  /** وضعیت فیلتر اپراتور */
   operatorFilter?: string | 'ALL'
   onOperatorFilter?: (value: string | 'ALL') => void
-  /** فقط حالت list — اپراتورهای پروژه */
+  /** اپراتورهای پروژه */
   operators?: { id: string; displayName: string }[]
-  /** فقط حالت list — جلسات فعالیت برای شمارش */
+  /** جلسات فعالیت برای شمارش */
   sessions?: { operatorId: string }[]
-  /** فقط حالت sheet — نام اپراتور جلسهٔ فعال (نشان برجستهٔ یکتا) */
-  activeOperatorName?: string | null
 }
 
 export function TimingSubheader({
@@ -45,15 +43,13 @@ export function TimingSubheader({
   onOpenPicker,
   canCreateSession,
   onCreateSession,
-  variant,
   operatorFilter,
   onOperatorFilter,
   operators,
   sessions,
-  activeOperatorName,
 }: TimingSubheaderProps) {
   const operatorsWithSessions = Array.from(new Set((sessions ?? []).map((s) => s.operatorId)))
-  const showChips = variant === 'list' && (sessions?.length ?? 0) > 0
+  const showChips = (sessions?.length ?? 0) > 0
 
   return (
     // z-40: بالاتر از سربرگ/ستون چسبان داخل جدول برگه (z-30)؛ هم‌تراز TopBar
@@ -80,7 +76,7 @@ export function TimingSubheader({
         فهرست فعالیت‌ها
       </Button>
 
-      {showChips ? (
+      {showChips && (
         <div className="flex min-w-0 flex-wrap items-center gap-1.5">
           <span className="text-xs font-bold text-muted-foreground">اپراتور:</span>
           <Badge variant="secondary" className="num shrink-0 text-[10px] font-bold">
@@ -106,14 +102,7 @@ export function TimingSubheader({
               />
             ))}
         </div>
-      ) : variant === 'sheet' ? (
-        activeOperatorName ? (
-          <span className="inline-flex min-w-0 shrink-0 items-center gap-1.5 rounded-full bg-brand-soft px-3 py-1 text-xs font-bold text-brand">
-            <UserRound className="size-3.5 shrink-0" aria-hidden />
-            <span className="truncate">{activeOperatorName}</span>
-          </span>
-        ) : null
-      ) : null}
+      )}
 
       {canCreateSession && (
         <Button size="sm" onClick={onCreateSession} className="btn-brand ms-auto shrink-0 gap-1.5 border-0">

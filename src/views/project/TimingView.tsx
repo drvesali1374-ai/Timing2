@@ -145,27 +145,20 @@ export default function TimingView({
   })
 
   // ═══════════════ برگهٔ فعال ═══════════════
-  // زیرهدر چسبان بالای برگه — §۱۲.۱ (اطلاعات فعالیت/ایستگاه/اپراتور فقط همین‌جا)
+  // v1.5.2 §۴ — هدر واحد: هنگام بازبودن جلسه، زیرهدر مستقل حذف شد
+  // و همهٔ اطلاعات (فعالیت/ایستگاه/اپراتور/روش/ذخیره/بستن) در هدر
+  // یکپارچهٔ داخل SheetPanel ادغام می‌شوند.
   if (activeSessionId && activityId && selectedActivity) {
-    const activeSession = sessions.find((s) => s.id === activeSessionId)
     return (
       <div className="mx-auto max-w-5xl">
-        <TimingSubheader
-          variant="sheet"
-          prefs={prefs}
-          activityName={selectedActivity.name}
-          stationName={selectedActivity.stationName}
-          onOpenPicker={openPicker}
-          canCreateSession={hasElements && operators.length > 0}
-          onCreateSession={() => setCreateOpen(true)}
-          activeOperatorName={activeSession?.operatorName ?? null}
-        />
         <SheetPanel
           sessionId={activeSessionId}
           prefs={prefs}
           onBack={() => setActiveSessionId(null)}
+          canCreateSession={hasElements && operators.length > 0}
+          onCreateSession={() => setCreateOpen(true)}
         />
-        {/* جلسهٔ جدید از زیرهدر برگه نیز در دسترس است */}
+        {/* جلسهٔ جدید از هدر واحد برگه نیز در دسترس است */}
         <CreateSessionDialog
           open={createOpen}
           onOpenChange={setCreateOpen}
@@ -272,7 +265,6 @@ export default function TimingView({
           چیپ‌های فیلتر اپراتور و جلسهٔ جدید؛ کارت‌های جلسه چسبان نیستند */}
       {selectedActivity && (
         <TimingSubheader
-          variant="list"
           prefs={prefs}
           activityName={selectedActivity.name}
           stationName={selectedActivity.stationName}
