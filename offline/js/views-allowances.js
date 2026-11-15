@@ -403,7 +403,7 @@
             summaryBlock('زمان ثابت هر اجرا', U.h('span', { class: 'num text-[13px] font-extrabold', text: fmtSeconds(summary.perExecutionSeconds) })),
             summaryBlock('زمان ثابت هر چرخه (جدا از ST عناصر)', U.h('span', { class: 'num text-[13px] font-extrabold', text: fmtSeconds(summary.perCycleSeconds) })),
             // فرمول — نمایش چپ‌به‌راست صحیح (v1.5.2 §۴.۱)
-            U.h('div', { dir: 'ltr', class: 'num flex items-center justify-center self-stretch px-3.5 py-1.5 text-[12px] font-extrabold', style: { color: 'var(--brand)', background: 'color-mix(in srgb, var(--brand-soft) 40%, transparent)', border: '1px dashed color-mix(in srgb, var(--brand) 40%, transparent)', borderRadius: 'var(--radius)' }, text: data.settings.formula }))));
+            UI.stFormula(data.settings.formula))));
 
         // نیازمند قاعده تجمیع — §۲.۳
         if (needsAgg.length > 0) {

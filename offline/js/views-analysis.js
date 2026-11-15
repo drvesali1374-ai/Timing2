@@ -450,7 +450,7 @@
       UI.metric('روش اعمال مجاز', alw.methodLabel || '—'),
       U.h('div', { class: 'metric' },
         U.h('div', { class: 'm-label', text: 'فرمول زمان استاندارد' }),
-        U.h('div', { class: 'm-value' }, U.h('code', { class: 'inline', dir: 'ltr', text: alw.formula || '—' }))),
+        U.h('div', { class: 'm-value' }, UI.stFormula(alw.formula || '—'))),
       UI.metric('تجمیع چند اپراتور', an.settings.aggregationMethodLabel || '—'),
       U.h('div', { class: 'metric' },
         U.h('div', { class: 'm-label', text: 'مجموع مجاز (A)' }),

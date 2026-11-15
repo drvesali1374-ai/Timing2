@@ -614,7 +614,7 @@
       var sec = U.h('section', { class: 'mt-4 print-break-avoid' },
         U.h('h3', { class: 'font-bold mb-2', text: '۱) پارامترها و فرض‌های محاسبات' }));
       sec.appendChild(prKV([
-        ['فرمول زمان استاندارد', U.h('code', { class: 'inline', dir: 'ltr', text: settings.formula })],
+        ['فرمول زمان استاندارد', UI.stFormula(settings.formula)],
         ['روش اعمال مجاز', settings.allowanceMethodLabel],
         ['روش تجمیع چند اپراتور', settings.aggregationMethodLabel],
         ['روش تشخیص دادهٔ غیرعادی', outlierText],

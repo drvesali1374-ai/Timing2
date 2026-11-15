@@ -45,6 +45,7 @@ import { Switch } from '@/components/ui/switch'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { Textarea } from '@/components/ui/textarea'
 import { HelpDot } from '@/components/common/HelpDot'
+import { StFormula } from '@/components/common/StFormula'
 import { PercentInput, PersianNumberInput } from '@/components/common/PersianNumberInput'
 import { EmptyState } from '@/components/common/Feedback'
 import {
@@ -368,12 +369,7 @@ export function AllowanceSection({
                     <span className="num text-[13px] font-extrabold">{formatSeconds(summary.perCycleSeconds, prefs)}</span>
                   </div>
                   {data?.settings.formula && (
-                    <div
-                      dir="ltr"
-                      className="num flex items-center justify-center self-stretch rounded-lg border border-dashed border-brand/40 bg-brand-soft/40 px-3.5 py-1.5 text-[12px] font-extrabold text-brand"
-                    >
-                      {data.settings.formula}
-                    </div>
+                    <StFormula formula={data.settings.formula} className="self-stretch" />
                   )}
                 </div>
               </div>

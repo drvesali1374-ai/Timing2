@@ -50,6 +50,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from '@/components/ui/chart'
 import { EmptyState } from '@/components/common/Feedback'
 import { HelpDot } from '@/components/common/HelpDot'
+import { StFormula } from '@/components/common/StFormula'
 import { analysisApi, reportsApi, timingApi, type ElementAnalysisItemDto } from '@/lib/api/endpoints'
 import { qk } from '@/lib/api/keys'
 import { useDisplayPrefs } from '@/store/display-store'
@@ -357,9 +358,9 @@ export default function AnalysisContent({ activityId }: { activityId: string }) 
             </div>
             <div className="rounded-xl bg-muted/60 p-3">
               <p className="text-xs text-muted-foreground">فرمول زمان استاندارد</p>
-              <p dir="ltr" className="mt-1 text-left font-mono font-bold">
-                {analysis.settings.formula}
-              </p>
+              <div className="mt-1.5">
+                <StFormula formula={analysis.settings.formula} />
+              </div>
             </div>
             <div className="rounded-xl bg-muted/60 p-3">
               <p className="text-xs text-muted-foreground">تجمیع چند اپراتور</p>

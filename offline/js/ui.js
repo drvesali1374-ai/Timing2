@@ -210,6 +210,15 @@
   document.addEventListener('click', function () { closeHelp(); });
   document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeHelp(); });
 
+  // ── چیپ مشترک فرمول زمان استاندارد — v1.5.2 §۳.۲ ──
+  // معادل StFormula.tsx وب: فاصلهٔ داخلی یکنواخت (۱۴/۸px) از لبهٔ کادر،
+  // direction:ltr برای عبارت ریاضی و جایگاه مناسب در رابط فارسی.
+  function stFormula(text) {
+    return U.h('span', {
+      dir: 'ltr', class: 'st-formula num', text: text,
+    });
+  }
+
   // ── پاپ‌اور کوچک «توضیح» — معادل Tooltip وب (v1.5.2 §۴.۲) ──
   var openNote = null;
   function noteDot(text, ariaLabel) {
@@ -639,7 +648,7 @@
   g.T2UI = {
     toast: toast, toastError: toastError,
     dialog: dialog, alertDialog: alertDialog, confirmDialog: confirmDialog, confirmDelete: confirmDelete,
-    helpDot: helpDot, badge: badge, emptyState: emptyState, tabsBar: tabsBar,
+    helpDot: helpDot, stFormula: stFormula, badge: badge, emptyState: emptyState, tabsBar: tabsBar,
     persianNumberInput: persianNumberInput, percentInput: percentInput, switchEl: switchEl, selectEl: selectEl,
     field: field, metric: metric, saveIndicator: saveIndicator, dropdownMenu: dropdownMenu,
     collapsibleCard: collapsibleCard, projectStatusBadge: projectStatusBadge, stageStatusBadge: stageStatusBadge,
