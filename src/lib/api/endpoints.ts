@@ -831,6 +831,9 @@ export interface ChartEdgeDto {
   targetAnchor: 'top' | 'bottom' | 'left' | 'right' | null
   isChain: boolean
   sortOrder: number
+  /** v1.5.2 §۱۰.۵ — ظاهر یال دستی؛ تهی = پیش‌فرض نمودار */
+  lineStyle: 'SOLID' | 'DASHED' | 'DOTTED' | null
+  lineColor: string | null
 }
 
 export interface ChartDto {
@@ -867,11 +870,17 @@ export const chartsApi = {
     body: {
       sourceNodeId: string
       targetNodeId: string
-      sourceAnchor?: 'top' | 'bottom' | 'left' | 'right'
-      targetAnchor?: 'top' | 'bottom' | 'left' | 'right'
+      /** v1.5.2 §۱۰.۴ — تهی = مسیریابی هوشمند مشترک با یال‌های خودکار */
+      sourceAnchor?: 'top' | 'bottom' | 'left' | 'right' | null
+      targetAnchor?: 'top' | 'bottom' | 'left' | 'right' | null
     }
   ) => api.post<{ edge: { id: string } }>(`/api/chart-edges?projectId=${projectId}`, body),
   deleteEdge: (edgeId: string) => api.del<{ deleted: boolean }>(`/api/chart-edges/${edgeId}`),
+  // v1.5.2 §۱۰.۵ — تنظیم ظاهر یال دستی (نوع خط/رنگ) — ماندگار در DB
+  updateEdgeAppearance: (
+    edgeId: string,
+    body: { lineStyle?: 'SOLID' | 'DASHED' | 'DOTTED' | null; lineColor?: string | null }
+  ) => api.patch<{ edge: { id: string } }>(`/api/chart-edges/${edgeId}`, body),
   // جلسه ۲ — ابعاد بوم (§۱۵.۶) و snapshot چیدمان دستی (§۱۵.۵)
   getCanvas: (projectId: string, chartType: ChartTypeValue) =>
     api.get<{ width: number; height: number } | null>(`/api/projects/${projectId}/charts/${chartType}/canvas`),

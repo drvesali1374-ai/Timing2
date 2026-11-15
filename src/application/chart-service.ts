@@ -411,6 +411,8 @@ export async function getChart(projectId: string, chartTypeInput: string): Promi
       targetAnchor: e.targetAnchor,
       isChain: e.isChain,
       sortOrder: e.sortOrder,
+      lineStyle: e.lineStyle,
+      lineColor: e.lineColor,
     })),
     counts: {
       total: nodes.length,
@@ -606,6 +608,37 @@ export async function createChartEdge(
     after: { sourceNodeId, targetNodeId, chartType: source.chartType }, projectId,
   })
   return edge
+}
+
+/** v1.5.2 §۱۰.۵ — تغییر ظاهر یال (نوع خط/رنگ)؛ تهی = پیش‌فرض نمودار */
+export async function updateChartEdgeAppearance(
+  edgeId: string,
+  input: { lineStyle?: 'SOLID' | 'DASHED' | 'DOTTED' | null; lineColor?: string | null }
+) {
+  const existing = await db.chartEdge.findUnique({ where: { id: edgeId } })
+  if (!existing) throw new AppError('EDGE_NOT_FOUND', 'اتصال یافت نشد.', 404)
+  if (existing.isChain) {
+    throw new AppError('CHAIN_EDGE_APPEARANCE', 'ظاهر یال‌های زنجیرهٔ توالی (سیستمی) قابل تغییر نیست؛ فقط یال‌های دستی.', 422)
+  }
+  const data: { lineStyle?: string | null; lineColor?: string | null } = {}
+  if (input.lineStyle !== undefined) data.lineStyle = input.lineStyle
+  if (input.lineColor !== undefined) {
+    // فقط رنگ CSS امن (هگز یا نام محدود) — بدون تزریق استایل دلخواه
+    if (input.lineColor === null || /^(#[0-9a-fA-F]{3,8}|#[0-9a-fA-F]{4,8})$/.test(input.lineColor.trim())) {
+      data.lineColor = input.lineColor === null ? null : input.lineColor.trim()
+    } else {
+      throw new AppError('INVALID_COLOR', 'رنگ یال معتبر نیست؛ فقط کد هگز (مثل #7257ff).', 422)
+    }
+  }
+  const updated = await db.chartEdge.update({ where: { id: edgeId }, data })
+  await recordAudit({
+    entityType: 'ChartEdge', entityId: edgeId, action: 'UPDATE',
+    entityName: 'ظاهر اتصال گره‌ها',
+    before: { lineStyle: existing.lineStyle, lineColor: existing.lineColor },
+    after: { lineStyle: updated.lineStyle, lineColor: updated.lineColor },
+    projectId: existing.projectId,
+  })
+  return updated
 }
 
 export async function deleteChartEdge(edgeId: string) {

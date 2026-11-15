@@ -402,6 +402,12 @@ export const chartEdgeCreateSchema = z.object({
   targetAnchor: z.enum(['top', 'bottom', 'left', 'right']).optional(),
 })
 
+/** v1.5.2 §۱۰.۵ — ظاهر یال دستی: نوع خط + رنگ (تهی = پیش‌فرض نمودار) */
+export const chartEdgeAppearanceSchema = z.object({
+  lineStyle: z.enum(['SOLID', 'DASHED', 'DOTTED']).nullable().optional(),
+  lineColor: z.string().regex(/^#[0-9a-fA-F]{3,8}$/, 'رنگ باید کد هگز باشد (مثل #7257ff)').nullable().optional(),
+})
+
 export const chartOrderMoveSchema = z.object({
   nodeId: z.string().uuid('گره معتبر نیست'),
   direction: z.enum(['up', 'down'], { message: 'جهت جابه‌جایی معتبر نیست' }),

@@ -729,11 +729,15 @@ tr.row-excluded > td { background: color-mix(in srgb, var(--red-soft) 35%, trans
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .node-ctrls {
-  position: absolute; bottom: -9px; left: 50%; transform: translateX(-50%); z-index: 8;
+  /* v1.5.2 §۱۰.۶ — نوار ابزار هاور بالای کارت (۱۲px فاصله) تا لنگر
+     پایین اتصال آزاد بماند؛ گره‌های نزدیک لبهٔ بالای بوم (.ctrl-below)
+     آن را با فاصلهٔ امن زیر کارت می‌گیرند. */
+  position: absolute; bottom: auto; top: -12px; left: 50%; transform: translateX(-50%); z-index: 8;
   display: flex; align-items: center; gap: 2px; padding: 2px;
   background: var(--background); border: 1px solid var(--border); border-radius: 99px;
   box-shadow: var(--shadow-1); opacity: 0; transition: opacity .15s var(--ease);
 }
+.chart-node.ctrl-below .node-ctrls { top: auto; bottom: -12px; }
 .chart-node:hover .node-ctrls, .chart-node:focus-within .node-ctrls { opacity: 1; }
 .node-ctrl-btn {
   display: inline-flex; width: 24px; height: 24px; align-items: center; justify-content: center;
@@ -1033,6 +1037,37 @@ code.inline { background: var(--muted); padding: 3px 9px; border-radius: 6px; fo
   display: inline-flex; align-items: center; gap: 1px; padding: 2px;
   border: 1px solid var(--border); border-radius: calc(var(--radius) - 2px); background: var(--card);
 }
+
+/* ═══ v1.5.2 §۱۰.۱ — گروه‌های نوار ابزار بوم + دکمهٔ PDF متمایز ═══ */
+.tb-group {
+  display: flex; align-items: center; gap: 4px; padding: 4px;
+  background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
+}
+.tb-group .btn-ghost:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-pdf {
+  background: var(--red-soft); color: var(--red); border: 1px solid color-mix(in srgb, var(--red) 40%, transparent);
+  font-weight: 700;
+}
+.btn-pdf:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--red-soft) 80%, transparent);
+  border-color: color-mix(in srgb, var(--red) 60%, transparent); color: var(--red);
+}
+/* ═══ v1.5.2 §۱۰.۵ — نوار ظاهر یال انتخاب‌شده (هم‌ارز وب) ═══ */
+.edge-appearance-bar {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 4px;
+  background: color-mix(in srgb, var(--brand-soft) 30%, transparent);
+  border: 1px solid color-mix(in srgb, var(--brand) 40%, transparent); border-radius: var(--radius);
+}
+.ea-style-btn { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px; font-size: 11px; }
+.ea-style-btn.active { background: var(--brand-soft); color: var(--brand); font-weight: 700; }
+.ea-sep { width: 1px; height: 20px; background: var(--border); margin-inline: 4px; }
+.ea-color-btn {
+  width: 20px; height: 20px; border-radius: 99px; border: 2px solid var(--border);
+  cursor: pointer; padding: 0; transition: transform .12s var(--ease);
+}
+.ea-color-btn:hover { transform: scale(1.12); }
+.ea-color-btn.active { border-color: var(--foreground); box-shadow: 0 0 0 2px color-mix(in srgb, var(--brand) 50%, transparent); }
+
 .zoom-group .icon-btn.sm { width: 26px; height: 26px; }
 .zoom-pct { min-width: 46px; text-align: center; font-size: 11.5px; font-weight: 700; }
 .zoom-reset {

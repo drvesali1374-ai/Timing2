@@ -2256,7 +2256,7 @@
     var qualifyingCount = allActivities.filter(function (a) { return chartType === 'OPC' ? OPC_TYPES.indexOf(a.processType) >= 0 : true; }).length;
     return {
       chartType: chartType, nodes: nodeDtos,
-      edges: edges.map(function (e) { return { id: e.id, sourceNodeId: e.sourceNodeId, targetNodeId: e.targetNodeId, isChain: e.isChain, sortOrder: e.sortOrder }; }),
+      edges: edges.map(function (e) { return { id: e.id, sourceNodeId: e.sourceNodeId, targetNodeId: e.targetNodeId, isChain: e.isChain, sortOrder: e.sortOrder, lineStyle: e.lineStyle || null, lineColor: e.lineColor || null }; }),
       counts: {
         total: nodes.length, auto: nodes.filter(function (n) { return !n.isManual; }).length,
         manual: nodes.filter(function (n) { return n.isManual; }).length, byType: byType,
@@ -2345,7 +2345,27 @@
       sourceAnchor: (anchors && anchors.sourceAnchor) || null,
       targetAnchor: (anchors && anchors.targetAnchor) || null,
       isChain: false, sortOrder: 0,
+      /* v1.5.2 §۱۰.۵ — ظاهر پیش‌فرض: تهی = پیوسته + رنگ استاندارد */
+      lineStyle: null, lineColor: null,
     });
+    commit();
+    return state.chartEdges[state.chartEdges.length - 1];
+  }
+  /** v1.5.2 §۱۰.۵ — تغییر ظاهر یال دستی (نوع خط/رنگ)؛ تهی = پیش‌فرض */
+  function updateChartEdgeAppearance(edgeId, patch) {
+    var e = byId('chartEdges', edgeId);
+    if (!e) throw new Error('اتصال یافت نشد.');
+    if (e.isChain) throw new Error('ظاهر یال‌های زنجیرهٔ توالی (سیستمی) قابل تغییر نیست؛ فقط یال‌های دستی.');
+    if (patch.lineStyle !== undefined) {
+      if (patch.lineStyle === null || patch.lineStyle === 'SOLID' || patch.lineStyle === 'DASHED' || patch.lineStyle === 'DOTTED') e.lineStyle = patch.lineStyle;
+      else throw new Error('نوع خط نامعتبر است.');
+    }
+    if (patch.lineColor !== undefined) {
+      if (patch.lineColor === null || /^#[0-9a-fA-F]{3,8}$/.test(String(patch.lineColor).trim())) {
+        e.lineColor = patch.lineColor === null ? null : String(patch.lineColor).trim();
+      } else throw new Error('رنگ یال معتبر نیست؛ فقط کد هگز (مثل #7257ff).');
+    }
+    touch(e);
     commit();
   }
   function deleteChartEdge(edgeId) {
@@ -3388,7 +3408,7 @@
 
     getChart: getChart, createManualNode: createManualNode, updateChartNode: updateChartNode,
     deleteChartNode: deleteChartNode, saveChartLayout: saveChartLayout, moveChartNodeOrder: moveChartNodeOrder,
-    createChartEdge: createChartEdge, deleteChartEdge: deleteChartEdge, getChartsStageState: getChartsStageState,
+    createChartEdge: createChartEdge, deleteChartEdge: deleteChartEdge, updateChartEdgeAppearance: updateChartEdgeAppearance, getChartsStageState: getChartsStageState,
     autoLayout: computeAutoLayout,
 
     getProjectDashboard: getProjectDashboard, computeStageSummary: computeStageSummary,

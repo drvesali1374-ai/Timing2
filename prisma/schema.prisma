@@ -398,6 +398,10 @@ model ChartEdge {
   targetAnchor String? @map("target_anchor")
   // یال زنجیرهٔ توالی (سیستمی، با تغییر ترتیب بازسازی می‌شود) در برابر اتصال دستی کاربر
   isChain      Boolean @default(false) @map("is_chain")
+  // v1.5.2 §۱۰.۵ — ظاهر قابل‌تنظیم یال دستی: تهی = پیش‌فرض نمودار
+  // (خط پیوسته + رنگ استاندارد)؛ SOLID | DASHED | DOTTED + رنگ دلخواه CSS
+  lineStyle    String? @map("line_style")
+  lineColor    String? @map("line_color")
 
   @@index([projectId, chartType])
   @@map("chart_edges")

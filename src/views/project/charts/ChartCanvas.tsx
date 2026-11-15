@@ -17,6 +17,7 @@ import { toast } from 'sonner'
 import {
   ChevronDown,
   ChevronUp,
+  FileDown,
   History,
   Loader2,
   Maximize2,
@@ -25,6 +26,8 @@ import {
   RefreshCw,
   Ruler,
   Trash2,
+  Undo2,
+  Redo2,
   Waypoints,
   ZoomIn,
   ZoomOut,
@@ -45,6 +48,7 @@ import { useDisplayPrefs } from '@/store/display-store'
 import { formatInt } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import PdfExportDialog from './PdfExportDialog'
+import { useChartHistory, type HistoryEntry } from './useChartHistory'
 
 // ابعاد مرجع گره — باید با ثابت‌های چیدمان بک‌اند هماهنگ بماند
 const NODE_W = 200
@@ -225,6 +229,20 @@ export default function ChartCanvas({ projectId, chartType }: { projectId: strin
   /** §۶-۶ — یال انتخاب‌شدهٔ فعلی (اگر هنوز موجود باشد) */
   const selectedEdge = useMemo(() => edges.find((e) => e.id === selectedEdgeId) ?? null, [edges, selectedEdgeId])
 
+  /** §۱۰.۸ — تاریخچهٔ Undo/Redy بوم؛ busy = جهش در حال اجرا */
+  const historyBusy = () =>
+    savePositionMutation.isPending ||
+    moveOrderMutation.isPending ||
+    layoutMutation.isPending ||
+    restoreSnapshotMutation.isPending ||
+    createNodeMutation.isPending ||
+    updateContentMutation.isPending ||
+    deleteNodeMutation.isPending ||
+    createEdgeMutation.isPending ||
+    deleteEdgeMutation.isPending ||
+    edgeAppearanceMutation.isPending
+  const { push: pushHistory, undo, redo, canUndo, canRedo, undoLabel, redoLabel } = useChartHistory(historyBusy)
+
   useEffect(() => {
     if (data) {
       void qc.invalidateQueries({ queryKey: qk.projectSummary(projectId) })
@@ -273,7 +291,15 @@ export default function ChartCanvas({ projectId, chartType }: { projectId: strin
   const moveOrderMutation = useMutation({
     mutationFn: (body: { nodeId: string; direction: 'up' | 'down' }) =>
       chartsApi.moveOrder(projectId, chartType, body),
-    onSuccess: invalidateAll,
+    onSuccess: async (_res, body) => {
+      await invalidateAll()
+      /* §۱۰.۸ — معکوس جابه‌جایی ترتیب، حرکت مخالف همان گره است */
+      pushHistory({
+        label: 'تغییر ترتیب گره',
+        undo: () => chartsApi.moveOrder(projectId, chartType, { nodeId: body.nodeId, direction: body.direction === 'up' ? 'down' : 'up' }).then(() => invalidateAll()),
+        redo: () => chartsApi.moveOrder(projectId, chartType, body).then(() => invalidateAll()),
+      })
+    },
     onError: (e: Error) => toast.error(e.message),
   })
 
@@ -283,10 +309,31 @@ export default function ChartCanvas({ projectId, chartType }: { projectId: strin
       await saveSnapshot(nodes, positions, { width: effCanvas.w, height: effCanvas.h })
       return chartsApi.applyLayout(projectId, chartType)
     },
-    onSuccess: async () => {
+    onMutate: () => ({
+      // §۱۰.۸ — مختصات همهٔ گره‌ها قبل از چیدمان خودکار
+      before: nodes.map((n) => ({ id: n.id, x: pos(n).x, y: pos(n).y })),
+    }),
+    onSuccess: async (_res, _vars, ctx) => {
       setPositions({})
       await invalidateAll()
       toast.success('چیدمان خودکار اعمال شد؛ چیدمان دستی قبلی ذخیره شد و با «بازگردانی چیدمان دستی» قابل بازیابی است.')
+      const before = (ctx as { before: Array<{ id: string; x: number; y: number }> } | undefined)?.before
+      if (before && before.length > 0) {
+        pushHistory({
+          label: 'چیدمان خودکار',
+          undo: async () => {
+            for (const b of before) {
+              await chartsApi.updateNode(b.id, { positionX: b.x, positionY: b.y })
+            }
+            await invalidateAll()
+          },
+          redo: async () => {
+            await saveSnapshot(nodes, positions, { width: effCanvas.w, height: effCanvas.h })
+            await chartsApi.applyLayout(projectId, chartType)
+            await invalidateAll()
+          },
+        })
+      }
     },
     onError: (e: Error) => toast.error(e.message),
   })
@@ -312,10 +359,20 @@ export default function ChartCanvas({ projectId, chartType }: { projectId: strin
 
   const createNodeMutation = useMutation({
     mutationFn: (body: { label: string; nodeType: string }) => chartsApi.createNode(projectId, chartType, body),
-    onSuccess: async () => {
+    onSuccess: async (res, body) => {
       setCreateOpen(false)
       await invalidateAll()
       toast.success('گره دستی به انتهای توالی اضافه شد.')
+      /* §۱۰.۸ — Undo افزودن گره = حذف آن؛ Redo = بازسازی با همان مشخصات */
+      const createdId = res.node.id
+      pushHistory({
+        label: `افزودن گره «${body.label}»`,
+        undo: () => chartsApi.deleteNode(createdId).then(() => invalidateAll()),
+        redo: async () => {
+          await chartsApi.createNode(projectId, chartType, body)
+          await invalidateAll()
+        },
+      })
     },
     onError: (e: Error) => toast.error(e.message),
   })
@@ -323,40 +380,145 @@ export default function ChartCanvas({ projectId, chartType }: { projectId: strin
   const updateContentMutation = useMutation({
     mutationFn: ({ nodeId, body }: { nodeId: string; body: { label?: string; nodeType?: string } }) =>
       chartsApi.updateNode(nodeId, body),
-    onSuccess: async () => {
+    onMutate: ({ nodeId }) => {
+      // §۱۰.۸ — snapshot مقادیر قبل برای Undo
+      const n = nodes.find((x) => x.id === nodeId)
+      return { before: n ? { label: n.label, nodeType: n.nodeType } : undefined }
+    },
+    onSuccess: async (_res, { nodeId, body }, ctx) => {
       setEditNode(null)
       await invalidateAll()
       toast.success('گره به‌روزرسانی شد.')
+      const before = (ctx as { before?: { label?: string; nodeType?: string } } | undefined)?.before
+      if (before) {
+        pushHistory({
+          label: 'ویرایش گره',
+          undo: () => chartsApi.updateNode(nodeId, before).then(() => invalidateAll()),
+          redo: () => chartsApi.updateNode(nodeId, body).then(() => invalidateAll()),
+        })
+      }
     },
     onError: (e: Error) => toast.error(e.message),
   })
 
   const deleteNodeMutation = useMutation({
     mutationFn: (nodeId: string) => chartsApi.deleteNode(nodeId),
-    onSuccess: async () => {
+    onMutate: (nodeId: string) => {
+      // §۱۰.۸ — snapshot گره + یال‌های آن برای بازسازی در Undo
+      const n = nodes.find((x) => x.id === nodeId)
+      const nodeEdges = edges.filter((e) => e.sourceNodeId === nodeId || e.targetNodeId === nodeId)
+      return { node: n ? { ...n } : null, edges: nodeEdges.map((e) => ({ ...e })) }
+    },
+    onSuccess: async (_res, nodeId, ctx) => {
       setDeleteTarget(null)
       await invalidateAll()
       toast.success('گره دستی حذف شد؛ گره‌های خودکار فعالیت‌ها دست‌نخورده‌اند.')
+      const snapshot = ctx as { node: ChartNodeDto | null; edges: ChartEdgeDto[] } | undefined
+      const node = snapshot?.node
+      if (node) {
+        const removedEdges = snapshot?.edges ?? []
+        /* §۱۰.۸ — Undo حذف گره = بازسازی با همان مشخصات/موقعیت + یال‌هایش؛
+         * شناسهٔ گرهِ بازسازی‌شده روی خود ورودی نگه داشته می‌شود تا Redo
+         * دقیقاً همان گره را حذف کند (بدون اتکا به کش ممکن است کهنه باشد). */
+        const entry: HistoryEntry & { recreatedId?: string } = {
+          label: `حذف گره «${node.label}»`,
+          undo: async () => {
+            const r = await chartsApi.createNode(projectId, chartType, { label: node.label, nodeType: node.nodeType })
+            entry.recreatedId = r.node.id
+            await chartsApi.updateNode(r.node.id, { positionX: node.positionX, positionY: node.positionY })
+            for (const e of removedEdges) {
+              const src = e.sourceNodeId === nodeId ? r.node.id : e.sourceNodeId
+              const tgt = e.targetNodeId === nodeId ? r.node.id : e.targetNodeId
+              await chartsApi.createEdge(projectId, { sourceNodeId: src, targetNodeId: tgt, sourceAnchor: null, targetAnchor: null }).catch(() => undefined)
+            }
+            await invalidateAll()
+          },
+          redo: async () => {
+            if (entry.recreatedId) await chartsApi.deleteNode(entry.recreatedId)
+            await invalidateAll()
+          },
+        }
+        pushHistory(entry)
+      }
     },
     onError: (e: Error) => toast.error(e.message),
   })
 
   const createEdgeMutation = useMutation({
-    mutationFn: (body: { sourceNodeId: string; targetNodeId: string; sourceAnchor: AnchorSide; targetAnchor: AnchorSide }) =>
+    mutationFn: (body: { sourceNodeId: string; targetNodeId: string; sourceAnchor: AnchorSide | null; targetAnchor: AnchorSide | null }) =>
       chartsApi.createEdge(projectId, body),
-    onSuccess: async () => {
+    onSuccess: async (res, body) => {
       await invalidateAll()
       toast.success('اتصال ایجاد شد.')
+      /* §۱۰.۸ — Undo ایجاد یال = حذف؛ Redo = ایجاد مجدد همان اتصال */
+      const createdId = res.edge.id
+      pushHistory({
+        label: 'ایجاد اتصال',
+        undo: () => chartsApi.deleteEdge(createdId).then(() => invalidateAll()),
+        redo: () => chartsApi.createEdge(projectId, body).then(() => invalidateAll()),
+      })
     },
     onError: (e: Error) => toast.error(e.message),
   })
 
   const deleteEdgeMutation = useMutation({
     mutationFn: (edgeId: string) => chartsApi.deleteEdge(edgeId),
-    onSuccess: async () => {
+    onMutate: (edgeId: string) => {
+      const e = edges.find((x) => x.id === edgeId)
+      return { edge: e ? { ...e } : null }
+    },
+    onSuccess: async (_res, edgeId, ctx) => {
       setEdgeTarget(null)
       await invalidateAll()
       toast.success('اتصال حذف شد؛ مشاهدات زمان‌سنجی تغییری نکرده‌اند.')
+      const snapshot = (ctx as { edge: ChartEdgeDto | null } | undefined)?.edge
+      if (snapshot) {
+        /* §۱۰.۸ — Undo حذف یال = ایجاد مجدد همان اتصال (مسیر هوشمند) */
+        const entry: HistoryEntry & { recreatedId?: string } = {
+          label: 'حذف اتصال',
+          undo: async () => {
+            const r = await chartsApi.createEdge(projectId, {
+              sourceNodeId: snapshot.sourceNodeId,
+              targetNodeId: snapshot.targetNodeId,
+              sourceAnchor: null,
+              targetAnchor: null,
+            })
+            entry.recreatedId = r.edge.id
+            if (snapshot.lineStyle || snapshot.lineColor) {
+              await chartsApi.updateEdgeAppearance(r.edge.id, { lineStyle: snapshot.lineStyle, lineColor: snapshot.lineColor }).catch(() => undefined)
+            }
+            await invalidateAll()
+          },
+          redo: async () => {
+            if (entry.recreatedId) await chartsApi.deleteEdge(entry.recreatedId)
+            else await chartsApi.deleteEdge(edgeId)
+            await invalidateAll()
+          },
+        }
+        pushHistory(entry)
+      }
+    },
+    onError: (e: Error) => toast.error(e.message),
+  })
+
+  /** v1.5.2 §۱۰.۵ — تغییر ظاهر یال انتخاب‌شده (نوع خط/رنگ) */
+  const edgeAppearanceMutation = useMutation({
+    mutationFn: ({ edgeId, body }: { edgeId: string; body: { lineStyle?: 'SOLID' | 'DASHED' | 'DOTTED' | null; lineColor?: string | null } }) =>
+      chartsApi.updateEdgeAppearance(edgeId, body),
+    onMutate: ({ edgeId }) => {
+      const e = edges.find((x) => x.id === edgeId)
+      return { before: e ? { lineStyle: e.lineStyle, lineColor: e.lineColor } : null }
+    },
+    onSuccess: async (_res, { edgeId, body }, ctx) => {
+      await invalidateAll()
+      const before = (ctx as { before: { lineStyle: 'SOLID' | 'DASHED' | 'DOTTED' | null; lineColor: string | null } | null } | undefined)?.before
+      if (before) {
+        pushHistory({
+          label: 'ظاهر اتصال',
+          undo: () => chartsApi.updateEdgeAppearance(edgeId, before).then(() => invalidateAll()),
+          redo: () => chartsApi.updateEdgeAppearance(edgeId, body).then(() => invalidateAll()),
+        })
+      }
     },
     onError: (e: Error) => toast.error(e.message),
   })
@@ -398,7 +560,16 @@ export default function ChartCanvas({ projectId, chartType }: { projectId: strin
     if (dragging && dragMovedRef.current) {
       const p = positions[dragging.id]
       if (p) {
+        const before = { x: dragging.orig.x, y: dragging.orig.y }
         savePositionMutation.mutate({ nodeId: dragging.id, x: p.x, y: p.y })
+        /* §۱۰.۸ — Undo جابه‌جایی گره = بازگشت به مختصات قبلی */
+        if (before.x !== p.x || before.y !== p.y) {
+          pushHistory({
+            label: 'جابه‌جایی گره',
+            undo: () => chartsApi.updateNode(dragging.id, { positionX: before.x, positionY: before.y }).then(() => invalidateAll()),
+            redo: () => chartsApi.updateNode(dragging.id, { positionX: p.x, positionY: p.y }).then(() => invalidateAll()),
+          })
+        }
         // snapshot چیدمان دستی پس از رهاسازی (§۱۵.۵)
         void saveSnapshot(nodes, { ...positions, [dragging.id]: p }, { width: effCanvas.w, height: effCanvas.h })
       }
@@ -506,11 +677,16 @@ export default function ChartCanvas({ projectId, chartType }: { projectId: strin
     }
     const onUp = () => {
       if (hoverTarget && hoverTarget.nodeId !== connecting.sourceId) {
+        /* v1.5.2 §۱۰.۴ — یال دستی از همان منطق مسیریابی هوشمند یال‌های
+         * خودکار استفاده می‌کند: anchorهای ذخیره‌شده تهی می‌مانند تا
+         * بهترین نقاط اتصال (از میان هر ۴ ضلع هر دو کارت) بر اساس
+         * موقعیت واقعی و بدون عبور از داخل کارت‌ها انتخاب شوند و
+         * پس از جابه‌جایی کارت‌ها مسیر دوباره محاسبه شود. */
         createEdgeMutation.mutate({
           sourceNodeId: connecting.sourceId,
           targetNodeId: hoverTarget.nodeId,
-          sourceAnchor: connecting.sourceAnchor,
-          targetAnchor: hoverTarget.anchor,
+          sourceAnchor: null,
+          targetAnchor: null,
         })
       }
       setConnecting(null)
@@ -634,47 +810,79 @@ export default function ChartCanvas({ projectId, chartType }: { projectId: strin
 
   return (
     <div className="space-y-4">
-      {/* نوار ابزار */}
+      {/* نوار ابزار — v1.5.2 §۱۰.۱: دسته‌بندی بر اساس کاربرد
+          [ایجاد/ویرایش نمودار] │ [بوم] │ [Undo/Redo §۱۰.۸] │ [نمایش: زوم]
+          │ [خروجی PDF با تم متمایز] — چیپ‌های شمارش در انتهای نوار */}
       <div className="flex flex-wrap items-center gap-2">
-        <Button size="sm" onClick={() => setCreateOpen(true)}>
-          <Plus className="size-4" aria-hidden />
-          گره دستی
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => layoutMutation.mutate()}
-          disabled={layoutMutation.isPending}
-        >
-          {layoutMutation.isPending ? <Loader2 className="size-4 animate-spin" aria-hidden /> : null}
-          چیدمان خودکار
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => restoreSnapshotMutation.mutate()}
-          disabled={restoreSnapshotMutation.isPending || !snapshotQ.data}
-          title={snapshotQ.data?.savedAt ? `آخرین چیدمان دستی ذخیره‌شده: ${new Date(snapshotQ.data.savedAt).toLocaleString('fa-IR')}` : 'هنوز چیدمان دستی ذخیره نشده است'}
-        >
-          <History className="size-4" aria-hidden />
-          بازگردانی چیدمان دستی
-        </Button>
-        <Button size="sm" variant="outline" onClick={() => setCanvasOpen(true)}>
-          <Ruler className="size-4" aria-hidden />
-          ابعاد بوم
-        </Button>
-        <Button size="sm" variant="outline" onClick={() => setPdfOpen(true)}>
-          خروجی PDF
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => void qc.invalidateQueries({ queryKey: qk.chart(projectId, chartType) })}
-          aria-label="بازخوانی نمودار از فعالیت‌ها"
-        >
-          <RefreshCw className="size-4" aria-hidden />
-          بازخوانی
-        </Button>
+        {/* ── ایجاد و ویرایش نمودار — نزدیک خود نمودار ── */}
+        <div className="flex items-center gap-1.5 rounded-xl border bg-card p-1" role="group" aria-label="ایجاد و ویرایش نمودار">
+          <Button size="sm" className="btn-brand gap-1.5 border-0" onClick={() => setCreateOpen(true)}>
+            <Plus className="size-4" aria-hidden />
+            گره دستی
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => layoutMutation.mutate()}
+            disabled={layoutMutation.isPending}
+          >
+            {layoutMutation.isPending ? <Loader2 className="size-4 animate-spin" aria-hidden /> : null}
+            چیدمان خودکار
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => restoreSnapshotMutation.mutate()}
+            disabled={restoreSnapshotMutation.isPending || !snapshotQ.data}
+            title={snapshotQ.data?.savedAt ? `آخرین چیدمان دستی ذخیره‌شده: ${new Date(snapshotQ.data.savedAt).toLocaleString('fa-IR')}` : 'هنوز چیدمان دستی ذخیره نشده است'}
+          >
+            <History className="size-4" aria-hidden />
+            بازگردانی چیدمان دستی
+          </Button>
+        </div>
+
+        {/* ── بوم ── */}
+        <div className="flex items-center gap-1.5 rounded-xl border bg-card p-1" role="group" aria-label="ابزار بوم">
+          <Button size="sm" variant="ghost" onClick={() => setCanvasOpen(true)}>
+            <Ruler className="size-4" aria-hidden />
+            ابعاد بوم
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => void qc.invalidateQueries({ queryKey: qk.chart(projectId, chartType) })}
+            aria-label="بازخوانی نمودار از فعالیت‌ها"
+          >
+            <RefreshCw className="size-4" aria-hidden />
+            بازخوانی
+          </Button>
+        </div>
+
+        {/* ── §۱۰.۸ — Undo/Redo ── */}
+        <div className="flex items-center gap-1 rounded-xl border bg-card p-1" role="group" aria-label="واگردانی و ازنو">
+          <Button
+            size="icon"
+            variant="ghost"
+            className="size-8"
+            onClick={() => void undo()}
+            disabled={!canUndo}
+            aria-label="واگردانی (Ctrl+Z)"
+            title={undoLabel ?? 'واگردانی'}
+          >
+            <Undo2 className="size-4" aria-hidden />
+          </Button>
+          <Button
+            size="icon"
+            variant="ghost"
+            className="size-8"
+            onClick={() => void redo()}
+            disabled={!canRedo}
+            aria-label="ازنو (Ctrl+Y)"
+            title={redoLabel ?? 'ازنو'}
+          >
+            <Redo2 className="size-4" aria-hidden />
+          </Button>
+        </div>
 
         {/* کنترل‌های زوم (§۱۵.۳) */}
         <div className="flex items-center gap-1 rounded-xl border bg-card p-1" role="group" aria-label="کنترل زوم">
@@ -695,8 +903,16 @@ export default function ChartCanvas({ projectId, chartType }: { projectId: strin
           </Button>
         </div>
 
-        {/* §۶-۶ — حذف یال انتخاب‌شده از نوار ابزار */}
-        {selectedEdge && (
+        {/* §۶-۶ — حذف یال انتخاب‌شده + §۱۰.۵ ظاهر آن */}
+        {selectedEdge && !selectedEdge.isChain && (
+          <EdgeAppearanceBar
+            edge={selectedEdge}
+            onApply={(body) => edgeAppearanceMutation.mutate({ edgeId: selectedEdge.id, body })}
+            pending={edgeAppearanceMutation.isPending}
+            onDelete={() => setEdgeTarget(selectedEdge)}
+          />
+        )}
+        {selectedEdge && selectedEdge.isChain && (
           <Button
             size="sm"
             variant="destructive"
@@ -708,6 +924,17 @@ export default function ChartCanvas({ projectId, chartType }: { projectId: strin
             حذف اتصال انتخاب‌شده
           </Button>
         )}
+
+        {/* §۱۰.۱ — خروجی PDF: تم متمایز قرمز PDF، همیشه در دسترس بالای صفحه */}
+        <Button
+          size="sm"
+          className="gap-1.5 border border-red/40 bg-red-soft font-bold text-red hover:border-red/60 hover:bg-red-soft/80 hover:text-red focus-visible:ring-red/30"
+          onClick={() => setPdfOpen(true)}
+          title="خروجی PDF نمودار — تک‌صفحه‌ای یا تایل‌دار"
+        >
+          <FileDown className="size-4" aria-hidden />
+          خروجی PDF
+        </Button>
 
         <div className="ms-auto flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
           {isExtendedOpc && (
@@ -774,6 +1001,12 @@ export default function ChartCanvas({ projectId, chartType }: { projectId: strin
             {/* یال‌ها — مسیر orthogonal از anchorها */}
             <svg className="pointer-events-none absolute inset-0" width={effCanvas.w} height={effCanvas.h} aria-hidden>
               <defs>
+                {/* v1.5.2 §۱۰.۵ — پیکان هم‌رنگ یال‌های رنگ‌آمیزی‌شدهٔ دلخواه */}
+                {[...new Set(edges.map((e) => e.lineColor).filter((c): c is string => !!c))].map((c) => (
+                  <marker key={c} id={`arrow-c-${chartType}-${c.replace(/[^a-zA-Z0-9]/g, '')}`} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+                    <path d="M 0 0 L 10 5 L 0 10 z" fill={c} />
+                  </marker>
+                ))}
                 {/* §۶-۳ — پیکان جهت جریان در انتهای مسیر (سمت مقصد)؛
                     اندازه/رنگ به‌اندازهٔ کافی واضح و هم‌رنگ خط */}
                 <marker id={`arrow-${chartType}`} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
@@ -793,6 +1026,12 @@ export default function ChartCanvas({ projectId, chartType }: { projectId: strin
                 const ta = (e.targetAnchor as AnchorSide | null) ?? autoAnchors(sp, tp)[1]
                 const d = orthogonalPath(sp, sa, tp, ta)
                 const isSelected = selectedEdgeId === e.id
+                /* v1.5.2 §۱۰.۵ — ظاهر یال: پیش‌فرض = پیوسته با رنگ استاندارد
+                 * (همانند یال‌های خودکار)؛ کاربر می‌تواند خط‌چین/نقطه‌چین/رنگ
+                 * دلخواه را برای هر یال دستی تنظیم کند (ماندگار در DB). */
+                const style = e.lineStyle ?? 'SOLID'
+                const dash = isSelected ? undefined : style === 'DASHED' ? '6 4' : style === 'DOTTED' ? '1.5 3.5' : undefined
+                const strokeColor = e.lineColor ?? undefined
                 return (
                   <g
                     key={e.id}
@@ -800,18 +1039,24 @@ export default function ChartCanvas({ projectId, chartType }: { projectId: strin
                     onClick={() => setSelectedEdgeId((prev) => (prev === e.id ? null : e.id))}
                     aria-label={`اتصال ${s!.label} به ${t!.label}${isSelected ? ' — انتخاب‌شده' : ''}`}
                   >
-                    <title>{isSelected ? 'اتصال انتخاب‌شده — حذف با دکمهٔ نوار ابزار یا کلید Delete' : 'کلیک: انتخاب اتصال'}</title>
+                    <title>{isSelected ? 'اتصال انتخاب‌شده — حذف با دکمهٔ نوار ابزار یا کلید Delete؛ ظاهر آن از پنل «ظاهر اتصال» قابل تنظیم است' : 'کلیک: انتخاب اتصال'}</title>
                     <path d={d} className="fill-none stroke-transparent" strokeWidth={16} />
                     <path
                       d={d}
                       className={cn(
                         'fill-none transition-colors',
-                        isSelected ? 'stroke-brand' : 'hover:stroke-red',
-                        !isSelected && (e.isChain ? 'stroke-brand/55' : 'stroke-brand-2/70'),
+                        !strokeColor && (isSelected ? 'stroke-brand' : 'hover:stroke-red'),
+                        !strokeColor && !isSelected && (e.isChain ? 'stroke-brand/55' : 'stroke-brand-2/70'),
                       )}
-                      strokeWidth={isSelected ? 3.5 : 2}
-                      strokeDasharray={e.isChain || isSelected ? undefined : '6 4'}
-                      markerEnd={`url(#arrow${isSelected ? '-selected' : ''}-${chartType})`}
+                      stroke={strokeColor ?? undefined}
+                      strokeWidth={isSelected ? 3.5 : style === 'SOLID' ? 2 : 2.25}
+                      strokeLinecap={style === 'DOTTED' ? 'round' : 'butt'}
+                      strokeDasharray={dash}
+                      markerEnd={
+                        !isSelected && strokeColor
+                          ? `url(#arrow-c-${chartType}-${strokeColor.replace(/[^a-zA-Z0-9]/g, '')})`
+                          : `url(#arrow${isSelected ? '-selected' : ''}-${chartType})`
+                      }
                     />
                   </g>
                 )
@@ -838,6 +1083,10 @@ export default function ChartCanvas({ projectId, chartType }: { projectId: strin
             {nodes.map((n) => {
               const p = pos(n)
               const isDragging = dragging?.id === n.id
+              /* §۱۰.۶ — اگر بالای کارت در نمای فعلی جا نیست (نزدیک لبهٔ بالای
+               * بوم)، نوار ابزار با فاصلهٔ امن زیر کارت قرار می‌گیرد —
+               * هرگز روی لنگرهای اتصال نمی‌نشیند. */
+              const toolbarBelow = p.y * zoom + pan.y < 64
               return (
                 <div
                   key={n.id}
@@ -907,8 +1156,14 @@ export default function ChartCanvas({ projectId, chartType }: { projectId: strin
                     </div>
                   </div>
 
-                  {/* کنترل‌ها — با هاور یا فوکوس نمایان */}
-                  <div className="absolute -bottom-2 left-1/2 flex -translate-x-1/2 items-center gap-0.5 rounded-full border bg-background p-0.5 opacity-0 shadow-sm transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
+                  {/* کنترل‌ها — با هاور یا فوکوس نمایان؛ §۱۰.۶ بالای کارت
+                      (۸px فاصله از لبه) تا لنگر پایین اتصال آزاد بماند */}
+                  <div
+                    className={cn(
+                      'absolute left-1/2 z-20 flex -translate-x-1/2 items-center gap-0.5 rounded-full border bg-background p-0.5 opacity-0 shadow-sm transition-opacity group-hover:opacity-100 group-focus-within:opacity-100',
+                      toolbarBelow ? '-bottom-3 translate-y-full' : '-top-3 -translate-y-full'
+                    )}
+                  >
                     <button
                       type="button"
                       className="inline-flex size-6 items-center justify-center rounded-full text-muted-foreground hover:bg-brand-soft hover:text-brand disabled:opacity-30"
@@ -1238,5 +1493,106 @@ function CanvasSizeDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  )
+}
+
+
+// ── §۱۰.۵ — نوار ظاهر یال انتخاب‌شده: نوع خط + رنگ + حذف ──
+const EDGE_COLORS = [
+  { value: null, label: 'رنگ استاندارد' },
+  { value: '#7257ff', label: 'بنفش برند' },
+  { value: '#0f9d8f', label: 'سبزآبی' },
+  { value: '#d97706', label: 'کهربایی' },
+  { value: '#dc2626', label: 'قرمز' },
+  { value: '#475569', label: 'خاکستری' },
+] as const
+
+function EdgeAppearanceBar({
+  edge,
+  onApply,
+  pending,
+  onDelete,
+}: {
+  edge: ChartEdgeDto
+  onApply: (body: { lineStyle?: 'SOLID' | 'DASHED' | 'DOTTED' | null; lineColor?: string | null }) => void
+  pending: boolean
+  onDelete: () => void
+}) {
+  const style = edge.lineStyle ?? 'SOLID'
+  return (
+    <div
+      className="flex flex-wrap items-center gap-1 rounded-xl border border-brand/40 bg-brand-soft/30 p-1"
+      role="group"
+      aria-label="ظاهر اتصال انتخاب‌شده"
+    >
+      <span className="px-1.5 text-[11px] font-bold text-brand">ظاهر اتصال:</span>
+      {([
+        ['SOLID', 'پیوسته'],
+        ['DASHED', 'خط‌چین'],
+        ['DOTTED', 'نقطه‌چین'],
+      ] as const).map(([value, label]) => (
+        <Button
+          key={value}
+          size="sm"
+          variant="ghost"
+          className={cn('h-7 gap-1.5 px-2 text-[11px]', style === value && 'bg-brand-soft font-bold text-brand')}
+          aria-pressed={style === value}
+          disabled={pending}
+          onClick={() => onApply({ lineStyle: value })}
+        >
+          <svg width="26" height="8" aria-hidden className="shrink-0">
+            <line
+              x1="1"
+              y1="4"
+              x2="25"
+              y2="4"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap={value === 'DOTTED' ? 'round' : 'butt'}
+              strokeDasharray={value === 'DASHED' ? '5 3' : value === 'DOTTED' ? '1.5 3.5' : undefined}
+            />
+          </svg>
+          {label}
+        </Button>
+      ))}
+      <span className="mx-1 h-5 w-px bg-border" aria-hidden />
+      {EDGE_COLORS.map((c) => (
+        <button
+          key={c.label}
+          type="button"
+          title={c.label}
+          aria-label={`رنگ یال: ${c.label}`}
+          aria-pressed={(edge.lineColor ?? null) === c.value}
+          disabled={pending}
+          onClick={() => onApply({ lineColor: c.value })}
+          className={cn(
+            'size-5 shrink-0 rounded-full border-2 transition-transform hover:scale-110 focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-50',
+            (edge.lineColor ?? null) === c.value ? 'border-foreground ring-2 ring-brand/50' : 'border-border'
+          )}
+          style={c.value ? { background: c.value } : { background: 'linear-gradient(135deg, var(--brand) 50%, var(--brand-2) 50%)' }}
+        />
+      ))}
+      <Button
+        size="sm"
+        variant="ghost"
+        className="h-7 px-2 text-[11px] text-muted-foreground"
+        disabled={pending}
+        title="بازگشت به ظاهر پیش‌فرض نمودار (پیوسته + رنگ استاندارد)"
+        onClick={() => onApply({ lineStyle: null, lineColor: null })}
+      >
+        پیش‌فرض
+      </Button>
+      <span className="mx-1 h-5 w-px bg-border" aria-hidden />
+      <Button
+        size="sm"
+        variant="destructive"
+        className="h-7 gap-1.5 px-2 text-[11px]"
+        onClick={onDelete}
+        title="حذف اتصال انتخاب‌شده (یا کلید Delete)"
+      >
+        <Trash2 className="size-3.5" aria-hidden />
+        حذف اتصال
+      </Button>
+    </div>
   )
 }

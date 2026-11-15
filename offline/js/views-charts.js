@@ -214,6 +214,65 @@
   /* v1.5.2 §۶-۶ — یال انتخاب‌شده (مثل state ری‌اکت: با ورود به نما و
      تعویض زبانه ریست می‌شود؛ تا حذف/نامعتبرشدن یال معتبر می‌ماند) */
   var selectedEdgeByProject = {};
+
+  /* ═══ v1.5.2 §۱۰.۸ — تاریخچهٔ Undo/Redo بوم (هم‌ارز useChartHistory وب) ═══
+     هر عمل ساختاری با عمل معکوس خود ثبت می‌شود؛ Undo/Redo خودشان وارد
+     History نمی‌شوند؛ تغییر جدید شاخهٔ Redo را پاک می‌کند؛ سقف ۶۰ مرحله. */
+  var chartHistories = {};
+  function histOf(pid) {
+    var k = pid + '|' + (chartTypeByProject[pid] || 'FPC');
+    if (!chartHistories[k]) chartHistories[k] = { entries: [], index: -1 };
+    return chartHistories[k];
+  }
+  function histPush(pid, label, undoFn, redoFn) {
+    var h = histOf(pid);
+    h.entries = h.entries.slice(0, h.index + 1);
+    h.entries.push({ label: label, undo: undoFn, redo: redoFn });
+    if (h.entries.length > 60) h.entries = h.entries.slice(h.entries.length - 60);
+    h.index = h.entries.length - 1;
+  }
+  var histBusy = false;
+  function histUndo(pid) {
+    var h = histOf(pid);
+    if (h.index < 0 || histBusy) return;
+    var e = h.entries[h.index];
+    histBusy = true;
+    try { e.undo(); h.index--; UI.toast('واگردانی شد: ' + e.label); }
+    catch (err) { UI.toastError(err); }
+    histBusy = false;
+    render();
+  }
+  function histRedo(pid) {
+    var h = histOf(pid);
+    if (h.index >= h.entries.length - 1 || histBusy) return;
+    var e = h.entries[h.index + 1];
+    histBusy = true;
+    try { e.redo(); h.index++; UI.toast('ازنو اعمال شد: ' + e.label); }
+    catch (err) { UI.toastError(err); }
+    histBusy = false;
+    render();
+  }
+  /* میانبرهای کیبورد — نصب یک‌باره؛ فقط وقتی نمای نمودار فعال است */
+  var histKeysInstalled = false;
+  function installHistKeys() {
+    if (histKeysInstalled) return;
+    histKeysInstalled = true;
+    document.addEventListener('keydown', function (ev) {
+      if (!(ev.ctrlKey || ev.metaKey)) return;
+      var k = (ev.key || '').toLowerCase();
+      var isUndo = k === 'z' && !ev.shiftKey;
+      var isRedo = k === 'y' || (k === 'z' && ev.shiftKey);
+      if (!isUndo && !isRedo) return;
+      var t = ev.target;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
+      if (document.querySelector('.dialog-backdrop, [data-state="open"]')) return;
+      if (!chartsViewActivePid) return;
+      ev.preventDefault();
+      if (isUndo) histUndo(chartsViewActivePid);
+      else histRedo(chartsViewActivePid);
+    });
+  }
+  var chartsViewActivePid = null;
   var delEdgeListener = null;    /* حذف یال انتخاب‌شده با Delete/Backspace */
 
   function getViewState(key) {
@@ -285,15 +344,9 @@
         return null;
       }
 
-      /* ── سربرگ ── */
-      root.appendChild(UI.stickyHeading(U.h('header', { class: 'flex items-center gap-3' },
-        U.h('span', { class: 'chip-icon' }, U.icon('workflow')),
-        U.h('div', { class: 'flex items-center gap-2 min-w-0' },
-          U.h('h1', { class: 'text-xl font-extrabold', text: 'نمودار فرایند — OPC / FPC' }),
-          UI.helpDot('نمودار فرایند', HELP_CHART)))))
-
-      /* ── زبانهٔ OPC / FPC ── */
-      root.appendChild(UI.tabsBar([
+      /* v1.5.2 §۱۰.۲ — بلوک چسبان واحد: هدر صفحه + نوار زبانه‌های OPC/FPC
+         هنگام اسکرول هم‌اهنگ زیر TopBar ثابت می‌مانند (استثنای آگاهانهٔ این صفحه). */
+      var tabsEl = UI.tabsBar([
         { key: 'OPC', label: 'OPC — عملیات و بازرسی' },
         { key: 'FPC', label: 'FPC — جریان کامل' },
       ], chartType, function (k) {
@@ -301,7 +354,17 @@
         chartTypeByProject[projectId] = k;
         delete selectedEdgeByProject[projectId]; /* §۶-۶ — ریست با تعویض زبانه (معادل key={chartType} وب) */
         render();
-      }));
+      });
+      tabsEl.style.marginTop = '12px';
+      root.appendChild(UI.stickyHeading(U.h('div', { style: { paddingBottom: '12px' } },
+        U.h('header', { class: 'flex items-center gap-3' },
+          U.h('span', { class: 'chip-icon' }, U.icon('workflow')),
+          U.h('div', { class: 'flex items-center gap-2 min-w-0' },
+            U.h('h1', { class: 'text-xl font-extrabold', text: 'نمودار فرایند — OPC / FPC' }),
+            UI.helpDot('نمودار فرایند', HELP_CHART))),
+        tabsEl)));
+      installHistKeys();
+      chartsViewActivePid = projectId;
 
       /* حالت‌های خالی — عیناً هم‌ارز ChartCanvas.tsx */
       if (!(chart.counts.activitiesTotal > 0)) {
@@ -428,12 +491,23 @@
             class: 'btn zoom-reset', type: 'button', 'aria-label': 'بازنشانی زوم به ۱۰۰٪', text: '۱۰۰٪',
             onclick: function () { view.zoom = 1; view.pan.x = 0; view.pan.y = 0; applyTransform(); },
           })),
-        /* §۶-۶ — حذف یال انتخاب‌شده از نوار ابزار */
-        selectedEdge ? U.h('button', {
-          class: 'btn btn-sm btn-destructive', type: 'button',
-          title: 'حذف اتصال انتخاب‌شده (یا کلید Delete)',
-          onclick: function () { confirmDeleteEdge(selectedEdge); },
-        }, U.icon('trash'), 'حذف اتصال انتخاب‌شده') : null,
+        /* §۶-۶ + §۱۰.۵ — یال انتخاب‌شده: نوار ظاهر (فقط دستی) یا حذف (زنجیره) */
+        selectedEdge && !selectedEdge.isChain
+          ? edgeAppearanceBar(selectedEdge)
+          : null,
+        selectedEdge && selectedEdge.isChain
+          ? U.h('button', {
+              class: 'btn btn-sm btn-destructive', type: 'button',
+              title: 'حذف اتصال انتخاب‌شده (یا کلید Delete)',
+              onclick: function () { confirmDeleteEdge(selectedEdge); },
+            }, U.icon('trash'), 'حذف اتصال انتخاب‌شده')
+          : null,
+        /* §۱۰.۱ — خروجی PDF: تم متمایز قرمز، همیشه در دسترس بالای صفحه */
+        U.h('button', {
+          class: 'btn btn-sm btn-pdf', type: 'button',
+          title: 'خروجی PDF نمودار — تک‌صفحه‌ای یا تایل‌دار',
+          onclick: function () { openPdfDialog(); },
+        }, U.icon('printer'), 'خروجی PDF'),
         /* چیپ‌های شمارش/راهنما — انتهای نوار (ms-auto)، هم‌ارز وب */
         U.h('div', { class: 'flex flex-wrap items-center gap-1.5 text-xs text-muted', style: { marginInlineStart: 'auto' } },
           isExt ? U.h('span', { class: 'chip-ext-opc', role: 'status', text: 'OPC توسعه‌یافته — دارای ورودی مواد/انبار' }) : null,
@@ -485,6 +559,17 @@
         marker.appendChild(svgTag('path', { d: 'M 0 0 L 10 5 L 0 10 z', fill: m[1] }));
         defs.appendChild(marker);
       });
+      /* v1.5.2 §۱۰.۵ — پیکان هم‌رنگ یال‌های رنگ‌آمیزی‌شدهٔ دلخواه */
+      var customColors = {};
+      chart.edges.forEach(function (e) { if (e.lineColor) customColors[e.lineColor] = true; });
+      Object.keys(customColors).forEach(function (c) {
+        var marker = svgTag('marker', {
+          id: 't2c-arrow-c-' + String(c).replace(/[^a-zA-Z0-9]/g, ''), viewBox: '0 0 10 10', refX: 9, refY: 5,
+          markerWidth: 8, markerHeight: 8, orient: 'auto-start-reverse',
+        });
+        marker.appendChild(svgTag('path', { d: 'M 0 0 L 10 5 L 0 10 z', fill: c }));
+        defs.appendChild(marker);
+      });
       svg.appendChild(defs);
       canvasWrap.appendChild(svg);
 
@@ -515,17 +600,24 @@
         var s = nodeById[e.sourceNodeId], t = nodeById[e.targetNodeId];
         if (!s || !t) return;
         var isSelected = e.id === selectedEdgeId;
-        /* رنگ‌ها هم‌ارز وب: زنجیره = brand ۵۵٪؛ دستی = brand-2 ۷۰٪؛
-           انتخاب‌شده = brand کامل بدون شفافیت (§۶-۶) */
+        /* v1.5.2 §۱۰.۵ — ظاهر یال: پیش‌فرض = پیوسته با رنگ استاندارد
+           (همانند زنجیره)؛ کاربر می‌تواند خط‌چین/نقطه‌چین/رنگ دلخواه
+           تنظیم کند (ماندگار در DB). رنگ‌ها هم‌ارز وب. */
+        var lineStyle = e.lineStyle || 'SOLID';
+        var customColor = e.lineColor || null;
         var visible = svgTag('path', {
           d: edgeD(e), fill: 'none',
-          stroke: e.isChain || isSelected ? 'var(--brand)' : 'var(--brand-2)',
-          'stroke-width': isSelected ? 3.5 : 2,
-          'marker-end': 'url(#' + (isSelected ? 't2c-arrow-selected' : 't2c-arrow') + ')',
+          stroke: customColor || (e.isChain || isSelected ? 'var(--brand)' : 'var(--brand-2)'),
+          'stroke-width': isSelected ? 3.5 : (lineStyle === 'SOLID' ? 2 : 2.25),
+          'stroke-linecap': lineStyle === 'DOTTED' ? 'round' : 'butt',
+          'marker-end': 'url(#' + (isSelected ? 't2c-arrow-selected' : (customColor ? 't2c-arrow-c-' + String(customColor).replace(/[^a-zA-Z0-9]/g, '') : 't2c-arrow')) + ')',
           class: 'chart-edge-line',
         });
-        if (!isSelected) visible.setAttribute('stroke-opacity', e.isChain ? '0.55' : '0.7');
-        if (!e.isChain && !isSelected) visible.setAttribute('stroke-dasharray', '6 4');
+        if (!isSelected && !customColor) visible.setAttribute('stroke-opacity', e.isChain ? '0.55' : '0.7');
+        if (!isSelected) {
+          if (lineStyle === 'DASHED') visible.setAttribute('stroke-dasharray', '6 4');
+          else if (lineStyle === 'DOTTED') visible.setAttribute('stroke-dasharray', '1.5 3.5');
+        }
         /* مسیر نامرئی پهن برای کلیک راحت — §۶-۶: کلیک = انتخاب (toggle) */
         var overlay = svgTag('path', {
           d: edgeD(e), fill: 'none', stroke: 'transparent', 'stroke-width': 16, 'pointer-events': 'stroke',
@@ -756,13 +848,20 @@
       function onConnectUp() {
         if (connectState && hotAnchor) {
           var targetId = hotAnchor.getAttribute('data-node-id');
-          var targetAnchor = hotAnchor.getAttribute('data-anchor');
           var sourceId = connectState.sourceId;
-          var sourceAnchor = connectState.sourceAnchor;
           endConnection();
           try {
-            DB.createChartEdge(projectId, chartType, sourceId, targetId, { sourceAnchor: sourceAnchor, targetAnchor: targetAnchor });
+            /* v1.5.2 §۱۰.۴ — یال دستی از همان منطق مسیریابی هوشمند یال‌های
+               خودکار استفاده می‌کند: anchor تهی = بهترین نقاط اتصال از میان
+               هر ۴ ضلع هر دو کارت؛ مسیر با جابه‌جایی کارت‌ها بازمحاسبه می‌شود. */
+            var created = DB.createChartEdge(projectId, chartType, sourceId, targetId, { sourceAnchor: null, targetAnchor: null });
             UI.toast('اتصال ایجاد شد.');
+            /* §۱۰.۸ — Undo ایجاد یال = حذف؛ Redo = ایجاد مجدد */
+            histPush(projectId, 'ایجاد اتصال', function () {
+              DB.deleteChartEdge(created.id);
+            }, function () {
+              DB.createChartEdge(projectId, chartType, sourceId, targetId, { sourceAnchor: null, targetAnchor: null });
+            });
           } catch (err) { UI.toastError(err); }
           render();
           return;
@@ -799,7 +898,16 @@
         return b;
       }
       function moveNodeOrder(n, dir) {
-        try { DB.moveChartNodeOrder(projectId, chartType, n.id, dir); render(); }
+        try {
+          DB.moveChartNodeOrder(projectId, chartType, n.id, dir);
+          /* §۱۰.۸ — معکوس جابه‌جایی ترتیب، حرکت مخالف همان گره است */
+          histPush(projectId, 'تغییر ترتیب گره', function () {
+            DB.moveChartNodeOrder(projectId, chartType, n.id, dir === 'up' ? 'down' : 'up');
+          }, function () {
+            DB.moveChartNodeOrder(projectId, chartType, n.id, dir);
+          });
+          render();
+        }
         catch (err) { UI.toastError(err); }
       }
       function confirmDeleteManualNode(n) {
@@ -812,8 +920,34 @@
         }).then(function (ok) {
           if (!ok) return;
           try {
+            var snapNode = { label: n.label, nodeType: n.nodeType, positionX: n.positionX, positionY: n.positionY };
+            var snapEdges = chart.edges
+              .filter(function (e) { return e.sourceNodeId === n.id || e.targetNodeId === n.id; })
+              .map(function (e) { return { sourceNodeId: e.sourceNodeId, targetNodeId: e.targetNodeId, lineStyle: e.lineStyle || null, lineColor: e.lineColor || null }; });
             DB.deleteChartNode(n.id);
             UI.toast('گره دستی حذف شد؛ گره‌های خودکار فعالیت‌ها دست‌نخورده‌اند.');
+            /* §۱۰.۸ — Undo حذف گره = بازسازی با همان مشخصات/موقعیت + یال‌ها */
+            var entry = { label: 'حذف گره «' + n.label + '»', recreatedId: null };
+            entry.undo = function () {
+              var rn = DB.createManualNode(projectId, chartTypeByProject[projectId], snapNode);
+              entry.recreatedId = rn.id;
+              DB.updateChartNode(rn.id, { positionX: snapNode.positionX, positionY: snapNode.positionY });
+              snapEdges.forEach(function (se) {
+                try {
+                  var src = se.sourceNodeId === n.id ? rn.id : se.sourceNodeId;
+                  var tgt = se.targetNodeId === n.id ? rn.id : se.targetNodeId;
+                  var re = DB.createChartEdge(projectId, chartTypeByProject[projectId], src, tgt, { sourceAnchor: null, targetAnchor: null });
+                  if (se.lineStyle || se.lineColor) {
+                    try { DB.updateChartEdgeAppearance(re.id, { lineStyle: se.lineStyle, lineColor: se.lineColor }); } catch (err2) { /* ظاهر اختیاری */ }
+                  }
+                } catch (err2) { /* یال تکراری یا نامعتبر — نادیده */ }
+              });
+            };
+            entry.redo = function () {
+              if (entry.recreatedId) DB.deleteChartNode(entry.recreatedId);
+              else DB.deleteChartNode(n.id);
+            };
+            histPush(projectId, entry.label, entry.undo, entry.redo);
             render();
           } catch (err) { UI.toastError(err); }
         });
@@ -833,8 +967,11 @@
       }
 
       function buildNodeEl(n) {
+        /* §۱۰.۶ — اگر بالای کارت در نمای فعلی جا نیست (نزدیک لبهٔ بالای
+           بوم)، نوار ابزار با فاصلهٔ امن زیر کارت قرار می‌گیرد. */
+        var toolbarBelow = n.positionY * view.zoom + view.pan.y < 64;
         var el = U.h('div', {
-          class: 'chart-node',
+          class: 'chart-node' + (toolbarBelow ? ' ctrl-below' : ''),
           dir: 'rtl', role: 'button', tabindex: '0',
           'aria-label': 'گره ' + U.formatInt(n.sortOrder + 1) + ': ' + n.label,
           style: { left: n.positionX + 'px', top: n.positionY + 'px', touchAction: 'none' },
@@ -912,6 +1049,15 @@
               el.style.left = x + 'px';
               el.style.top = y + 'px';
               redrawEdges();
+              /* §۱۰.۸ — Undo جابه‌جایی گره = بازگشت به مختصات قبلی */
+              if (origX !== x || origY !== y) {
+                var back = {}; back[n.id] = { x: origX, y: origY };
+                histPush(projectId, 'جابه‌جایی گره', function () {
+                  DB.saveChartLayout(projectId, chartType, back);
+                }, function () {
+                  DB.saveChartLayout(projectId, chartType, pos);
+                });
+              }
             } catch (err) {
               UI.toastError(err);
               restore();
@@ -939,6 +1085,81 @@
       }
     }
 
+    /* §۱۰.۸ — آیکون‌های Undo/Redo (lucide undo-2/redo-2) */
+    var SVG_UNDO = '<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11"/>';
+    var SVG_REDO = '<path d="m15 14 5-5-5-5"/><path d="M20 9H9.5A5.5 5.5 0 0 0 4 14.5A5.5 5.5 0 0 0 9.5 20H13"/>';
+
+    /* §۱۰.۵ — نوار ظاهر یال انتخاب‌شده: نوع خط + رنگ + پیش‌فرض + حذف (هم‌ارز وب) */
+    var EDGE_COLORS = [
+      { value: null, label: 'رنگ استاندارد' },
+      { value: '#7257ff', label: 'بنفش برند' },
+      { value: '#0f9d8f', label: 'سبزآبی' },
+      { value: '#d97706', label: 'کهربایی' },
+      { value: '#dc2626', label: 'قرمز' },
+      { value: '#475569', label: 'خاکستری' },
+    ];
+    function edgeAppearanceBar(edge) {
+      var style = edge.lineStyle || 'SOLID';
+      function apply(patch) {
+        try {
+          var before = { lineStyle: edge.lineStyle || null, lineColor: edge.lineColor || null };
+          DB.updateChartEdgeAppearance(edge.id, patch);
+          histPush(projectId, 'ظاهر اتصال', function () {
+            DB.updateChartEdgeAppearance(edge.id, before);
+          }, function () {
+            DB.updateChartEdgeAppearance(edge.id, patch);
+          });
+          render();
+        } catch (err) { UI.toastError(err); }
+      }
+      var bar = U.h('div', { class: 'edge-appearance-bar', role: 'group', 'aria-label': 'ظاهر اتصال انتخاب‌شده' },
+        U.h('span', { class: 'text-[11px] font-bold', style: { color: 'var(--brand)', paddingInline: '6px' }, text: 'ظاهر اتصال:' }));
+      [['SOLID', 'پیوسته'], ['DASHED', 'خط‌چین'], ['DOTTED', 'نقطه‌چین']].forEach(function (st) {
+        var dash = st[0] === 'DASHED' ? '5 3' : (st[0] === 'DOTTED' ? '1.5 3.5' : '');
+        bar.appendChild(U.h('button', {
+          class: 'btn btn-sm btn-ghost ea-style-btn' + (style === st[0] ? ' active' : ''), type: 'button',
+          'aria-pressed': String(style === st[0]), title: st[1],
+          onclick: function () { apply({ lineStyle: st[0] }); },
+        }, (function () {
+          var sv = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+          sv.setAttribute('width', '26'); sv.setAttribute('height', '8'); sv.setAttribute('aria-hidden', 'true');
+          var ln = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+          ln.setAttribute('x1', '1'); ln.setAttribute('y1', '4'); ln.setAttribute('x2', '25'); ln.setAttribute('y2', '4');
+          ln.setAttribute('stroke', 'currentColor'); ln.setAttribute('stroke-width', '2');
+          if (st[0] === 'DOTTED') ln.setAttribute('stroke-linecap', 'round');
+          if (dash) ln.setAttribute('stroke-dasharray', dash);
+          sv.appendChild(ln);
+          return sv;
+        })(), st[1]));
+      });
+      bar.appendChild(U.h('span', { class: 'ea-sep', 'aria-hidden': 'true' }));
+      EDGE_COLORS.forEach(function (c) {
+        var active = (edge.lineColor || null) === c.value;
+        var b = U.h('button', {
+          type: 'button', title: 'رنگ یال: ' + c.label, 'aria-label': 'رنگ یال: ' + c.label,
+          'aria-pressed': String(active),
+          class: 'ea-color-btn' + (active ? ' active' : ''),
+        });
+        b.style.background = c.value
+          ? c.value
+          : 'linear-gradient(135deg, var(--brand) 50%, var(--brand-2) 50%)';
+        b.addEventListener('click', function () { apply({ lineColor: c.value }); });
+        bar.appendChild(b);
+      });
+      bar.appendChild(U.h('button', {
+        class: 'btn btn-sm btn-ghost text-[11px]', type: 'button',
+        title: 'بازگشت به ظاهر پیش‌فرض نمودار (پیوسته + رنگ استاندارد)',
+        onclick: function () { apply({ lineStyle: null, lineColor: null }); },
+      }, 'پیش‌فرض'));
+      bar.appendChild(U.h('span', { class: 'ea-sep', 'aria-hidden': 'true' }));
+      bar.appendChild(U.h('button', {
+        class: 'btn btn-sm btn-destructive', type: 'button',
+        title: 'حذف اتصال انتخاب‌شده (یا کلید Delete)',
+        onclick: function () { confirmDeleteEdge(selectedEdge || edge); },
+      }, U.icon('trash'), 'حذف اتصال'));
+      return bar;
+    }
+
     /* §۶-۶ — تأیید حذف یال (دکمهٔ نوار ابزار یا کلید Delete) — متن‌ها هم‌ارز وب */
     function confirmDeleteEdge(edge) {
       UI.confirmDialog({
@@ -950,9 +1171,24 @@
       }).then(function (ok) {
         if (!ok) return;
         try {
+          var snap = { sourceNodeId: edge.sourceNodeId, targetNodeId: edge.targetNodeId, lineStyle: edge.lineStyle || null, lineColor: edge.lineColor || null };
           DB.deleteChartEdge(edge.id);
           delete selectedEdgeByProject[projectId];
           UI.toast('اتصال حذف شد؛ مشاهدات زمان‌سنجی تغییری نکرده‌اند.');
+          /* §۱۰.۸ — Undo حذف یال = ایجاد مجدد همان اتصال (مسیر هوشمند + ظاهر) */
+          var entry = { label: 'حذف اتصال', recreatedId: null };
+          entry.undo = function () {
+            var re = DB.createChartEdge(projectId, chartTypeByProject[projectId], snap.sourceNodeId, snap.targetNodeId, { sourceAnchor: null, targetAnchor: null });
+            entry.recreatedId = re.id;
+            if (snap.lineStyle || snap.lineColor) {
+              try { DB.updateChartEdgeAppearance(re.id, { lineStyle: snap.lineStyle, lineColor: snap.lineColor }); } catch (err) { /* ظاهر اختیاری */ }
+            }
+          };
+          entry.redo = function () {
+            if (entry.recreatedId) DB.deleteChartEdge(entry.recreatedId);
+            else DB.deleteChartEdge(edge.id);
+          };
+          histPush(projectId, entry.label, entry.undo, entry.redo);
           render();
         } catch (err) { UI.toastError(err); }
       });
@@ -1024,11 +1260,24 @@
                 }
                 try {
                   if (existing) {
+                    var before = { label: existing.label, nodeType: existing.nodeType };
                     DB.updateChartNode(existing.id, { label: trimmed, nodeType: nodeType });
                     UI.toast('گره به‌روزرسانی شد.');
+                    /* §۱۰.۸ — Undo ویرایش گره = بازگشت مقادیر قبلی */
+                    histPush(projectId, 'ویرایش گره', function () {
+                      DB.updateChartNode(existing.id, before);
+                    }, function () {
+                      DB.updateChartNode(existing.id, { label: trimmed, nodeType: nodeType });
+                    });
                   } else {
-                    DB.createManualNode(projectId, chartType, { label: trimmed, nodeType: nodeType });
+                    var created = DB.createManualNode(projectId, chartType, { label: trimmed, nodeType: nodeType });
                     UI.toast('گره دستی به انتهای توالی اضافه شد.');
+                    /* §۱۰.۸ — Undo افزودن گره = حذف آن */
+                    histPush(projectId, 'افزودن گره «' + trimmed + '»', function () {
+                      DB.deleteChartNode(created.id);
+                    }, function () {
+                      DB.createManualNode(projectId, chartTypeByProject[projectId], { label: trimmed, nodeType: nodeType });
+                    });
                   }
                   close();
                   render();
