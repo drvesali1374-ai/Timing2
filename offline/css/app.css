@@ -1355,6 +1355,17 @@ code.inline { background: var(--muted); padding: 3px 9px; border-radius: 6px; fo
     break-after: avoid;
     page-break-after: avoid;
   }
+  /* v1.5.2 §۱۶ — سرپرست جدول‌های بلند با ابتدای جدول می‌ماند */
+  .print-report .print-keep-with-next {
+    break-after: avoid;
+    page-break-after: avoid;
+  }
+  /* §۱۶ — widows/orphans بخش‌های متنی: حداقل ۲ سطر در هر طرف شکست */
+  .print-report p,
+  .print-report li {
+    orphans: 2;
+    widows: 2;
+  }
   /* همهٔ جدول‌های گزارش در چاپ وسط‌چین؛ سلول‌های متن بلند
      (.pr-note) مثل عنصر/عنوان/دلیل، راست‌چین RTL می‌مانند. */
   .print-report table { text-align: center; }

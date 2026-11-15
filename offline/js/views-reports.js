@@ -441,9 +441,23 @@
               r && r.assessment ? (r.assessment.consistencyGrade || '—') : '—',
               r && r.assessment ? r.assessment.totalFactor : '—']);
           });
-          an.allowances.categories.forEach(function (c) {
-            if (isNull(c.effectiveValue)) return;
-            aRows.push([an.activity.name, c.name, ALLOWANCE_SOURCE_LABELS[c.source] || c.source, c.effectiveValue, c.isActive ? 'بله' : 'خیر']);
+          /* v1.5.2 §۱۵ — ردیف‌های الونس مؤثر از resolver سلسله‌مراتتی؛
+             «نوع» = نوع مقدار الونس (درصدی/زمان ثابت) — اطلاعات معتبر */
+          an.allowances.rows.forEach(function (r) {
+            if (r.status === 'EXCLUDED') return;
+            /* مقدار عددی خام (مثل نسخهٔ وب): درصد ×۱۰۰؛ زمان ثانیه */
+            var val = r.valueType === 'FIXED_TIME'
+              ? (isNull(r.timeValueSeconds) ? '—' : num(r.timeValueSeconds))
+              : (isNull(r.percentValue) ? '—' : num(r.percentValue * 100));
+            aRows.push([
+              an.activity.name,
+              r.title,
+              DB.CONST.ALLOWANCE_VALUE_TYPE_LABELS[r.valueType] || r.valueType || '—',
+              val,
+              r.sourceScopeLabel || DB.CONST.ALLOWANCE_SCOPE_LABELS[r.sourceScopeType] || '—',
+              ALLOWANCE_STATUS_LABELS[r.status] || r.status,
+              r.applicationBasis ? (DB.CONST.ALLOWANCE_BASIS_LABELS[r.applicationBasis] || r.applicationBasis) : '—',
+            ]);
           });
         });
         sheets.push({
@@ -457,8 +471,8 @@
           rows: wRows,
         });
         sheets.push({
-          name: 'دسته‌های مجاز',
-          headers: ['فعالیت', 'دسته', 'منبع', 'مقدار', 'فعال'],
+          name: 'الونس‌های مؤثر',
+          headers: ['فعالیت', 'عنوان الونس', 'نوع', 'مقدار مؤثر', 'مبدأ', 'وضعیت', 'مبنا'],
           rows: aRows,
         });
       } else if (flt.type === 'operators') {
@@ -684,7 +698,9 @@
          §۷ (v1.5.2): ستون «نوع» حذف شد — پارامتر elementType از
          مدل داده در v1.5.0 برداشته شده و سلول داده‌ای نداشت؛ تعداد
          سرستون‌ها اکنون دقیقاً برابر تعداد سلول‌های هر ردیف است. */
-      sec.appendChild(U.h('p', { class: 'pr-meta font-bold mt-2 mb-1', text: 'عناصر کاری:' }));
+      /* §۱۶ — سرپرست جدول بلند با ابتدای جدول می‌ماند؛ خود جدول در
+         مرز ردیف‌ها بین صفحات تقسیم و سرستون تکرار می‌شود (thead) */
+      sec.appendChild(U.h('p', { class: 'pr-meta font-bold mt-2 mb-1 print-keep-with-next', text: 'عناصر کاری:' }));
       sec.appendChild(U.h('div', { class: 'overflow-x-auto' }, prTable(
         ['عنصر', 'n', 'میانگین', 'SD', 'CV٪', 'OT', 'وستینگهاوس (S/E/C/Cons)', 'R', 'NT', 'ST'],
         an.elements.map(function (el) {
@@ -729,7 +745,7 @@
       /* مشاهدات مشکوک و خارج‌شده */
       var suspects = an.suspects.filter(function (s) { return !flt.operator || s.operatorId === flt.operator; });
       if (suspects.length) {
-        sec.appendChild(U.h('p', { class: 'pr-meta font-bold mt-2 mb-1', text: 'مشاهدات مشکوک و خارج‌شده:' }));
+        sec.appendChild(U.h('p', { class: 'pr-meta font-bold mt-2 mb-1 print-keep-with-next', text: 'مشاهدات مشکوک و خارج‌شده:' }));
         sec.appendChild(U.h('div', { class: 'overflow-x-auto' }, prTable(
           ['عنصر', 'چرخه', 'اپراتور', 'مقدار (ثانیه)', 'وضعیت', 'امتیاز Z / قاعده', 'دلیل خروج'],
           suspects.map(function (s) {

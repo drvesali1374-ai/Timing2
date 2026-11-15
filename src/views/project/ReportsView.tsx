@@ -394,9 +394,11 @@ function ReportPaper({
             )}
           </div>
 
-          {/* جدول عناصر + وستینگهاوس */}
-          <div className="print-break-avoid space-y-1">
-            <p className="text-xs font-bold">عناصر کاری — آمار، وستینگهاوس و زمان‌ها (ثانیه)</p>
+          {/* جدول عناصر + وستینگهاوس — §۱۶ استثنا: جدول بلند در مرز ردیف‌ها
+              بین صفحات تقسیم و سرستون در صفحات بعد تکرار می‌شود (thead)
+              تا صفحهٔ خالی یا جدول بریده ناقص تولید نشود */}
+          <div className="space-y-1">
+            <p className="print-keep-with-next text-xs font-bold">عناصر کاری — آمار، وستینگهاوس و زمان‌ها (ثانیه)</p>
             <div className="overflow-x-auto">
               <table className="w-full min-w-[760px] text-[11px]">
                 <thead>
@@ -491,10 +493,10 @@ function ReportPaper({
             )}
           </p>
 
-          {/* داده‌های مشکوک و خارج‌شده */}
+          {/* داده‌های مشکوک و خارج‌شده — §۱۶ استثنا: بلندپذیر در مرز ردیف‌ها */}
           {sec.suspects.length > 0 && (
-            <div className="print-break-avoid space-y-1">
-              <p className="text-xs font-bold">مشاهدات مشکوک و خارج‌شده از محاسبات (دادهٔ خام حفظ می‌شود)</p>
+            <div className="space-y-1">
+              <p className="print-keep-with-next text-xs font-bold">مشاهدات مشکوک و خارج‌شده از محاسبات (دادهٔ خام حفظ می‌شود)</p>
               <table className="w-full text-[11px]">
                 <thead>
                   <tr className="border-b border-slate-300 text-right">
