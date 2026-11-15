@@ -36,7 +36,7 @@ import {
   Timer,
   Users,
 } from 'lucide-react'
-import { Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, XAxis, YAxis } from 'recharts'
+import { Bar, BarChart, CartesianGrid, Cell, LabelList, Pie, PieChart, XAxis, YAxis } from 'recharts'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -306,7 +306,21 @@ function ActivitiesWidget({ data }: { data: ProjectDashboardDto }) {
               />
               <YAxis tick={{ fontSize: 10 }} width={48} label={<SecondsUnitLabel />} />
               <ChartTooltip content={<ChartTooltipContent />} />
-              <Bar dataKey="st" fill="var(--brand)" radius={[6, 6, 0, 0]} maxBarSize={48} />
+              {/* v1.5.2 §۱۱ — ضخامت میله‌ها مقیاس ثابت و کنترل‌شده (سقف ۳۲px)؛
+                  با کم شدن تعداد فعالیت‌ها میله‌ها بزرگ نمی‌شوند و فاصله‌ها
+                  یکنواخت می‌مانند؛ فضای خالی حفظ می‌شود */}
+              <Bar dataKey="st" fill="var(--brand)" radius={[6, 6, 0, 0]} maxBarSize={32}>
+                {/* مقدار روی میله — فقط با تعداد کم برای پرهیز از هم‌پوشانی (هم‌ارز آفلاین) */}
+                {chartData.length <= 8 && (
+                  <LabelList
+                    dataKey="st"
+                    position="top"
+                    fontSize={9.5}
+                    fill="var(--foreground)"
+                    formatter={(v: number) => formatTimeValue(v, prefs, 1)}
+                  />
+                )}
+              </Bar>
             </BarChart>
           </ChartContainer>
         </div>

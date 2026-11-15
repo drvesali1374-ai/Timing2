@@ -185,8 +185,10 @@
     var maxRaw = Math.max.apply(null, acts.map(function (a) { return a.st; }));
     var maxV = maxRaw * 1.12 || 1;
     var innerW = W - padL - padR, innerH = H - padT - padB;
+    /* v1.5.2 §۱۱ — ضخامت میله‌ها مقیاس ثابت و کنترل‌شده (سقف ۳۲px)؛
+       با کم شدن تعداد فعالیت‌ها میله‌ها بزرگ نمی‌شوند؛ فاصله یکنواخت */
     var slot = innerW / acts.length;
-    var barW = Math.min(48, slot * 0.6);
+    var barW = Math.min(32, slot * 0.6);
 
     /* خطوط راهنما + تیک‌های محور عمودی */
     for (var g = 0; g <= 2; g++) {

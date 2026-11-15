@@ -756,7 +756,9 @@ tr.row-excluded > td { background: color-mix(in srgb, var(--red-soft) 35%, trans
 .chart-svg { position: absolute; inset: 0; z-index: 1; pointer-events: none; overflow: visible; }
 
 /* ── چارت‌های آماری ── */
-.stat-chart { width: 100%; }
+.stat-chart { width: 100%; max-width: 560px; margin-inline: auto; display: block; }
+/* v1.5.2 §۱۱ — عدم بزرگ‌نمایی viewBox در کارت‌های پهن: فونت/میله در اندازهٔ
+   طراحی می‌مانند و فقط در نمایشگر کوچک جمع می‌شوند (فضای خالی حفظ می‌شود) */
 .stat-chart text { font-family: 'Vazirmatn', system-ui, sans-serif; }
 .donut-center { dominant-baseline: central; text-anchor: middle; }
 
