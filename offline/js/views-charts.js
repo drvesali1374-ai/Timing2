@@ -1,16 +1,21 @@
 /* ═══════════════════════════════════════════════════════════
    views-charts.js — مرحلهٔ «نمودار فرایند — OPC / FPC»
-   پورت وفادار از ChartsView / ChartCanvas نسخهٔ وب (جلسه ۲ §۱۵):
-   • زوم/پن (§۱۵.۳): بزرگ/کوچک‌نمایی + درصد زوم + «جا دادن» + «۱۰۰٪»؛
-     Ctrl+چرخ ماوس = زوم حول نشانگر، درگ زمینه = جابه‌جایی؛
-     مختصات گره‌ها واقعی می‌ماند (دلتای درگ تقسیم بر زوم).
+   پورت وفادار از ChartsView / ChartCanvas نسخهٔ وب (جلسه ۲ §۱۵ + v1.5.2 Part-3 §۶):
+   • زوم/پن (§۱۵.۳ + §۶-۴): چرخ ماوس همیشه زوم حول نشانگر است؛
+     درگ زمینه = جابه‌جایی؛ مختصات گره‌ها واقعی می‌ماند (دلتای درگ تقسیم بر زوم).
    • چهار لنگر در هر گره (§۱۵.۴): اتصال با کشیدن از لنگر گردِ گره تا
-     لنگر گرهٔ دیگر؛ مسیر یال‌ها orthogonal/elbow با stub ۲۰px
+     لنگر گرهٔ دیگر؛ مسیر یال‌ها orthogonal/elbow با stub ۲۲px
      (پورت دقیق anchorPoint / autoAnchors / orthogonalPath از ChartCanvas.tsx).
+   • §۶-۱/۶-۲: بهترین جفت anchor از میان همهٔ ۱۶ ترکیب با جریمهٔ سنگین
+     برای عبور از داخل گره‌ها — نه فقط زوج‌های هم‌جهت.
+   • §۶-۳: پیکان جهت جریان درشت‌تر (۸px؛ انتخاب‌شده ۹px) هم‌رنگ خط.
+   • §۶-۶: کلیک روی یال = انتخاب (toggle)؛ حذف با دکمهٔ نوار ابزار یا
+     کلید Delete/Backspace با تأییدیه — عیناً هم‌ارز نسخهٔ وب.
    • snapshot چیدمان دستی (§۱۵.۵): پیش از «چیدمان خودکار» ذخیره و با
      «بازگردانی چیدمان دستی» قابل بازیابی است.
    • ابعاد بوم دلخواه با preset (§۱۵.۶) — مستقل از زوم و کاغذ PDF.
-   • خروجی PDF تک‌صفحه‌ای/تایل‌دار (§۱۵.۷) با نشانه‌های برش و شمارهٔ صفحه.
+   • خروجی PDF تک‌صفحه‌ای/تایل‌دار (§۱۵.۷ + §۶-۵ برش به محدودهٔ واقعی
+     محتوا) با نشانه‌های برش و شمارهٔ صفحه.
    • MATERIAL_INPUT + «OPC توسعه‌یافته» (§۱۵.۱/۱۵.۲).
    قابلیت‌های قبلی همه حفظ شده‌اند: زبانهٔ OPC/FPC، درگ گره + ذخیرهٔ خودکار،
    ترتیب بالا/پایین، دیالوگ CRUD گره دستی، تأیید حذف یال، چیدمان خودکار،
@@ -81,10 +86,10 @@
   }
 
   var HELP_CHART = {
-    what: 'نمودار فرایند، توالی رویدادهای تولید را نشان می‌دهد. OPC (نمودار فرایند عملیات) به‌طور کلاسیک فقط عملیات و بازرسی را دارد و FPC (نمودار فرایند جریان) هر پنج نوع رویداد: عملیات، بازرسی، حمل‌ونقل، تأخیر و انبارش. افزودن «ورودی مواد/قطعات» یا «انبارش» به OPC، حالت نمودار را به «OPC توسعه‌یافته» تغییر می‌دهد.',
-    input: 'گره‌های اصلی خودکار از فعالیت‌های «ساختار تولید» ساخته می‌شوند و برای رویدادهای فاقد زمان‌سنجی «گره دستی» بسازید. برای اتصال، از یکی از چهار لنگر گردِ گره بکشید و روی لنگر گرهٔ مقصد رها کنید. با درگِ زمینه بوم را جابه‌جا کنید و با Ctrl+چرخ ماوس زوم کنید؛ ابعاد بوم و خروجی PDF مستقل از زوم نمایش‌اند.',
-    example: 'مسیر یک قطعه: انبارش اولیه ▽ ← حمل به ایستگاه مونتاژ ⇨ ← عملیات مونتاژ ○ ← بازرسی کیفیت □ ← تأخیر در انتظار تأیید D.',
-    note: 'حذف یا تغییر نمودار هیچ دادهٔ زمان‌سنجی را حذف نمی‌کند. جابه‌جایی گره‌ها با کشیدن به‌صورت خودکار ذخیره می‌شود؛ پیش از «چیدمان خودکار»، چیدمان دستی فعلی به‌عنوان آخرین چیدمان ذخیره می‌شود و با «بازگردانی چیدمان دستی» قابل بازیابی است.',
+    what: 'نمودار فرایند، توالی رویدادهای تولید را نشان می‌دهد. OPC (نمودار فرایند عملیات) در تعریف کلاسیک فقط عملیات ○ و بازرسی □ را نمایش می‌دهد؛ FPC (نمودار فرایند جریان) هر پنج نوع رویداد استاندارد: عملیات ○، بازرسی □، حمل‌ونقل ⇨، تأخیر D و انبارش ▽.',
+    input: 'گره‌های اصلی به‌صورت خودکار از فعالیت‌های تعریف‌شده در «ساختار تولید» ساخته می‌شوند و با تغییر آن‌ها به‌روز می‌مانند. برای رویدادهای فاقد فعالیت زمان‌سنجی، «گره دستی» بسازید. ورودی مواد اولیه، قطعات و نیم‌ساخته‌ها به‌صورت گره مستقل «ورودی مواد ⬡» تعریف می‌شوند و با خط تغذیه به مرحلهٔ موردنظر وصل می‌شوند. در OPC می‌توانید «انبار ▽» را نیز به‌صورت اختیاری بیفزایید — در این صورت حالت نمودار به «OPC توسعه‌یافته» تغییر می‌کند تا با تعریف کلاسیک اشتباه نشود.',
+    example: 'مسیر یک قطعه: ورودی مواد ⬡ ← حمل به ایستگاه مونتاژ ⇨ ← عملیات مونتاژ ○ ← بازرسی کیفیت □ ← تأخیر در انتظار تأیید D.',
+    note: 'زوم و جابه‌جایی بوم، مختصات ذخیره‌شدهٔ گره‌ها را تغییر نمی‌دهد. چیدمان دستی قبل از «چیدمان خودکار» ذخیره می‌شود و با «بازگردانی چیدمان دستی» قابل بازیابی است. حذف یا تغییر نمودار هیچ دادهٔ زمان‌سنجی را حذف نمی‌کند.',
   };
 
   /* ── آیکون‌های SVG داخلی (در مجموعهٔ utils.js نیستند) ── */
@@ -118,42 +123,98 @@
     if (a === 'left') return { x: p.x, y: p.y + hh / 2 };
     return { x: p.x + NW, y: p.y + hh / 2 };
   }
-  /* انتخاب خودکار anchor بر اساس جهت نسبی دو گره (یال‌های زنجیره/بدون anchor) */
-  function autoAnchors(s, t, hs, ht) {
-    var sc = { x: s.x + NW / 2, y: s.y + (hs || NH) / 2 };
-    var tc = { x: t.x + NW / 2, y: t.y + (ht || NH) / 2 };
-    var dx = tc.x - sc.x, dy = tc.y - sc.y;
-    if (Math.abs(dy) >= Math.abs(dx)) return dy >= 0 ? ['bottom', 'top'] : ['top', 'bottom'];
-    return dx >= 0 ? ['right', 'left'] : ['left', 'right'];
+  /* ═══ v1.5.2 Part-3 §۶-۱/§۶-۲ — مسیریابی elbow پیشرفته (پورت ChartCanvas.tsx) ═══
+     بهترین جفت anchor از میان «همهٔ ۱۶ ترکیب» انتخاب می‌شود — حتی
+     ترکیب‌های متقاطع مثل left-top یا right-bottom. معیار: طول مسیر +
+     جریمهٔ سنگین برای عبور از داخل گره‌های مبدأ/مقصد. */
+  var ALL_SIDES = ['top', 'bottom', 'left', 'right'];
+
+  /* تقاطع پاره‌خط با مستطیل (برای جریمهٔ عبور از داخل گره) — نمونه‌گیری چندنقطه‌ای ارزان */
+  function segmentHitsRect(a, b, r) {
+    var steps = 12;
+    for (var i = 0; i <= steps; i++) {
+      var k = i / steps;
+      var x = a.x + (b.x - a.x) * k, y = a.y + (b.y - a.y) * k;
+      if (x > r.x + 1 && x < r.x + r.w - 1 && y > r.y + 1 && y < r.y + r.h - 1) return true;
+    }
+    return false;
   }
-  /* مسیر elbow با stub ۲۰px و ۱-۲ پیچ — بدون عبور از داخل گره */
-  function orthogonalPath(s, sa, t, ta, hs, ht) {
-    var sA = anchorPoint(s, sa, hs);
-    var tA = anchorPoint(t, ta, ht);
-    var stub = 20;
+
+  /* نقاط مسیر elbow از anchor مبدأ به anchor مقصد — stub ۲۲px (§۶-۲) */
+  function elbowPoints(s, sa, t, ta, hs, ht) {
+    var sA = anchorPoint(s, sa, hs), tA = anchorPoint(t, ta, ht);
+    var stub = 22;
     var sOut = { x: sA.x + ANCHOR_NORMAL[sa].x * stub, y: sA.y + ANCHOR_NORMAL[sa].y * stub };
-    var tIn = { x: tA.x - ANCHOR_NORMAL[ta].x * stub, y: tA.y - ANCHOR_NORMAL[ta].y * stub };
+    /* §۶-۳ — نقطهٔ ورود به مقصد باید «بیرون» گره باشد (tA + نرمال×stub)
+       تا آخرین قطعه (tIn→tA) به سمت داخل گره و پیکان marker-end رو به
+       مقصد باشد. فرمول قبلی (tA − نرمال×stub) نقطه را داخل گره می‌گذاشت؛
+       قطعهٔ آخر معکوس می‌شد و پیکان رو به مبدأ/زیر خط پنهان می‌ماند. */
+    var tIn = { x: tA.x + ANCHOR_NORMAL[ta].x * stub, y: tA.y + ANCHOR_NORMAL[ta].y * stub };
     var pts = [sA, sOut];
-    var verticalSource = sa === 'bottom' || sa === 'top';
+    var vSrc = sa === 'bottom' || sa === 'top', vDst = ta === 'bottom' || ta === 'top';
     if (Math.abs(sOut.x - tIn.x) > 1 && Math.abs(sOut.y - tIn.y) > 1) {
-      if (verticalSource) {
+      if (vSrc && vDst) {
         var midY = (sOut.y + tIn.y) / 2;
         pts.push({ x: sOut.x, y: midY }, { x: tIn.x, y: midY });
-      } else {
+      } else if (!vSrc && !vDst) {
         var midX = (sOut.x + tIn.x) / 2;
         pts.push({ x: midX, y: sOut.y }, { x: midX, y: tIn.y });
+      } else if (vSrc && !vDst) {
+        /* مبدأ عمودی → مقصد افقی: خم در سطح ورودی افقی مقصد */
+        pts.push({ x: sOut.x, y: tIn.y });
+      } else {
+        /* مبدأ افقی → مقصد عمودی: خم در سطح خروجی افقی مبدأ */
+        pts.push({ x: tIn.x, y: sOut.y });
       }
     }
     pts.push(tIn, tA);
-    return pts.map(function (p, i) { return (i === 0 ? 'M ' : 'L ') + Math.round(p.x) + ' ' + Math.round(p.y); }).join(' ');
+    return pts;
+  }
+
+  /* امتیاز یک زوج anchor: طول مسیر + جریمهٔ عبور از داخل گره‌ها (§۶-۱) */
+  function anchorPairScore(s, sa, t, ta, hs, ht) {
+    var pts = elbowPoints(s, sa, t, ta, hs, ht);
+    var len = 0, i;
+    for (i = 1; i < pts.length; i++) len += Math.abs(pts[i].x - pts[i - 1].x) + Math.abs(pts[i].y - pts[i - 1].y);
+    var srcRect = { x: s.x, y: s.y, w: NW, h: hs || NH };
+    var dstRect = { x: t.x, y: t.y, w: NW, h: ht || NH };
+    var penalty = 0;
+    for (i = 1; i < pts.length; i++) {
+      if (segmentHitsRect(pts[i - 1], pts[i], srcRect)) penalty += 400;
+      if (segmentHitsRect(pts[i - 1], pts[i], dstRect)) penalty += 400;
+    }
+    return len + penalty;
+  }
+
+  /* بهترین جفت anchor از میان همهٔ ۱۶ ترکیب (§۶-۱) */
+  function autoAnchors(s, t, hs, ht) {
+    var best = ['bottom', 'top'], bestScore = Infinity;
+    for (var i = 0; i < ALL_SIDES.length; i++) {
+      for (var j = 0; j < ALL_SIDES.length; j++) {
+        if (ALL_SIDES[i] === ALL_SIDES[j]) continue;
+        var score = anchorPairScore(s, ALL_SIDES[i], t, ALL_SIDES[j], hs, ht);
+        if (score < bestScore) { bestScore = score; best = [ALL_SIDES[i], ALL_SIDES[j]]; }
+      }
+    }
+    return best;
+  }
+
+  /* مسیر orthogonal/elbow — بدون عبور از داخل گره */
+  function orthogonalPath(s, sa, t, ta, hs, ht) {
+    return elbowPoints(s, sa, t, ta, hs, ht)
+      .map(function (p, i) { return (i === 0 ? 'M ' : 'L ') + Math.round(p.x) + ' ' + Math.round(p.y); })
+      .join(' ');
   }
 
   /* ── وضعیت ماژول — بین رندرها و ناوبری حفظ می‌شود ── */
   var chartTypeByProject = {};   /* projectId -> 'OPC' | 'FPC' */
-  var selectedByProject = {};    /* projectId -> nodeId انتخاب‌شده */
   var viewStateByChart = {};     /* projectId|chartType -> { zoom, pan } */
   var escListener = null;
   var cancelConnectFn = null;    /* لغو اتصال در جریان با Escape */
+  /* v1.5.2 §۶-۶ — یال انتخاب‌شده (مثل state ری‌اکت: با ورود به نما و
+     تعویض زبانه ریست می‌شود؛ تا حذف/نامعتبرشدن یال معتبر می‌ماند) */
+  var selectedEdgeByProject = {};
+  var delEdgeListener = null;    /* حذف یال انتخاب‌شده با Delete/Backspace */
 
   function getViewState(key) {
     if (!viewStateByChart[key]) viewStateByChart[key] = { zoom: 1, pan: { x: 0, y: 0 } };
@@ -172,9 +233,12 @@
     container.appendChild(root);
 
     if (chartTypeByProject[projectId] !== 'OPC' && chartTypeByProject[projectId] !== 'FPC') chartTypeByProject[projectId] = 'OPC';
+    /* §۶-۶ — ورود تازه به نما = ریست انتخاب یال (معادل remount در وب) */
+    delete selectedEdgeByProject[projectId];
 
     var suppressClickUntil = 0; /* سرکوب click پس از درگ واقعی گره/زمینه */
-    var pdfCtx = { el: null, w: 0, h: 0, title: '' }; /* منبع خروجی PDF — در هر رندر تازه می‌شود */
+    /* منبع خروجی PDF — در هر رندر تازه می‌شود؛ cropX/Y = برش محتوای §۶-۵ */
+    var pdfCtx = { el: null, w: 0, h: 0, title: '', cropX: 0, cropY: 0 };
 
     function render() {
       cancelConnectFn = null;
@@ -235,19 +299,28 @@
       ], chartType, function (k) {
         if (chartTypeByProject[projectId] === k) return;
         chartTypeByProject[projectId] = k;
-        selectedByProject[projectId] = null;
+        delete selectedEdgeByProject[projectId]; /* §۶-۶ — ریست با تعویض زبانه (معادل key={chartType} وب) */
         render();
       }));
 
-      /* نمودار خالی — بدون گره */
+      /* حالت‌های خالی — عیناً هم‌ارز ChartCanvas.tsx */
+      if (!(chart.counts.activitiesTotal > 0)) {
+        pdfCtx.el = null;
+        root.appendChild(U.h('section', { class: 'card p-6' }, UI.emptyState({
+          title: 'هنوز فعالیتی تعریف نشده است',
+          desc: 'گره‌های نمودار فرایند به‌صورت خودکار از فعالیت‌های تعریف‌شده در «ساختار تولید» ساخته می‌شوند. ابتدا ایستگاه و فعالیت بسازید.',
+          icon: 'workflow',
+        })));
+        return;
+      }
       if (nodes.length === 0) {
         pdfCtx.el = null;
         root.appendChild(U.h('section', { class: 'card p-6' }, UI.emptyState({
-          title: 'گره‌ای برای نمایش وجود ندارد',
-          desc: 'گره‌های اصلی به‌صورت خودکار از فعالیت‌های «ساختار تولید» ساخته می‌شوند؛ فعالیتی مشمول این نوع نمودار تعریف نشده است. برای رویدادهای فاقد زمان‌سنجی می‌توانید همین‌جا گره دستی بسازید.',
+          title: chartType === 'OPC' ? 'فعالیتی برای OPC مشمول نیست' : 'گره‌ای برای نمایش نیست',
+          desc: chartType === 'OPC'
+            ? 'در نمودار OPC فقط فعالیت‌های از نوع «عملیات» و «بازرسی» نمایش داده می‌شوند. فعالیت‌های حمل‌ونقل، تأخیر و انبارش را در نمای FPC ببینید.'
+            : 'گره‌ای برای نمایش وجود ندارد.',
           icon: 'workflow',
-          actionLabel: 'ساخت گره دستی',
-          onAction: function () { openManualNodeDialog(null); },
         })));
         return;
       }
@@ -273,18 +346,20 @@
 
       var zoomPctEl = U.h('span', { class: 'zoom-pct num', dir: 'ltr', 'aria-live': 'polite' });
 
-      /* ── نوار ابزار ── */
+      /* §۶-۶ — یال انتخاب‌شدهٔ معتبر (اگر هنوز موجود باشد) */
+      var selectedEdgeId = selectedEdgeByProject[projectId] || null;
+      var selectedEdge = null;
+      chart.edges.forEach(function (e) { if (e.id === selectedEdgeId) selectedEdge = e; });
+      if (!selectedEdge) { selectedEdgeId = null; delete selectedEdgeByProject[projectId]; }
+
+      /* ── نوار ابزار — چیدمان هم‌ارز وب: دکمه‌ها → زوم → حذف انتخاب‌شده → چیپ‌ها ── */
       root.appendChild(U.h('div', { class: 'flex flex-wrap items-center gap-2 mb-1' },
-        UI.badge(U.formatInt(chart.counts.total) + ' گره', 'brand-solid'),
-        UI.badge(U.formatInt(chart.counts.auto) + ' خودکار', 'muted'),
-        UI.badge(U.formatInt(chart.counts.manual) + ' دستی', 'cyan'),
-        U.h('span', {
-          class: 'text-xs text-muted',
-          text: 'فعالیت‌های مشمول: ' + U.formatInt(chart.counts.activitiesIncluded) + ' از ' + U.formatInt(chart.counts.activitiesTotal),
-        }),
-        U.h('div', { class: 'spacer' }),
         U.h('button', {
-          class: 'btn btn-sm btn-outline', type: 'button',
+          class: 'btn btn-sm btn-brand', type: 'button',
+          onclick: function () { openManualNodeDialog(null); },
+        }, U.icon('plus'), 'گره دستی'),
+        U.h('button', {
+          class: 'btn btn-sm btn-brand', type: 'button',
           onclick: function () {
             try {
               /* §۱۵.۵ — ابتدا چیدمان دستی فعلی به‌عنوان snapshot ذخیره شود */
@@ -335,10 +410,6 @@
           class: 'btn btn-sm btn-outline', type: 'button', 'aria-label': 'بازخوانی نمودار از فعالیت‌ها',
           onclick: function () { render(); },
         }, U.icon('refresh'), 'بازخوانی'),
-        U.h('button', {
-          class: 'btn btn-sm btn-brand', type: 'button',
-          onclick: function () { openManualNodeDialog(null); },
-        }, U.icon('plus'), 'گره دستی'),
         U.h('div', { class: 'zoom-group', role: 'group', 'aria-label': 'کنترل زوم' },
           U.h('button', {
             class: 'icon-btn sm', type: 'button', 'aria-label': 'کوچک‌نمایی', title: 'کوچک‌نمایی',
@@ -356,20 +427,25 @@
           U.h('button', {
             class: 'btn zoom-reset', type: 'button', 'aria-label': 'بازنشانی زوم به ۱۰۰٪', text: '۱۰۰٪',
             onclick: function () { view.zoom = 1; view.pan.x = 0; view.pan.y = 0; applyTransform(); },
-          }))));
-
-      /* ── چیپ‌های راهنما + نشان OPC توسعه‌یافته (§۱۵.۲) ── */
-      root.appendChild(U.h('div', { class: 'flex flex-wrap items-center gap-1.5 mb-3' },
-        isExt ? U.h('span', { class: 'chip-ext-opc', role: 'status', text: 'OPC توسعه‌یافته — دارای ورودی مواد/انبار' }) : null,
-        allowedTypes.map(function (t) {
-          var count = byType[t] || 0;
-          return U.h('span', { class: 'legend-chip' + (count ? '' : ' zero') },
-            symbolEl(t, 'sm'),
-            U.h('span', { text: (TYPE_LABEL[t] || t) + ': ' + U.formatInt(count) }));
-        }),
-        chart.counts.manual > 0
-          ? U.h('span', { class: 'legend-chip', style: { borderStyle: 'dashed' }, text: 'دستی: ' + U.formatInt(chart.counts.manual) })
-          : null));
+          })),
+        /* §۶-۶ — حذف یال انتخاب‌شده از نوار ابزار */
+        selectedEdge ? U.h('button', {
+          class: 'btn btn-sm btn-destructive', type: 'button',
+          title: 'حذف اتصال انتخاب‌شده (یا کلید Delete)',
+          onclick: function () { confirmDeleteEdge(selectedEdge); },
+        }, U.icon('trash'), 'حذف اتصال انتخاب‌شده') : null,
+        /* چیپ‌های شمارش/راهنما — انتهای نوار (ms-auto)، هم‌ارز وب */
+        U.h('div', { class: 'flex flex-wrap items-center gap-1.5 text-xs text-muted', style: { marginInlineStart: 'auto' } },
+          isExt ? U.h('span', { class: 'chip-ext-opc', role: 'status', text: 'OPC توسعه‌یافته — دارای ورودی مواد/انبار' }) : null,
+          allowedTypes.map(function (t) {
+            var count = byType[t] || 0;
+            return U.h('span', { class: 'legend-chip' + (count ? '' : ' zero') },
+              symbolEl(t, 'sm'),
+              U.h('span', { text: (TYPE_LABEL[t] || t) + ': ' + U.formatInt(count) }));
+          }),
+          chart.counts.manual > 0
+            ? U.h('span', { class: 'legend-chip', style: { borderStyle: 'dashed' }, text: 'دستی: ' + U.formatInt(chart.counts.manual) })
+            : null)));
 
       /* ── هشدار گره‌های بی‌اتصال ── */
       var connected = {};
@@ -394,16 +470,17 @@
       viewport.appendChild(contentWrap);
       viewport.appendChild(U.h('div', {
         class: 'chart-hint', dir: 'rtl',
-        text: 'درگ زمینه = جابه‌جایی · Ctrl+چرخ ماوس = زوم · کشیدن از لنگر گردِ گره = اتصال',
+        text: 'چرخ ماوس = زوم · درگ زمینه = جابه‌جایی · کشیدن از لنگر گردِ گره = اتصال',
       }));
 
-      /* یال‌های SVG */
+      /* یال‌های SVG — §۶-۳: پیکان جهت جریان درشت‌تر (۸px؛ انتخاب‌شده ۹px)
+         هم‌رنگ خط — عیناً هم‌ارز ChartCanvas.tsx */
       var svg = svgTag('svg', { class: 'chart-svg', width: CW, height: CH, 'aria-hidden': 'true' });
       var defs = svgTag('defs');
-      [['t2c-arrow-brand', 'var(--brand)'], ['t2c-arrow-cyan', 'var(--cyan)']].forEach(function (m) {
+      [['t2c-arrow', 'var(--brand)', 8], ['t2c-arrow-selected', 'var(--brand)', 9]].forEach(function (m) {
         var marker = svgTag('marker', {
           id: m[0], viewBox: '0 0 10 10', refX: 9, refY: 5,
-          markerWidth: 7, markerHeight: 7, orient: 'auto',
+          markerWidth: m[2], markerHeight: m[2], orient: 'auto-start-reverse',
         });
         marker.appendChild(svgTag('path', { d: 'M 0 0 L 10 5 L 0 10 z', fill: m[1] }));
         defs.appendChild(marker);
@@ -437,43 +514,42 @@
       chart.edges.forEach(function (e) {
         var s = nodeById[e.sourceNodeId], t = nodeById[e.targetNodeId];
         if (!s || !t) return;
-        var color = e.isChain ? 'var(--brand)' : 'var(--cyan)';
+        var isSelected = e.id === selectedEdgeId;
+        /* رنگ‌ها هم‌ارز وب: زنجیره = brand ۵۵٪؛ دستی = brand-2 ۷۰٪؛
+           انتخاب‌شده = brand کامل بدون شفافیت (§۶-۶) */
         var visible = svgTag('path', {
-          d: edgeD(e), fill: 'none', stroke: color, 'stroke-width': 2,
-          'marker-end': 'url(#' + (e.isChain ? 't2c-arrow-brand' : 't2c-arrow-cyan') + ')',
+          d: edgeD(e), fill: 'none',
+          stroke: e.isChain || isSelected ? 'var(--brand)' : 'var(--brand-2)',
+          'stroke-width': isSelected ? 3.5 : 2,
+          'marker-end': 'url(#' + (isSelected ? 't2c-arrow-selected' : 't2c-arrow') + ')',
+          class: 'chart-edge-line',
         });
-        if (!e.isChain) visible.setAttribute('stroke-dasharray', '6 4');
-        /* مسیر نامرئی پهن برای کلیک راحت + عنوان راهنما */
+        if (!isSelected) visible.setAttribute('stroke-opacity', e.isChain ? '0.55' : '0.7');
+        if (!e.isChain && !isSelected) visible.setAttribute('stroke-dasharray', '6 4');
+        /* مسیر نامرئی پهن برای کلیک راحت — §۶-۶: کلیک = انتخاب (toggle) */
         var overlay = svgTag('path', {
           d: edgeD(e), fill: 'none', stroke: 'transparent', 'stroke-width': 16, 'pointer-events': 'stroke',
         });
-        overlay.style.cursor = 'pointer';
+        var grp = svgTag('g', { class: 'chart-edge' + (isSelected ? ' selected' : '') });
+        grp.style.cursor = 'pointer';
         edgeEls.push({ edge: e, visible: visible, overlay: overlay });
         var title = svgTag('title');
-        title.textContent = s.label + ' → ' + t.label + (e.isChain ? ' — زنجیرهٔ توالی' : '');
+        title.textContent = isSelected
+          ? 'اتصال انتخاب‌شده — حذف با دکمهٔ نوار ابزار یا کلید Delete'
+          : 'کلیک: انتخاب اتصال';
         overlay.appendChild(title);
-        overlay.addEventListener('click', function () {
-          if (e.isChain) {
-            UI.toast('یال زنجیرهٔ توالی با تغییر ترتیب گره‌ها بازسازی می‌شود.', { type: 'info' });
-            return;
-          }
-          UI.confirmDialog({
-            title: 'حذف اتصال دستی؟',
-            desc: 'اتصال بین «' + s.label + '» و «' + t.label + '» حذف می‌شود. این تغییر فقط نمودار را تغییر می‌دهد و هیچ دادهٔ زمان‌سنجی حذف نمی‌شود.',
-            destructive: true,
-            confirmLabel: 'حذف اتصال',
-            cancelLabel: 'انصراف',
-          }).then(function (ok) {
-            if (!ok) return;
-            try {
-              DB.deleteChartEdge(e.id);
-              UI.toast('اتصال حذف شد؛ مشاهدات زمان‌سنجی تغییری نکرده‌اند.');
-              render();
-            } catch (err) { UI.toastError(err); }
-          });
+        /* کلیک روی گروه (مثل onClick روی <g> در وب) — هم روی خود گروه
+           کار می‌کند و هم وقتی هدفِ واقعی کلیک، مسیر شفاف پهن است */
+        grp.addEventListener('click', function () {
+          if (Date.now() < suppressClickUntil) return;
+          /* toggle انتخاب — عیناً مثل وب */
+          if (selectedEdgeByProject[projectId] === e.id) delete selectedEdgeByProject[projectId];
+          else selectedEdgeByProject[projectId] = e.id;
+          render();
         });
-        svg.appendChild(visible);
-        svg.appendChild(overlay);
+        grp.appendChild(visible);
+        grp.appendChild(overlay);
+        svg.appendChild(grp);
       });
 
       /* ── گره‌ها ── */
@@ -524,16 +600,12 @@
         return { x: (clientX - rect.left) / view.zoom, y: (clientY - rect.top) / view.zoom };
       }
 
-      /* چرخ ماوس: Ctrl/Meta = زوم حول نشانگر؛ در غیر این صورت جابه‌جایی */
+      /* §۶-۴ — چرخ ماوس روی بوم همیشه زوم حول نشانگر است؛ صفحه اسکرول
+         نمی‌شود و بوم با چرخ جابه‌جا (Pan) نمی‌شود. جابه‌جایی فقط با درگ
+         زمینه. Ctrl/Meta+چرخ نیز زوم می‌ماند (رفتار اشاره‌ای pinch ترک‌پد). */
       viewport.addEventListener('wheel', function (ev) {
         if (ev.cancelable) ev.preventDefault();
-        if (ev.ctrlKey || ev.metaKey) {
-          zoomAt(ev.clientX, ev.clientY, ev.deltaY < 0 ? 1.1 : 1 / 1.1);
-        } else {
-          view.pan.x -= ev.deltaX;
-          view.pan.y -= ev.deltaY;
-          applyTransform();
-        }
+        zoomAt(ev.clientX, ev.clientY, ev.deltaY < 0 ? 1.1 : 1 / 1.1);
       }, { passive: false });
 
       /* درگ زمینه = پن؛ کلیک زمینه = لغو انتخاب */
@@ -563,16 +635,6 @@
         window.addEventListener('pointerup', finish);
         window.addEventListener('pointercancel', finish);
       });
-      viewport.addEventListener('click', function (ev) {
-        if (Date.now() < suppressClickUntil) return;
-        var t = ev.target;
-        if (t && t.closest && (t.closest('.chart-node') || t.closest('.chart-anchor') || t.closest('.chart-svg'))) return;
-        if (selectedByProject[projectId]) {
-          selectedByProject[projectId] = null;
-          render();
-        }
-      });
-
       root.appendChild(viewport);
       applyTransform();
 
@@ -584,15 +646,57 @@
       });
       redrawEdges();
 
-      /* ── پنل جزئیات گره انتخاب‌شده (زیر بوم) ── */
-      var detailHost = U.h('div');
-      root.appendChild(detailHost);
-      renderDetail();
+      /* §۶-۵ — محدودهٔ واقعی محتوای نمودار (گره‌ها + یال‌ها + پیکان‌ها):
+         خروجی PDF فقط همین محدوده را شامل می‌شود، نه کل فضای خالی بوم.
+         مختصات ذخیره‌شدهٔ گره‌ها هرگز تغییر نمی‌کند — فقط برش نمایشی.
+         (پورت دقیق contentBBox از ChartCanvas.tsx؛ PAD = فاصلهٔ امن)
+         مختصات منفی/چیدمان نامتعارف نیز درست پشتیبانی می‌شود. */
+      var contentBBox = null;
+      (function () {
+        var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        function expand(x, y) {
+          if (x < minX) minX = x;
+          if (y < minY) minY = y;
+          if (x > maxX) maxX = x;
+          if (y > maxY) maxY = y;
+        }
+        var PAD = 48;
+        nodes.forEach(function (n) {
+          var h = nodeH[n.id] || NH;
+          expand(n.positionX - PAD, n.positionY - PAD);
+          expand(n.positionX + NW + PAD, n.positionY + h + PAD);
+        });
+        chart.edges.forEach(function (e) {
+          var sn = nodeById[e.sourceNodeId], tn = nodeById[e.targetNodeId];
+          if (!sn || !tn) return;
+          var sp = { x: sn.positionX, y: sn.positionY }, tp = { x: tn.positionX, y: tn.positionY };
+          var auto = autoAnchors(sp, tp, nodeH[sn.id], nodeH[tn.id]);
+          var sa = anchorOf(e, 'sourceAnchor') || auto[0];
+          var ta = anchorOf(e, 'targetAnchor') || auto[1];
+          elbowPoints(sp, sa, tp, ta, nodeH[sn.id], nodeH[tn.id]).forEach(function (pt) {
+            expand(pt.x - PAD, pt.y - PAD);
+            expand(pt.x + PAD, pt.y + PAD);
+          });
+        });
+        if (isFinite(minX) && isFinite(maxX)) {
+          contentBBox = { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+        }
+      })();
 
-      /* منبع خروجی PDF — بوم رندرشدهٔ فعلی */
+      /* منبع خروجی PDF — بوم رندرشدهٔ فعلی، برش‌خورده به محدودهٔ محتوا (§۶-۵) */
       pdfCtx.el = canvasWrap;
-      pdfCtx.w = CW;
-      pdfCtx.h = CH;
+      if (contentBBox) {
+        pdfCtx.w = Math.ceil(contentBBox.w);
+        pdfCtx.h = Math.ceil(contentBBox.h);
+        /* محتوا با آفست منفی درون قاب برش‌خورده قرار می‌گیرد */
+        pdfCtx.cropX = -Math.floor(contentBBox.x);
+        pdfCtx.cropY = -Math.floor(contentBBox.y);
+      } else {
+        pdfCtx.w = CW;
+        pdfCtx.h = CH;
+        pdfCtx.cropX = 0;
+        pdfCtx.cropY = 0;
+      }
       pdfCtx.title = (chartType === 'OPC' ? 'نمودار فرایند عملیات (OPC)' : 'نمودار فرایند جریان (FPC)') + (isExt ? ' — توسعه‌یافته' : '');
 
       /* ═══ اتصال از لنگر به لنگر (§۱۵.۴) ═══ */
@@ -684,31 +788,74 @@
         window.addEventListener('pointercancel', endConnection);
       }
 
-      /* ── ساخت یک گره ── */
+      /* ── ساخت یک گره — ساختار/کنترل‌ها عیناً هم‌ارز ChartCanvas.tsx ── */
+      function nodeCtrlBtn(iconName, label, disabled, onclick, danger) {
+        var b = U.h('button', {
+          class: 'node-ctrl-btn' + (danger ? ' danger' : ''), type: 'button',
+          'aria-label': label, title: label,
+        }, U.icon(iconName));
+        if (disabled) b.disabled = true;
+        b.addEventListener('click', function (ev) { ev.stopPropagation(); if (!b.disabled) onclick(); });
+        return b;
+      }
+      function moveNodeOrder(n, dir) {
+        try { DB.moveChartNodeOrder(projectId, chartType, n.id, dir); render(); }
+        catch (err) { UI.toastError(err); }
+      }
+      function confirmDeleteManualNode(n) {
+        /* معادل ConfirmDeleteDialog وب — شمارش وابستگی‌ها (اتصال‌های گره) */
+        var edgeCount = chart.edges.filter(function (e) { return e.sourceNodeId === n.id || e.targetNodeId === n.id; }).length;
+        UI.confirmDelete({
+          title: 'حذف گره دستی',
+          name: n.label,
+          deps: { 'اتصال‌های این گره': edgeCount },
+        }).then(function (ok) {
+          if (!ok) return;
+          try {
+            DB.deleteChartNode(n.id);
+            UI.toast('گره دستی حذف شد؛ گره‌های خودکار فعالیت‌ها دست‌نخورده‌اند.');
+            render();
+          } catch (err) { UI.toastError(err); }
+        });
+      }
+      function showAutoNodeInfo(n) {
+        /* معادل دیالوگ «اطلاعات گره خودکار» وب */
+        UI.dialog({
+          title: n.label,
+          bodyBuilder: function (body) {
+            body.appendChild(U.h('p', { class: 'text-sm leading-relaxed', text: 'نوع رویداد: ' + (TYPE_LABEL[n.nodeType] || n.nodeType) + (n.stationName ? ' — ' + n.stationName : '') }));
+            body.appendChild(U.h('p', {
+              class: 'text-sm leading-relaxed', style: { marginTop: '8px' },
+              text: 'این گره به‌صورت خودکار از فعالیت «' + n.label + '» ساخته شده است؛ برای تغییر نام یا نوع، فعالیت را در «ساختار تولید» ویرایش کنید.',
+            }));
+          },
+        });
+      }
+
       function buildNodeEl(n) {
-        var isSelected = selectedByProject[projectId] === n.id;
         var el = U.h('div', {
-          class: 'chart-node' + (isSelected ? ' selected' : ''),
+          class: 'chart-node',
           dir: 'rtl', role: 'button', tabindex: '0',
           'aria-label': 'گره ' + U.formatInt(n.sortOrder + 1) + ': ' + n.label,
           style: { left: n.positionX + 'px', top: n.positionY + 'px', touchAction: 'none' },
         },
-          U.h('div', { class: 'flex items-start gap-2' },
+          /* شماره توالی — گوشهٔ بالا-راست (start در RTL) */
+          U.h('span', { class: 'cn-num num', text: U.formatInt(n.sortOrder + 1) }),
+          U.h('div', { class: 'flex items-start gap-2.5' },
             symbolEl(n.nodeType, 'md'),
             U.h('div', { class: 'flex-1 min-w-0' },
-              U.h('div', {
-                class: 'text-sm font-semibold', title: n.label, text: n.label,
-                style: {
-                  display: '-webkit-box', WebkitLineClamp: '2', WebkitBoxOrient: 'vertical',
-                  overflow: 'hidden', wordBreak: 'break-word', minHeight: '20px',
-                },
-              }),
-              U.h('div', { class: 'flex items-center gap-1 mt-1' },
-                U.h('span', {
-                  class: 'text-xs text-faint truncate flex-1',
-                  text: n.stationName || (TYPE_LABEL[n.nodeType] || ''),
-                }),
-                n.isManual ? UI.badge('دستی', 'cyan') : UI.badge('خودکار', 'muted')))),
+              U.h('p', { class: 'cn-label', title: n.label, text: n.label }),
+              U.h('p', { class: 'cn-sub', text: (TYPE_LABEL[n.nodeType] || n.nodeType) + (n.isManual ? ' · گره دستی' : (n.stationName ? ' · ' + n.stationName : '')) }))),
+          /* کنترل‌ها — با هاور یا فوکوس نمایان (هم‌ارز وب) */
+          U.h('div', { class: 'node-ctrls' },
+            nodeCtrlBtn('arrowUp', 'جابه‌جایی «' + n.label + '» به بالا در توالی', n.sortOrder === 0, function () { moveNodeOrder(n, 'up'); }),
+            nodeCtrlBtn('arrowDown', 'جابه‌جایی «' + n.label + '» به پایین در توالی', n.sortOrder === nodes.length - 1, function () { moveNodeOrder(n, 'down'); }),
+            n.isManual
+              ? nodeCtrlBtn('pencil', 'ویرایش گره «' + n.label + '»', false, function () { openManualNodeDialog(n); })
+              : null,
+            n.isManual
+              ? nodeCtrlBtn('trash', 'حذف گره «' + n.label + '»', false, function () { confirmDeleteManualNode(n); }, true)
+              : nodeCtrlBtn('workflow', 'اطلاعات فعالیت «' + n.label + '»', false, function () { showAutoNodeInfo(n); })),
           ANCHOR_SIDES.map(function (a) {
             var sp = U.h('span', {
               class: 'chart-anchor', 'data-node-id': n.id, 'data-anchor': a,
@@ -777,78 +924,38 @@
           if (ev.cancelable) ev.preventDefault();
         });
 
-        function activate() {
-          if (Date.now() < suppressClickUntil) return;
-          selectedByProject[projectId] = n.id;
-          render();
-        }
-        el.addEventListener('click', activate);
+        /* کلیدهای جهت‌نما — جابه‌جایی در توالی (هم‌ارز وب) */
         el.addEventListener('keydown', function (ev) {
-          if (ev.key === 'Enter' || ev.key === ' ') {
+          if (ev.key === 'ArrowUp') {
             if (ev.cancelable) ev.preventDefault();
-            activate();
+            moveNodeOrder(n, 'up');
+          }
+          if (ev.key === 'ArrowDown') {
+            if (ev.cancelable) ev.preventDefault();
+            moveNodeOrder(n, 'down');
           }
         });
         return el;
       }
+    }
 
-      /* ── پنل جزئیات ── */
-      function renderDetail() {
-        U.clear(detailHost);
-        var selId = selectedByProject[projectId];
-        var n = selId ? nodeById[selId] : null;
-        if (!n) return;
-        var idx = nodes.indexOf(n);
-        detailHost.appendChild(U.h('section', { class: 'card p-4', 'aria-label': 'جزئیات گره انتخاب‌شده' },
-          U.h('div', { class: 'flex flex-wrap items-center gap-2' },
-            symbolEl(n.nodeType, 'sm'),
-            U.h('span', { class: 'font-bold', text: n.label }),
-            UI.badge(TYPE_LABEL[n.nodeType] || n.nodeType, 'outline'),
-            U.h('span', { class: 'text-xs text-muted', text: n.stationName ? n.stationName : '—' }),
-            U.h('span', { class: 'text-xs text-faint num', text: 'جایگاه ' + U.formatInt(n.sortOrder + 1) })),
-          U.h('div', { class: 'flex flex-wrap items-center gap-2 mt-3' },
-            n.isManual ? U.h('button', {
-              class: 'btn btn-sm btn-outline', type: 'button',
-              onclick: function () { openManualNodeDialog(n); },
-            }, U.icon('pencil'), 'ویرایش گره') : null,
-            U.h('button', {
-              class: 'btn btn-sm btn-outline', type: 'button', disabled: idx <= 0,
-              onclick: function () {
-                try { DB.moveChartNodeOrder(projectId, chartType, n.id, 'up'); render(); }
-                catch (err) { UI.toastError(err); }
-              },
-            }, U.icon('arrowUp'), 'ترتیب: بالا'),
-            U.h('button', {
-              class: 'btn btn-sm btn-outline', type: 'button', disabled: idx >= nodes.length - 1,
-              onclick: function () {
-                try { DB.moveChartNodeOrder(projectId, chartType, n.id, 'down'); render(); }
-                catch (err) { UI.toastError(err); }
-              },
-            }, U.icon('arrowDown'), 'ترتیب: پایین'),
-            n.isManual ? U.h('button', {
-              class: 'btn btn-sm btn-destructive-outline', type: 'button',
-              onclick: function () {
-                UI.confirmDialog({
-                  title: 'حذف گره',
-                  desc: 'گره «' + n.label + '» حذف می‌شود؛ گره‌های خودکار فعالیت‌ها دست‌نخورده می‌مانند.',
-                  destructive: true,
-                  confirmLabel: 'حذف گره',
-                }).then(function (ok) {
-                  if (!ok) return;
-                  try {
-                    DB.deleteChartNode(n.id);
-                    selectedByProject[projectId] = null;
-                    UI.toast('گره دستی حذف شد؛ گره‌های خودکار فعالیت‌ها دست‌نخورده‌اند.');
-                    render();
-                  } catch (err) { UI.toastError(err); }
-                });
-              },
-            }, U.icon('trash'), 'حذف گره') : null),
-          !n.isManual ? U.h('p', {
-            class: 'text-xs text-muted mt-3 leading-relaxed',
-            text: 'گره‌های خودکار از فعالیت‌ها ساخته می‌شوند؛ برای تغییر، فعالیت را در ساختار تولید ویرایش کنید.',
-          }) : null));
-      }
+    /* §۶-۶ — تأیید حذف یال (دکمهٔ نوار ابزار یا کلید Delete) — متن‌ها هم‌ارز وب */
+    function confirmDeleteEdge(edge) {
+      UI.confirmDialog({
+        title: 'حذف اتصال گره‌ها؟',
+        desc: 'این اتصال حذف می‌شود؛ گره‌ها و دادهٔ زمان‌سنجی فعالیت‌ها دست‌نخورده می‌مانند.',
+        destructive: true,
+        confirmLabel: 'حذف اتصال',
+        cancelLabel: 'انصراف',
+      }).then(function (ok) {
+        if (!ok) return;
+        try {
+          DB.deleteChartEdge(edge.id);
+          delete selectedEdgeByProject[projectId];
+          UI.toast('اتصال حذف شد؛ مشاهدات زمان‌سنجی تغییری نکرده‌اند.');
+          render();
+        } catch (err) { UI.toastError(err); }
+      });
     }
 
     /* ── دیالوگ ساخت/ویرایش گره دستی (§۱۵.۱/۱۵.۲) ── */
@@ -1219,11 +1326,14 @@
         }
 
         var content = src.contentEl.outerHTML;
+        /* §۶-۵ — برش به محدودهٔ واقعی محتوا: محتوا با آفست برش داخل قاب می‌نشیند */
+        var crop = { x: pdfCtx.cropX || 0, y: pdfCtx.cropY || 0 };
+        var cropped = '<div style="position:absolute;left:' + crop.x + 'px;top:' + crop.y + 'px">' + content + '</div>';
         if (mode === 'fit') {
           var offX = Math.max(0, (fr.w - src.chartWidth * s) / 2);
           var offY = Math.max(0, (fr.h - src.chartHeight * s) / 2);
           pages.push(mkPage(0, 0, 1, 1,
-            '<div style="position:absolute;left:' + offX + 'px;top:' + offY + 'px;width:' + src.chartWidth + 'px;height:' + src.chartHeight + 'px;transform:scale(' + s + ');transform-origin:0 0">' + content + '</div>'));
+            '<div style="position:absolute;left:' + offX + 'px;top:' + offY + 'px;width:' + src.chartWidth + 'px;height:' + src.chartHeight + 'px;transform:scale(' + s + ');transform-origin:0 0">' + cropped + '</div>'));
         } else {
           var vw = fr.w - overlap, vh = fr.h - overlap;
           var idx = 1;
@@ -1231,7 +1341,7 @@
             for (var col = 0; col < tiled.cols; col++) {
               var tx = -(col * vw) / s, ty = -(row * vh) / s;
               pages.push(mkPage(col, row, idx, tiled.pages,
-                '<div style="position:absolute;left:0;top:0;width:' + src.chartWidth + 'px;height:' + src.chartHeight + 'px;transform:translate(' + tx + 'px,' + ty + 'px) scale(' + s + ');transform-origin:0 0">' + content + '</div>'));
+                '<div style="position:absolute;left:0;top:0;width:' + src.chartWidth + 'px;height:' + src.chartHeight + 'px;transform:translate(' + tx + 'px,' + ty + 'px) scale(' + s + ');transform-origin:0 0">' + cropped + '</div>'));
               idx++;
             }
           }
@@ -1286,19 +1396,36 @@
       }
     }
 
-    /* ESC → لغو اتصال در جریان، وگرنه لغو انتخاب گره (اگر دیالوگی باز نباشد) */
+    /* ESC → لغو اتصال در جریان (اگر دیالوگی باز نباشد) */
     if (escListener) document.removeEventListener('keydown', escListener);
     escListener = function (e) {
       if (e.key !== 'Escape') return;
       if (!root.isConnected) return;
       if (document.querySelector('.dialog-overlay')) return;
-      if (cancelConnectFn) { cancelConnectFn(); return; }
-      if (selectedByProject[projectId]) {
-        selectedByProject[projectId] = null;
-        render();
-      }
+      if (cancelConnectFn) cancelConnectFn();
     };
     document.addEventListener('keydown', escListener);
+
+    /* §۶-۶ — حذف یال انتخاب‌شده با Delete/Backspace (فقط وقتی یال انتخاب
+       شده، کاربر داخل فیلد متنی تایپ نمی‌کند و دیالوگی باز نیست) */
+    if (delEdgeListener) document.removeEventListener('keydown', delEdgeListener);
+    delEdgeListener = function (e) {
+      if (e.key !== 'Delete' && e.key !== 'Backspace') return;
+      if (!root.isConnected) return;
+      var eid = selectedEdgeByProject[projectId];
+      if (!eid) return;
+      var t = e.target;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
+      if (document.querySelector('.dialog-overlay')) return; /* دیالوگ باز است */
+      var ch;
+      try { ch = DB.getChart(projectId, chartTypeByProject[projectId]); } catch (err) { return; }
+      var edge = null;
+      (ch.edges || []).forEach(function (e2) { if (e2.id === eid) edge = e2; });
+      if (!edge) return;
+      if (e.cancelable) e.preventDefault();
+      confirmDeleteEdge(edge); /* تأییدیهٔ حذف باز می‌شود */
+    };
+    document.addEventListener('keydown', delEdgeListener);
 
     render();
   };

@@ -97,7 +97,12 @@ function elbowPoints(s: Position, sa: AnchorSide, t: Position, ta: AnchorSide): 
   const tA = anchorPoint(t, ta)
   const stub = 22
   const sOut = { x: sA.x + ANCHOR_NORMAL[sa].x * stub, y: sA.y + ANCHOR_NORMAL[sa].y * stub }
-  const tIn = { x: tA.x - ANCHOR_NORMAL[ta].x * stub, y: tA.y - ANCHOR_NORMAL[ta].y * stub }
+  /** §۶-۳ — نقطهٔ ورود به مقصد باید «بیرون» گره باشد (tA + نرمال×stub)،
+   *  تا آخرین قطعهٔ مسیر (tIn→tA) به سمت داخل گره و پیکانِ marker-end
+   *  رو به مقصد باشد. فرمول قبلی (tA − نرمال×stub) نقطه را داخل گره
+   *  می‌گذاشت؛ قطعهٔ آخر معکوس می‌شد و پیکان رو به مبدأ/زیر خط پنهان
+   *  می‌ماند — یعنی marker-end هرگز دیده نمی‌شد. */
+  const tIn = { x: tA.x + ANCHOR_NORMAL[ta].x * stub, y: tA.y + ANCHOR_NORMAL[ta].y * stub }
   const pts: Position[] = [sA, sOut]
   const vSrc = sa === 'bottom' || sa === 'top'
   const vDst = ta === 'bottom' || ta === 'top'
@@ -421,12 +426,20 @@ export default function ChartCanvas({ projectId, chartType }: { projectId: strin
   /** v1.5.2 §۶-۴ — چرخ ماوس روی بوم همیشه Zoom است (نزدیک نشانگر)؛
    *  صفحه اسکرول نمی‌شود و بوم با چرخ جابه‌جا (Pan) نمی‌شود.
    *  جابه‌جایی فقط با درگ زمینه. Ctrl/Meta+چرخ نیز زوم می‌ماند
-   *  (رفتار اشاره‌ای pinch ترک‌پد حفظ شده است). */
-  const onWheel = (e: React.WheelEvent) => {
-    e.preventDefault()
-    const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1
-    zoomAt(e.clientX, e.clientY, factor)
-  }
+   *  (رفتار اشاره‌ای pinch ترک‌پد حفظ شده است).
+   *  نکته: listener بومی non-passive روی خود viewport — چون onWheel ری‌اکت
+   *  passive است و preventDefault آن بی‌اثر می‌شود (صفحه هم اسکرول می‌خورد). */
+  useEffect(() => {
+    const vp = viewportRef.current
+    if (!vp) return
+    const onWheelNative = (e: WheelEvent) => {
+      e.preventDefault()
+      const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1
+      zoomAt(e.clientX, e.clientY, factor)
+    }
+    vp.addEventListener('wheel', onWheelNative, { passive: false })
+    return () => vp.removeEventListener('wheel', onWheelNative)
+  }, [zoomAt, data])
 
   const fitToView = () => {
     const rect = viewportRef.current?.getBoundingClientRect()
@@ -733,7 +746,6 @@ export default function ChartCanvas({ projectId, chartType }: { projectId: strin
         dir="ltr"
         role="application"
         aria-label={`بوم نمودار ${chartType} — زوم ${Math.round(zoom * 100)}٪`}
-        onWheel={onWheel}
         onPointerDown={onBackgroundPointerDown}
         onPointerMove={onBackgroundPointerMove}
         onPointerUp={onBackgroundPointerUp}

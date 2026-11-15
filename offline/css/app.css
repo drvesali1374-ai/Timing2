@@ -119,6 +119,7 @@ button { font-family: inherit; }
 .items-stretch { align-items: stretch; } .justify-between { justify-content: space-between; }
 .justify-center { justify-content: center; } .self-start { align-self: flex-start; }
 .gap-0\.5 { gap: 2px; } .gap-1 { gap: 4px; } .gap-1\.5 { gap: 6px; } .gap-2 { gap: 8px; }
+.gap-2\.5 { gap: 10px; }
 .gap-3 { gap: 12px; } .gap-4 { gap: 16px; } .gap-5 { gap: 20px; } .gap-6 { gap: 24px; }
 .p-2 { padding: 8px; } .p-3 { padding: 12px; } .p-4 { padding: 16px; } .p-5 { padding: 20px; } .p-6 { padding: 24px; }
 .px-2 { padding-inline: 8px; } .px-3 { padding-inline: 12px; } .px-4 { padding-inline: 16px; }
@@ -699,8 +700,8 @@ tr.row-excluded > td { background: color-mix(in srgb, var(--red-soft) 35%, trans
   radial-gradient(circle at 1px 1px, color-mix(in srgb, var(--line-strong) 55%, transparent) 1px, transparent 0) 0 0 / 22px 22px, var(--card);
   overflow: auto; }
 .chart-node {
-  position: absolute; width: 200px; background: var(--card); border: 1.5px solid var(--line-strong);
-  border-radius: var(--radius); box-shadow: var(--shadow-1); cursor: grab; user-select: none; padding: 9px 11px; z-index: 2;
+  position: absolute; width: 200px; background: var(--card); border: 1px solid var(--border);
+  border-radius: var(--radius); box-shadow: var(--shadow-1); cursor: grab; user-select: none; padding: 10px; z-index: 2;
   transition: box-shadow .15s var(--ease), border-color .15s var(--ease);
 }
 .chart-node:hover { box-shadow: var(--shadow-2); }
@@ -710,6 +711,44 @@ tr.row-excluded > td { background: color-mix(in srgb, var(--red-soft) 35%, trans
   width: 30px; height: 30px; border-radius: calc(var(--radius) - 4px); flex-shrink: 0;
   display: inline-flex; align-items: center; justify-content: center; font-weight: 800; font-size: 15px;
 }
+/* ── v1.5.2 Part-3 §۶ — کارت گره: شماره توالی + برچسب/زیرنویس تک‌خطی +
+   کنترل‌های هاور (عیناً هم‌ارز ChartCanvas.tsx وب) ── */
+.chart-node .cn-num {
+  position: absolute; inset-inline-start: -6px; top: -6px; z-index: 5;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 24px; height: 24px; border-radius: 50%;
+  border: 1px solid var(--border); background: var(--background);
+  font-size: 11px; font-weight: 700;
+}
+.chart-node .cn-label {
+  font-size: 14px; font-weight: 700; line-height: 24px; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.chart-node .cn-sub {
+  font-size: 11px; line-height: 20px; color: var(--muted-foreground); min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.node-ctrls {
+  position: absolute; bottom: -9px; left: 50%; transform: translateX(-50%); z-index: 8;
+  display: flex; align-items: center; gap: 2px; padding: 2px;
+  background: var(--background); border: 1px solid var(--border); border-radius: 99px;
+  box-shadow: var(--shadow-1); opacity: 0; transition: opacity .15s var(--ease);
+}
+.chart-node:hover .node-ctrls, .chart-node:focus-within .node-ctrls { opacity: 1; }
+.node-ctrl-btn {
+  display: inline-flex; width: 24px; height: 24px; align-items: center; justify-content: center;
+  border-radius: 50%; border: none; background: transparent; color: var(--muted-foreground);
+  cursor: pointer; padding: 0;
+}
+.node-ctrl-btn .icon { width: 16px; height: 16px; }
+.node-ctrl-btn:hover { background: var(--brand-soft); color: var(--brand); }
+.node-ctrl-btn.danger { color: var(--red); }
+.node-ctrl-btn.danger:hover { background: var(--red-soft); }
+.node-ctrl-btn:disabled { opacity: .3; cursor: default; }
+/* ── v1.5.2 Part-3 §۶-۶ — یال‌ها: انتخاب با کلیک + هاور قرمز (هم‌ارز وب) ── */
+.chart-edge { cursor: pointer; }
+.chart-edge .chart-edge-line { transition: stroke .15s ease, stroke-opacity .15s ease; }
+.chart-edge:not(.selected):hover .chart-edge-line { stroke: var(--red); stroke-opacity: 1; }
 .chart-svg { position: absolute; inset: 0; z-index: 1; pointer-events: none; overflow: visible; }
 
 /* ── چارت‌های آماری ── */
