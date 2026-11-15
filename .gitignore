@@ -68,3 +68,8 @@ server.log
 
 # اسکرین‌شات‌های موقت بازبینی مرورگر (نسخهٔ بایگانی‌شده در offline/parity-shots است)
 /shots/
+
+# پوشه‌های سندباکس محیط اجرا (بخشی از پروژه نیستند)
+/examples/
+/mini-services/
+/tests/
