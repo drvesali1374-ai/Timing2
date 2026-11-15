@@ -1,20 +1,19 @@
 'use client'
 
 // ═══════════════════════════════════════════════════════════
-// نمای «مجازها و الونس‌ها» — بازطراحی جلسه اول
-// • زبانه تعریف‌های مرکزی: فهرست مرکزی الونس‌های پروژه
-//   (تفکیک تعریف از تخصیص — §۲.۲) با ایجاد/ویرایش/آرشیو
-// • زبانه الونس‌های خط تولید: تخصیص سطح PROJECT از طریق
-//   بخش واحد «الونس‌ها و زمان‌های مجاز» (§۶)
-// • زبانه گروه‌های فعالیت: فقط طبقه‌بندی — پس از migration
-//   گروه‌ها دیگر منبع دوم اعمال الونس نیستند (§۵)
+// نمای «مجازها و الونس‌ها» — تعریف‌های مرکزی
+// • فهرست مرکزی الونس‌های پروژه (تفکیک تعریف از تخصیص — §۲.۲)
+//   با ایجاد/ویرایش/آرشیو
 // • درصدها: کاربر عدد درصد می‌بیند (۱۵)؛ API مقدار اعشاری
 //   می‌گیرد (0.15) — PercentInput + formatPercent — FR-15
+// • v1.5.2 بازبینی نهایی §۱۲/§۱۳ — زبانه‌های «الونس‌های خط
+//   تولید» و «گروه‌های فعالیت» حذف شدند؛ تخصیص الونس از
+//   فرم‌های ایستگاه/فعالیت/عنصر انجام می‌شود.
 // ═══════════════════════════════════════════════════════════
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { Archive, ChevronDown, ChevronUp, Factory, Layers, ListTree, Loader2, Pencil, Percent, Plus, SlidersHorizontal, Trash2 } from 'lucide-react'
+import { Archive, Layers, Loader2, Pencil, Percent, Plus, Trash2 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -22,7 +21,6 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import {
   Dialog,
@@ -38,7 +36,7 @@ import { ConfirmDeleteDialog, EmptyState } from '@/components/common/Feedback'
 import { SaveIndicator } from '@/components/common/SaveIndicator'
 import { PercentInput, PersianNumberInput } from '@/components/common/PersianNumberInput'
 import { useAutosave } from '@/hooks/use-autosave'
-import { allowancesApi, type AllowanceDefinitionDto, type GroupDto } from '@/lib/api/endpoints'
+import { allowancesApi, type AllowanceDefinitionDto } from '@/lib/api/endpoints'
 import { qk } from '@/lib/api/keys'
 import { useAppStore } from '@/store/app-store'
 import { useDisplayPrefs } from '@/store/display-store'
@@ -57,20 +55,6 @@ const DEFINITIONS_HELP = {
   note: 'حذف تعریف دارای تخصیص/سابقه، به‌جای نابودی سوابق، آن را بایگانی می‌کند؛ تغییر عنوان ارتباط تخصیص‌ها را از بین نمی‌برد (ارتباط با ID است).',
 } as const
 
-const PROJECT_SCOPE_HELP = {
-  what: 'الونس‌های این سطح به همه ایستگاه‌ها، فعالیت‌ها و عناصر کاری پروژه ارث می‌رسند؛ مگر آنکه در سطح پایین‌تر جایگزین یا حذف از ارث‌بری شوند.',
-  input: 'با «افزودن الونس» از فهرست مرکزی انتخاب کنید؛ درصد یا زمان ثابت با مبنا ثبت می‌شود.',
-  example: 'الونس نیازهای شخصی ۵٪ در سطح خط = پیش‌فرض کل خط؛ یک ایستگاه خاص می‌تواند مقدار خودش را جایگزین کند.',
-  note: 'الونس زمانی سطح خط را با مبنا «هر چرخه» ثبت کنید تا در زمان تک‌تک عناصر ضرب نشود.',
-} as const
-
-const GROUPS_HELP = {
-  what: 'گروه‌های فعالیت صرفاً برای طبقه‌بندی و برچسب‌گذاری فعالیت‌های مشابه‌اند. پس از مهاجرت به مدل سلسله‌مراتبی، مقادیر الونس از سطوح خط/ایستگاه/فعالیت/عنصر resolve می‌شوند و گروه منبع دوم محاسبه نیست.',
-  input: 'گروه بسازید و در فرم «مشخصات فعالیت» به فعالیت‌ها نسبت دهید.',
-  example: 'گروه «کار دستی سبک» یا «کار ماشینی سنگین».',
-  note: 'مقادیر قدیمی گروه‌ها در زمان مهاجرت به تخصیص سطح فعالیت تبدیل شده‌اند تا نتیجه پروژه‌های موجود حفظ شود.',
-} as const
-
 const DEFAULT_VALUE_HELP = {
   what: 'مقدار پیش‌فرض فقط پیشنهاد اولیه فرم تخصیص است؛ به‌تنهایی به معنی اعمال الونس نیست و تغییر آن تخصیص‌های قبلی را تغییر نمی‌دهد.',
   input: 'نوع (درصدی/زمان ثابت) و مقدار متناظر را وارد کنید یا «بدون مقدار» بگذارید.',
@@ -78,24 +62,14 @@ const DEFAULT_VALUE_HELP = {
   note: 'زمان پیش‌فرض برحسب ثانیه ذخیره می‌شود؛ واحد دقیقه در فرم تخصیص به ثانیه تبدیل می‌شود.',
 } as const
 
+
 // ═══════════════ نمای اصلی ═══════════════
+// v1.5.2 بازبینی نهایی §۱۲/§۱۳/§۱۴ — زبانه‌های «الونس‌های خط تولید» و
+// «گروه‌های فعالیت» حذف شدند؛ این صفحه مستقیماً تعریف‌های مرکزی را
+// مدیریت می‌کند (بدون نوار زبانه؛ فاصلهٔ عمودی مناسب زیر سربرگ).
 
-export default function GroupsView({ projectId }: { projectId: string }) {
+export default function AllowancesView({ projectId }: { projectId: string }) {
   const prefs = useDisplayPrefs()
-  const [tab, setTab] = useState<'definitions' | 'project' | 'groups'>('definitions')
-
-  const defsQ = useQuery({
-    queryKey: qk.allowanceDefinitions(projectId),
-    queryFn: () => allowancesApi.definitions(projectId),
-  })
-  const groupsQ = useQuery({
-    queryKey: qk.groups(projectId),
-    queryFn: () => allowancesApi.groups(projectId),
-  })
-
-  const activeCount = (defsQ.data?.items ?? []).filter((d) => d.isActive && !d.isArchived).length
-  const archivedCount = (defsQ.data?.items ?? []).filter((d) => d.isArchived).length
-
   return (
     <div className="animate-view-in w-full space-y-5">
       {/* سربرگ بخش — چسبان زیر نوار اصلی (v1.5.2 §۸) */}
@@ -103,58 +77,22 @@ export default function GroupsView({ projectId }: { projectId: string }) {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <div className="chip-icon bg-brand-soft text-brand">
-              {/* v1.5.2 §۴.۳/§۵.۴: آیکون Percent برای بخش الونس‌ها */}
               <Percent className="size-6" aria-hidden />
             </div>
             <div>
               <h1 className="text-xl font-extrabold">مجازها و الونس‌ها</h1>
-              <p className="num text-xs text-muted-foreground">
-                {activeCount} تعریف فعال
-                {archivedCount > 0 ? ` · ${archivedCount} بایگانی‌شده` : ''} ·{' '}
-                {groupsQ.data?.items.length ?? 0} گروه فعالیت
+              <p className="text-xs text-muted-foreground">
+                تعریف مرکزی الونس‌ها و تخصیص سلسله‌مراتتی به ایستگاه، فعالیت و عنصر
               </p>
             </div>
           </div>
         </div>
       </SectionHeading>
 
-      <Tabs dir="rtl" value={tab} onValueChange={(v) => setTab(v as typeof tab)}>
-        <TabsList className="h-auto w-full flex-wrap justify-start gap-1 bg-surface-2/70 p-1">
-          <TabsTrigger value="definitions" className="gap-1.5">
-            <Layers className="size-4" aria-hidden />
-            تعریف‌های مرکزی
-          </TabsTrigger>
-          <TabsTrigger value="project" className="gap-1.5">
-            {/* v1.5.2 §۵.۴: آیکون SlidersHorizontal برای الونس‌های خط تولید */}
-            <SlidersHorizontal className="size-4" aria-hidden />
-            الونس‌های خط تولید
-          </TabsTrigger>
-          <TabsTrigger value="groups" className="gap-1.5">
-            {/* v1.5.2 §۵.۴: آیکون ListTree برای گروه‌های فعالیت */}
-            <ListTree className="size-4" aria-hidden />
-            گروه‌های فعالیت
-          </TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="definitions" className="mt-4">
-          <DefinitionsTab projectId={projectId} prefs={prefs} />
-        </TabsContent>
-        <TabsContent value="project" className="mt-4">
-          {/* v1.5.2 §۵.۱: کارت توضیحی مستقل حذف شد؛ راهنمای ظریف
-              در یک خط بالای محتوای تب — با HelpDot */}
-          <div className="mb-3 flex items-start gap-2 px-1 text-[11px] leading-5 text-muted-foreground">
-            <HelpDot label="الونس‌های سطح خط تولید" content={PROJECT_SCOPE_HELP} />
-            <p>
-              این الونس‌ها به تمام ایستگاه‌ها، فعالیت‌ها و عناصر کاری ارث می‌رسند؛ در هر سطح پایین‌تر قابل جایگزینی یا حذف از
-              ارث‌بری‌اند.
-            </p>
-          </div>
-          <AllowanceSection projectId={projectId} scopeType="PROJECT" scopeId={projectId} />
-        </TabsContent>
-        <TabsContent value="groups" className="mt-4">
-          <GroupsTab projectId={projectId} prefs={prefs} />
-        </TabsContent>
-      </Tabs>
+      {/* §۱۴ — فاصلهٔ عمودی مناسب بین سربرگ چسبان و اولین کارت محتوا */}
+      <div className="mt-6">
+        <DefinitionsTab projectId={projectId} prefs={prefs} />
+      </div>
     </div>
   )
 }
@@ -267,8 +205,8 @@ function DefinitionsTab({ projectId, prefs }: { projectId: string; prefs: Prefs 
               {showArchived ? 'هیچ تعریفی ثبت نشده است' : 'هنوز تعریف الونسی ثبت نشده است'}
             </p>
             <p className="mx-auto mt-1 max-w-lg text-xs leading-5 text-muted-foreground">
-              تعریف مرکزی، الونس نام‌دار پروژه است (مثل «نیازهای شخصی» یا «استراحت شیفت»). پس از ساخت، از زبانه
-              «الونس‌های خط تولید» یا فرم ایستگاه/فعالیت/عنصر قابل تخصیص است.
+              تعریف مرکزی، الونس نام‌دار پروژه است (مثل «نیازهای شخصی» یا «استراحت شیفت»). پس از ساخت، از فرم
+              ایستگاه/فعالیت/عنصر (بخش «الونس‌ها و زمان‌های مجاز») قابل تخصیص است.
             </p>
             {!showArchived && (
               <Button size="sm" className="btn-brand mt-3 gap-1.5 border-0" onClick={() => setCreateOpen(true)}>
@@ -758,301 +696,3 @@ function DefinitionFormDialog({
   )
 }
 
-// ═══════════════ زبانه گروه‌های فعالیت — فقط طبقه‌بندی ═══════════════
-// v1.5.2 §۸ — بازطراحی کارت‌های گروه:
-// • §۸-۱ سیستم تایپوگرافی منسجم: عنوان ۱۵px/۷۰۰، توضیح ۱۲px/۴۰۰،
-//   متادیتا ۱۱px، نام فعالیت ۱۲px/۶۰۰ — بدون جهش نامنظم اندازه
-// • §۸-۲ هر فعالیت یک زیرکارت با پس‌زمینهٔ ملایمِ متمایز از کارت گروه
-// • §۸-۳ self-start + items-start — ارتفاع طبیعی بر اساس محتوا
-// • §۸-۴ نام فعالیت + نام ایستگاه با چیدمان مشخص و wrap بدون سرریز؛
-//   «نمایش همه / نمایش کمتر» برای فهرست‌های بلند
-
-/** آستانه نمایش فهرست جمع‌وجور قبل از دکمهٔ «نمایش همه» */
-const GROUP_COLLAPSED_COUNT = 5
-
-function GroupCard({
-  g,
-  prefs,
-  projectId,
-  onDelete,
-}: {
-  g: GroupDto
-  prefs: Prefs
-  projectId: string
-  onDelete: (g: GroupDto) => void
-}) {
-  const navigate = useAppStore((s) => s.navigate)
-  const [expanded, setExpanded] = useState(false)
-  const showAll = expanded || g.activities.length <= GROUP_COLLAPSED_COUNT
-  const visibleActivities = showAll ? g.activities : g.activities.slice(0, GROUP_COLLAPSED_COUNT)
-  const hiddenCount = g.activities.length - visibleActivities.length
-
-  return (
-    // §۸-۳: self-start — کارت به ارتفاع همسایهٔ خودش کشیده نمی‌شود
-    <article className="flex flex-col self-start rounded-xl border border-border/60 bg-surface-2/50 p-4">
-      {/* سربرگ گروه — تایپوگرافی سلسله‌مراتبی (§۸-۱) */}
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0 flex-1">
-          <h3 className="break-words text-[15px] font-bold leading-6">{g.name}</h3>
-          {g.description && (
-            <p className="mt-1 break-words text-xs leading-5 text-muted-foreground">{g.description}</p>
-          )}
-          <p className="num mt-2 text-[11px] leading-5 text-faint">
-            {g.activities.length.toLocaleString('fa-IR')} فعالیت · ساخته‌شده {formatDateTime(g.createdAt, prefs)}
-          </p>
-        </div>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="size-7 shrink-0 text-red hover:text-red"
-          aria-label={`حذف گروه ${g.name}`}
-          onClick={() => onDelete(g)}
-        >
-          <Trash2 className="size-3.5" aria-hidden />
-        </Button>
-      </div>
-      {g.activities.length > 0 ? (
-        /* فاصلهٔ کافی سربرگ ← فهرست + جداکنندهٔ ظریف (§۸-۲) */
-        <ul className="mt-4 space-y-2 border-t border-border/50 pt-4">
-          {visibleActivities.map((a) => (
-            <li key={a.id}>
-              {/* زیرکارت فعالیت — پس‌زمینهٔ نرم متمایز از کارت گروه (§۸-۲)؛
-                  موبایل: نام و ایستگاه پشته‌ای، دسکتاپ: هم‌ردیف (§۸-۵) */}
-              <button
-                type="button"
-                className="
-                  flex w-full flex-col gap-1 rounded-lg border border-border/50 bg-card/80 px-3 py-2 text-right
-                  transition-colors hover:border-brand/40 hover:bg-brand-soft/40
-                  sm:flex-row sm:items-start sm:justify-between sm:gap-3
-                "
-                onClick={() => navigate({ name: 'activity', projectId, activityId: a.id })}
-              >
-                {/* نام فعالیت — wrap کامل؛ بدون بریده‌شدن (§۸-۱) */}
-                <span className="min-w-0 break-words text-xs font-semibold leading-5">{a.name}</span>
-                {/* ایستگاهِ فعالیت — همراهی مشخص با آیکون، بدون سرریز (§۸-۴) */}
-                <span
-                  className="
-                    flex w-fit shrink-0 items-start gap-1 self-start text-[11px] leading-5 text-muted-foreground
-                    sm:max-w-[55%]
-                  "
-                >
-                  <Factory className="mt-[3px] size-3.5 shrink-0 text-faint" aria-hidden />
-                  <span className="min-w-0 break-words">{a.station.name}</span>
-                </span>
-              </button>
-            </li>
-          ))}
-          {/* نمایش همه فعالیت‌ها / نمایش کمتر — دسترسی به فهرست کامل (§۸-۴) */}
-          {g.activities.length > GROUP_COLLAPSED_COUNT && (
-            <li>
-              <button
-                type="button"
-                className="num flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[11px] font-bold text-brand transition-colors hover:bg-brand-soft/40"
-                aria-expanded={expanded}
-                onClick={() => setExpanded((s) => !s)}
-              >
-                {expanded ? (
-                  <>
-                    <ChevronUp className="size-3.5" aria-hidden />
-                    نمایش کمتر
-                  </>
-                ) : (
-                  <>
-                    <ChevronDown className="size-3.5" aria-hidden />
-                    نمایش همه فعالیت‌ها ({hiddenCount.toLocaleString('fa-IR')} مورد دیگر)
-                  </>
-                )}
-              </button>
-            </li>
-          )}
-        </ul>
-      ) : (
-        /* گروه بدون فعالیت — جای‌نگهدار ظریف به‌جای فضای خالی (§۸-۳) */
-        <div className="mt-4 border-t border-border/50 pt-4">
-          <p className="rounded-lg border border-dashed border-border/70 px-3 py-2.5 text-center text-[11px] leading-5 text-muted-foreground">
-            فعالیتی به این گروه نسبت داده نشده است
-          </p>
-        </div>
-      )}
-    </article>
-  )
-}
-
-function GroupsTab({ projectId, prefs }: { projectId: string; prefs: Prefs }) {
-  const qc = useQueryClient()
-  const [createOpen, setCreateOpen] = useState(false)
-  const [createForm, setCreateForm] = useState<{ name: string; description: string }>({ name: '', description: '' })
-  const [creating, setCreating] = useState(false)
-  const [deleting, setDeleting] = useState<GroupDto | null>(null)
-
-  const groupsQ = useQuery({
-    queryKey: qk.groups(projectId),
-    queryFn: () => allowancesApi.groups(projectId),
-  })
-  const groups = groupsQ.data?.items ?? []
-
-  const invalidate = () => {
-    void qc.invalidateQueries({ queryKey: qk.groups(projectId) })
-    void qc.invalidateQueries({ queryKey: qk.projectSummary(projectId) })
-  }
-
-  const createMutation = useMutation({
-    mutationFn: () =>
-      allowancesApi.createGroup(projectId, {
-        name: createForm.name.trim(),
-        description: createForm.description.trim() || null,
-      }),
-    onSuccess: () => {
-      invalidate()
-      toast.success('گروه فعالیت ایجاد شد')
-      setCreateOpen(false)
-    },
-    onError: (err) => toast.error(err instanceof Error ? err.message : 'ایجاد گروه ناموفق بود'),
-  })
-
-  const deleteMutation = useMutation({
-    mutationFn: (g: GroupDto) => allowancesApi.deleteGroup(g.id),
-    onSuccess: (_res, g) => {
-      invalidate()
-      toast.success(`گروه «${g.name}» حذف شد`, {
-        description: `${g.activities.length} فعالیتِ این گروه بدون گروه شد؛ داده آن‌ها حذف نشد.`,
-      })
-      setDeleting(null)
-    },
-    onError: (err) => toast.error(err instanceof Error ? err.message : 'حذف گروه ناموفق بود'),
-  })
-
-  const submitCreate = async () => {
-    if (!createForm.name.trim()) {
-      toast.error('نام گروه الزامی است')
-      return
-    }
-    setCreating(true)
-    try {
-      await createMutation.mutateAsync()
-    } finally {
-      setCreating(false)
-    }
-  }
-
-  return (
-    <section className="card-premium overflow-hidden" aria-label="گروه‌های فعالیت">
-      <div className="card-head flex flex-wrap items-center justify-between gap-3 p-4 pb-3">
-        <div className="flex items-center gap-2.5">
-          <span className="chip-icon bg-cyan-soft text-cyan">
-            {/* v1.5.2 §۵.۴: ListTree — آیکون یکپارچهٔ گروه‌های فعالیت */}
-            <ListTree className="size-5" aria-hidden />
-          </span>
-          <div>
-            <h2 className="text-sm font-extrabold">گروه‌های فعالیت</h2>
-            <p className="text-[11px] text-muted-foreground">طبقه‌بندی فعالیت‌های مشابه — منبع محاسبه نیست</p>
-          </div>
-          <HelpDot label="گروه‌های فعالیت" content={GROUPS_HELP} />
-        </div>
-        <Button size="sm" className="btn-brand gap-1.5 border-0" onClick={() => setCreateOpen(true)}>
-          <Plus className="size-4" aria-hidden />
-          گروه جدید
-        </Button>
-      </div>
-
-      {/* فاصلهٔ محتوا از سربرگ بخش — نه چسبیده، نه شلوغ (v1.5.2 §۸) */}
-      <div className="p-4 pt-4">
-        {groupsQ.isLoading ? (
-          <div className="space-y-2">
-            <Skeleton className="h-14 w-full rounded-xl" />
-            <Skeleton className="h-14 w-full rounded-xl" />
-          </div>
-        ) : groupsQ.isError ? (
-          <EmptyState
-            title="بارگذاری گروه‌ها ناموفق بود"
-            description={groupsQ.error instanceof Error ? groupsQ.error.message : 'خطای نامشخص'}
-            action={
-              <Button variant="outline" size="sm" onClick={() => groupsQ.refetch()}>
-                تلاش مجدد
-              </Button>
-            }
-          />
-        ) : groups.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-border/70 bg-surface-2/50 p-6 text-center">
-            <p className="text-sm font-bold">هنوز گروه فعالیتی ثبت نشده است</p>
-            <p className="mx-auto mt-1 max-w-lg text-xs leading-5 text-muted-foreground">
-              گروه‌ها صرفاً برچسب طبقه‌بندی فعالیت‌ها هستند؛ الونس‌ها از مدل سلسله‌مراتبی (خط → ایستگاه → فعالیت →
-              عنصر) اعمال می‌شوند.
-            </p>
-            <Button size="sm" className="btn-brand mt-3 gap-1.5 border-0" onClick={() => setCreateOpen(true)}>
-              <Plus className="size-4" aria-hidden />
-              اولین گروه
-            </Button>
-          </div>
-        ) : (
-          /* §۸-۳: items-start — کارت‌های هم‌ردیف به ارتفاع هم کشیده نمی‌شوند */
-          <div className="grid items-start gap-4 sm:grid-cols-2">
-            {groups.map((g) => (
-              <GroupCard key={g.id} g={g} prefs={prefs} projectId={projectId} onDelete={setDeleting} />
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* ایجاد گروه */}
-      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-        <DialogContent dir="rtl" className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>گروه فعالیت جدید</DialogTitle>
-            <DialogDescription>
-              گروه فقط برای طبقه‌بندی فعالیت‌هاست؛ مقادیر الونس در سطوح خط/ایستگاه/فعالیت/عنصر تعیین می‌شوند.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="space-y-1.5">
-              <Label htmlFor="group-create-name">نام گروه (الزامی)</Label>
-              <Input
-                id="group-create-name"
-                value={createForm.name}
-                onChange={(e) => setCreateForm((s) => ({ ...s, name: e.target.value }))}
-                placeholder="مثلاً: کار دستی سبک"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="group-create-desc">توضیحات (اختیاری)</Label>
-              <Textarea
-                id="group-create-desc"
-                value={createForm.description}
-                onChange={(e) => setCreateForm((s) => ({ ...s, description: e.target.value }))}
-                className="min-h-14"
-              />
-            </div>
-          </div>
-          <DialogFooter className="gap-2">
-            <Button variant="outline" onClick={() => setCreateOpen(false)}>
-              انصراف
-            </Button>
-            <Button onClick={submitCreate} disabled={creating} className="btn-brand border-0">
-              {creating ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <Plus className="size-4" aria-hidden />}
-              ثبت گروه
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* تأیید حذف گروه */}
-      <ConfirmDeleteDialog
-        open={deleting !== null}
-        onOpenChange={(open) => !open && setDeleting(null)}
-        title="حذف گروه فعالیت"
-        entityName={deleting?.name ?? ''}
-        dependencies={
-          deleting
-            ? {
-                ...(deleting.activities.length > 0
-                  ? { 'فعالیت — فقط بدون گروه می‌شوند؛ داده آن‌ها حذف نمی‌شود': deleting.activities.length }
-                  : {}),
-              }
-            : {}
-        }
-        onConfirm={() => deleting && deleteMutation.mutate(deleting)}
-        loading={deleteMutation.isPending}
-      />
-    </section>
-  )
-}

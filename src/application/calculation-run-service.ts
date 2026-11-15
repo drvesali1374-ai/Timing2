@@ -45,7 +45,6 @@ function compactActivity(a: ActivityAnalysisDto) {
     id: a.activity.id,
     name: a.activity.name,
     stationName: a.activity.stationName,
-    groupName: a.activity.groupName,
     sampleProgress: {
       validCycles: a.sampleProgress.validCycles,
       totalCycles: a.sampleProgress.totalCycles,

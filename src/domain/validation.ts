@@ -97,7 +97,6 @@ export const activityCreateSchema = z.object({
   name: trimmed(200),
   description: z.string().trim().max(3000).nullable().optional(),
   processType: z.enum(PROCESS_TYPES).default('OPERATION'),
-  groupId: z.string().uuid('گروه انتخاب‌شده معتبر نیست').nullable().optional(),
   targetSampleCount: optionalNumber({ min: 1, max: 10000 }),
 })
 
@@ -131,51 +130,11 @@ export const operatorUpdateSchema = operatorCreateSchema.partial().extend({
   expectedUpdatedAt: z.string().datetime().optional(),
 })
 
-// ── گروه‌ها و مجازها — FR-04 ──
-export const groupCreateSchema = z.object({
-  name: trimmed(200),
-  description: z.string().trim().max(2000).nullable().optional(),
-})
-
-export const groupUpdateSchema = groupCreateSchema.partial().extend({
-  expectedUpdatedAt: z.string().datetime().optional(),
-})
-
-export const categoryCreateSchema = z.object({
-  name: trimmed(200),
-  code: z.string().trim().max(50).nullable().optional(),
-  isActive: z.boolean().default(true),
-  sortOrder: numberFromString({ min: 0, max: 9999 }).default(0),
-})
-
-export const categoryUpdateSchema = categoryCreateSchema.partial().extend({
-  expectedUpdatedAt: z.string().datetime().optional(),
-})
-
 // درصد مجاز: مقدار اعشاری محاسباتی — ۱۵٪ = 0.15 — FR-15
 export const percentValueSchema = numberFromString({ min: 0, max: 0.9999 }).refine(
   (n) => n >= 0 && n < 1,
   { message: 'درصد مجاز باید بین ۰ و کمتر از ۱۰۰ باشد' }
 )
-
-export const groupAllowancesPutSchema = z.object({
-  values: z.array(
-    z.object({
-      categoryId: z.string().uuid(),
-      percentValue: percentValueSchema.nullable(), // null = بدون مقدار
-    })
-  ).min(1),
-})
-
-export const activityAllowancesPutSchema = z.object({
-  overrides: z.array(
-    z.object({
-      categoryId: z.string().uuid(),
-      percentValue: percentValueSchema.nullable(), // null = حذف بازنویسی و بازگشت به ارث‌بری
-    })
-  ).min(1),
-  expectedUpdatedAt: z.string().datetime().optional(),
-})
 
 // ── الونس‌ها — مدل جدید سلسله‌مراتبی (جلسه اول) ──
 
@@ -456,10 +415,6 @@ export type ElementCreateInput = z.infer<typeof elementCreateSchema>
 export type ElementUpdateInput = z.infer<typeof elementUpdateSchema>
 export type OperatorCreateInput = z.infer<typeof operatorCreateSchema>
 export type OperatorUpdateInput = z.infer<typeof operatorUpdateSchema>
-export type GroupCreateInput = z.infer<typeof groupCreateSchema>
-export type GroupUpdateInput = z.infer<typeof groupUpdateSchema>
-export type CategoryCreateInput = z.infer<typeof categoryCreateSchema>
-export type CategoryUpdateInput = z.infer<typeof categoryUpdateSchema>
 export type AllowanceDefinitionCreateInput = z.infer<typeof allowanceDefinitionCreateSchema>
 export type AllowanceDefinitionUpdateInput = z.infer<typeof allowanceDefinitionUpdateSchema>
 export type AllowanceOpsPutInput = z.infer<typeof allowanceOpsPutSchema>

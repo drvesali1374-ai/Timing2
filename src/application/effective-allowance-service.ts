@@ -4,8 +4,9 @@
 // • تخصیص در چهار scope: PROJECT/LINE, STATION, ACTIVITY, WORK_ELEMENT
 // • Override / Exclude / Restore (§۲.۴)
 // • resolve از والدها — بدون ذخیره کپی تکراری (§۲.۴ قاعده ۱۰)
-// • migration از مدل قدیمی GroupAllowance/ActivityAllowanceOverride (§۴)
 // • mark stale محاسبات و snapshot تاریخی از طریق CalculationRun
+// v1.5.2 بازبینی نهایی §۱۲ — مهاجرت از مدل قدیمی گروه/دسته حذف شد؛
+// مدل سلسله‌مراتتی تنها منبع اعمال الونس است.
 // ═══════════════════════════════════════════════════════════
 import { db } from '@/lib/db'
 import {
@@ -99,16 +100,6 @@ export interface ScopeAllowancesDto {
   lastModifiedAt: string | null
 }
 
-export interface MigrationReport {
-  projectId: string
-  migrated: boolean
-  definitionsCreated: number
-  assignmentsCreated: number
-  activitiesProcessed: number
-  skippedInactiveCategories: number
-  issues: string[]
-}
-
 // ── کمکی‌ها ──
 
 async function assertProject(projectId: string) {
@@ -122,10 +113,6 @@ async function getMethod(projectId: string): Promise<AllowanceMethod> {
   return (settings[PROJECT_SETTING_KEYS.allowanceMethod] ??
     DEFAULT_PROJECT_SETTINGS[PROJECT_SETTING_KEYS.allowanceMethod]) as AllowanceMethod
 }
-
-/** مارکر migration — تکرارپذیری (§۴.۱.۲) */
-const MIGRATION_MARKER_KEY = 'migration.allowanceModel'
-const MIGRATION_MARKER_VALUE = 'v2'
 
 // ── بافت scope — زنجیره والد و اعتبارسنجی تعلق به پروژه (§۵) ──
 
@@ -243,9 +230,6 @@ export interface ProjectAllowanceContext {
 
 export async function loadProjectAllowanceContext(projectId: string): Promise<ProjectAllowanceContext> {
   await assertProject(projectId)
-  // self-heal: داده قدیمی فراریوشده (import/restore بسته‌های قدیمی) خودکار مهاجرت می‌شود
-  await migrateProjectAllowancesIfNeeded(projectId)
-
   const [defs, assignments, method] = await Promise.all([
     db.allowanceDefinition.findMany({ where: { projectId }, orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }] }),
     db.allowanceAssignment.findMany({
@@ -717,182 +701,6 @@ export async function deleteDefinition(definitionId: string): Promise<{ archived
     projectId: existing.projectId,
   })
   return { archived: false, assignmentCount: 0 }
-}
-
-// ── migration از مدل قدیمی (§۴) ──
-
-// سریال‌سازی مهاجرت per پروژه (الزام ۲ — بخش ۲):
-// درخواست‌های همزمان اولین بارگذاری پروژه قدیمی، به‌جای اجرای تراکنش‌های رقیب روی
-// SQLite (که به timeout تراکنش و خطای 500 می‌انجامد)، در زنجیره درون‌فرایندی صف
-// می‌شوند و منتظر همان وعده مهاجرت می‌مانند؛ سپس داده پس از مهاجرت خوانده می‌شود.
-// globalThis — در حالت dev ماژول ممکن است در چند chunk تکرار شود؛
-// نقشه درون فرایند باید بین همه نمونه‌ها مشترک باشد (الزام ۲)
-const gForMigration = globalThis as unknown as { __t2AllowanceMigrationInflight?: Map<string, Promise<MigrationReport>> }
-const migrationInflight: Map<string, Promise<MigrationReport>> = (gForMigration.__t2AllowanceMigrationInflight ??= new Map())
-
-export function migrateProjectAllowancesIfNeeded(projectId: string): Promise<MigrationReport> {
-  const inflight = migrationInflight.get(projectId)
-  if (inflight) return inflight
-  const run = doMigrateProjectAllowancesIfNeeded(projectId).finally(() => {
-    if (migrationInflight.get(projectId) === run) migrationInflight.delete(projectId)
-  })
-  migrationInflight.set(projectId, run)
-  return run
-}
-
-/**
- * مهاجرت پروژه از مدل گروه/دسته/بازنویسی به مدل مرکزی سلسله‌مراتبی.
- * • دسته‌ها → تعریف مرکزی (حفظ ID — §۴.۱.۳)
- * • مقدار مؤثر قدیم هر فعالیت (دسته فعال + GroupAllowance + اولویت
- *   ActivityAllowanceOverride) → تخصیص سطح ACTIVITY (§۴.۱.۵/۶)
- * • WorkElement بدون تخصیص تکراری — از Activity ارث می‌برد (§۴.۱.۷)
- * • قابل تکرار — مارکر ProjectSetting (§۴.۱.۲)
- * • داده قدیمی حذف نمی‌شود (§۴.۱.۸) — legacy می‌ماند
- */
-async function doMigrateProjectAllowancesIfNeeded(projectId: string): Promise<MigrationReport> {
-  const marker = await db.projectSetting.findUnique({
-    where: { projectId_key: { projectId, key: MIGRATION_MARKER_KEY } },
-  })
-  if (marker?.value === MIGRATION_MARKER_VALUE) {
-    return { projectId, migrated: false, definitionsCreated: 0, assignmentsCreated: 0, activitiesProcessed: 0, skippedInactiveCategories: 0, issues: [] }
-  }
-
-  const issues: string[] = []
-  let definitionsCreated = 0
-  let assignmentsCreated = 0
-  let skippedInactiveCategories = 0
-
-  const [categories, activities] = await Promise.all([
-    db.allowanceCategory.findMany({ where: { projectId }, orderBy: { sortOrder: 'asc' } }),
-    db.activity.findMany({
-      where: { station: { projectId } },
-      include: {
-        group: { include: { groupAllowances: true } },
-        allowanceOverrides: true,
-      },
-    }),
-  ])
-
-  const runMigrationTx = () => db.$transaction(async (tx) => {
-    // ۱. دسته‌ها → تعیف مرکزی (حفظ ID)
-    for (const cat of categories) {
-      const existing = await tx.allowanceDefinition.findUnique({ where: { id: cat.id } })
-      if (existing) continue
-      await tx.allowanceDefinition.create({
-        data: {
-          id: cat.id, // حفظ ID دسته — ارتباط سوابق حفظ می‌شود (§۴.۱.۳)
-          projectId,
-          title: cat.name,
-          code: cat.code,
-          description: null,
-          defaultValueType: null,
-          defaultValuePercent: null,
-          defaultTimeSeconds: null,
-          isActive: cat.isActive,
-          sortOrder: cat.sortOrder,
-        },
-      })
-      definitionsCreated++
-    }
-
-    // ۲. مقدار مؤثر قدیم فعالیت‌ها → تخصیص ACTIVITY
-    for (const activity of activities) {
-      for (const cat of categories) {
-        if (!cat.isActive) {
-          // دسته غیرفعال در مدل قدیم در A لحاظ نمی‌شد — بدون داده ساختگی (§۴.۱.۱۱)
-          if (activity.group?.groupAllowances.some((g) => g.categoryId === cat.id) ||
-              activity.allowanceOverrides.some((o) => o.categoryId === cat.id)) {
-            skippedInactiveCategories++
-          }
-          continue
-        }
-        const groupValue = activity.group?.groupAllowances.find((g) => g.categoryId === cat.id)?.percentValue ?? null
-        const overrideValue = activity.allowanceOverrides.find((o) => o.categoryId === cat.id)?.percentValue ?? null
-        const effective = overrideValue !== null ? overrideValue : groupValue
-        if (effective === null) continue
-
-        const existing = await tx.allowanceAssignment.findUnique({
-          where: { definitionId_scopeType_scopeId: { definitionId: cat.id, scopeType: 'ACTIVITY', scopeId: activity.id } },
-        })
-        if (existing) continue // اجرای مجدد داده را دوبرابر نمی‌کند (§۱۰.۳)
-        await tx.allowanceAssignment.create({
-          data: {
-            definitionId: cat.id,
-            scopeType: 'ACTIVITY',
-            scopeId: activity.id,
-            mode: 'ACTIVE',
-            valueType: 'PERCENT',
-            percentValue: effective,
-            timeValueSeconds: null,
-            applicationBasis: null,
-          },
-        })
-        assignmentsCreated++
-      }
-    }
-
-    // ۳. مارکر — تکرارپذیری
-    await tx.projectSetting.upsert({
-      where: { projectId_key: { projectId, key: MIGRATION_MARKER_KEY } },
-      create: { projectId, key: MIGRATION_MARKER_KEY, value: MIGRATION_MARKER_VALUE },
-      update: { value: MIGRATION_MARKER_VALUE },
-    })
-  }, { timeout: 15_000 })
-
-  // اجرا با تلاش مجدد — رقابت هم‌زمانی/فرایندی بر روی SQLite می‌تواند
-  // به timeout تراکنش بیانجامد؛ پس از هر شکست، مارکر دوباره بررسی می‌شود (اگر مهاجرت رقیب کامل شده باشد، ادامه بدون خطا).
-  const markerNow = () => db.projectSetting.findUnique({ where: { projectId_key: { projectId, key: MIGRATION_MARKER_KEY } } })
-  try {
-    await runMigrationTx()
-  } catch (err) {
-    const m = await markerNow()
-    if (m?.value === MIGRATION_MARKER_VALUE) {
-      return { projectId, migrated: false, definitionsCreated: 0, assignmentsCreated: 0, activitiesProcessed: activities.length, skippedInactiveCategories: 0, issues: [] }
-    }
-    await new Promise((r) => setTimeout(r, 300))
-    try {
-      await runMigrationTx()
-    } catch (err2) {
-      const m2 = await markerNow()
-      if (m2?.value === MIGRATION_MARKER_VALUE) {
-        return { projectId, migrated: false, definitionsCreated: 0, assignmentsCreated: 0, activitiesProcessed: activities.length, skippedInactiveCategories: 0, issues: [] }
-      }
-      throw err2
-    }
-  }
-
-  if (categories.some((c) => !c.isActive)) {
-    issues.push(`${skippedInactiveCategories} مقدار متنعلق به دسته غیرفعال نادیده گرفته شد (مطابق قاعده قدیمی: دسته غیرفعال در A لحاظ نمی‌شد).`)
-  }
-
-  const report: MigrationReport = {
-    projectId,
-    migrated: true,
-    definitionsCreated,
-    assignmentsCreated,
-    activitiesProcessed: activities.length,
-    skippedInactiveCategories,
-    issues,
-  }
-  if (definitionsCreated > 0 || assignmentsCreated > 0) {
-    await recordAudit({
-      entityType: 'Project', entityId: projectId, action: 'UPDATE',
-      entityName: 'مهاجرت الونس‌ها به مدل سلسله‌مراتبی',
-      after: { definitionsCreated, assignmentsCreated, activitiesProcessed: activities.length },
-      projectId,
-    })
-  }
-  return report
-}
-
-/** اجرای مهاجرت روی همه پروژه‌ها — اسکریپت/گزارش */
-export async function migrateAllProjects(): Promise<MigrationReport[]> {
-  const projects = await db.project.findMany({ select: { id: true } })
-  const reports: MigrationReport[] = []
-  for (const p of projects) {
-    reports.push(await migrateProjectAllowancesIfNeeded(p.id))
-  }
-  return reports
 }
 
 // ── resolve برای تحلیل/گزارش — بارگذاری یکجا per activity ──

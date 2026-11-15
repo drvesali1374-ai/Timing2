@@ -22,32 +22,32 @@ export interface StageSummary {
     activities: number
     elements: number
     operators: number
-    groups: number
-    categories: number
+    /** v1.5.2 §۱۲ — تعداد تعریف‌های مرکزی الونس (جایگزین گروه/دسته قدیمی) */
+    allowanceDefinitions: number
     elementsWithRating: number
     finalized: boolean
   }
 }
 
 export async function computeStageSummary(projectId: string): Promise<StageSummary> {
-  const [project, stations, activities, elements, operators, groups, categories, assessments, sessions, validCycles, suspectCount] =
+  const [project, stations, activities, elements, operators, definitions, assignmentCount, assessments, sessions, validCycles, suspectCount] =
     await Promise.all([
       db.project.findUnique({ where: { id: projectId }, select: { studyDate: true, finalization: true } }),
       db.station.findMany({ where: { projectId }, select: { id: true } }),
       db.activity.findMany({
         where: { station: { projectId } },
-        select: { id: true, groupId: true, targetSampleCount: true },
+        select: { id: true, targetSampleCount: true },
       }),
       db.workElement.findMany({
         where: { activity: { station: { projectId } } },
         select: { id: true, activityId: true },
       }),
       db.operator.findMany({ where: { projectId }, select: { id: true } }),
-      db.activityGroup.findMany({
-        where: { projectId },
-        include: { groupAllowances: { select: { id: true, category: { select: { isActive: true } } } } },
+      // v1.5.2 §۱۲ — وضعیت مرحلهٔ الونس‌ها از تعریف مرکزی + تخصیص سلسله‌مراتتی
+      db.allowanceDefinition.count({ where: { projectId, isActive: true, isArchived: false } }),
+      db.allowanceAssignment.count({
+        where: { definition: { projectId }, mode: 'ACTIVE' },
       }),
-      db.allowanceCategory.findMany({ where: { projectId }, select: { id: true, isActive: true } }),
       db.ratingAssessment.findMany({
         where: { workElement: { activity: { station: { projectId } } } },
         select: { id: true },
@@ -115,23 +115,13 @@ export async function computeStageSummary(projectId: string): Promise<StageSumma
     ? { status: 'DONE', hint: 'اپراتورهای مطالعه ثبت شده‌اند.' }
     : { status: 'PENDING', hint: 'حداقل یک اپراتور برای زمان‌سنجی لازم است.' }
 
-  // گروه‌ها و مجازها
-  const activeCategories = categories.filter((c) => c.isActive).length
-  if (activeCategories === 0 && groups.length === 0) {
-    stages.allowances = { status: 'PENDING', hint: 'دسته مجاز و گروه فعالیت تعریف نشده است.' }
-  } else if (groups.length === 0) {
-    stages.allowances = { status: 'IN_PROGRESS', hint: 'دسته‌ها ثبت شده؛ گروه فعالیت بسازید.' }
+  // مجازها و الونس‌ها — v1.5.2 §۱۲/§۱۳: مبتنی بر تعریف مرکزی و تخصیص سلسله‌مراتتی
+  if (definitions === 0) {
+    stages.allowances = { status: 'PENDING', hint: 'هنوز تعریف مرکزی الونسی ثبت نشده است.' }
+  } else if (assignmentCount === 0) {
+    stages.allowances = { status: 'IN_PROGRESS', hint: 'تعریف‌ها ثبت شده‌اند؛ الونس‌ها را به سطوح خط/ایستگاه/فعالیت/عنصر اختصاص دهید.' }
   } else {
-    const groupsWithoutValues = groups.filter(
-      (g) => g.groupAllowances.filter((ga) => ga.category.isActive).length === 0
-    ).length
-    stages.allowances =
-      groupsWithoutValues > 0
-        ? {
-            status: 'IN_PROGRESS',
-            hint: `${groupsWithoutValues} گروه بدون مقدار مجاز فعال است.`,
-          }
-        : { status: 'DONE', hint: 'گروه‌ها و دسته‌های مجاز تکمیل شده‌اند.' }
+    stages.allowances = { status: 'DONE', hint: 'تعریف‌های مرکزی و تخصیص الونس‌ها ثبت شده‌اند.' }
   }
 
   // وستینگهاوس
@@ -276,8 +266,7 @@ export async function computeStageSummary(projectId: string): Promise<StageSumma
       activities: activityCount,
       elements: elementCount,
       operators: operators.length,
-      groups: groups.length,
-      categories: categories.length,
+      allowanceDefinitions: definitions,
       elementsWithRating,
       finalized,
     },

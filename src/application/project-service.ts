@@ -92,13 +92,13 @@ export async function getProjectDetail(projectId: string) {
   })
   if (!project) throw new AppError('PROJECT_NOT_FOUND', 'پروژه یافت نشد.', 404)
 
-  const [stations, activities, elements, operators, groups, sessions, observations, summaries] =
+  const [stations, activities, elements, operators, definitions, sessions, observations, summaries] =
     await Promise.all([
       db.station.count({ where: { projectId } }),
       db.activity.count({ where: { station: { projectId } } }),
       db.workElement.count({ where: { activity: { station: { projectId } } } }),
       db.operator.count({ where: { projectId } }),
-      db.activityGroup.count({ where: { projectId } }),
+      db.allowanceDefinition.count({ where: { projectId, isArchived: false } }),
       db.studySession.count({ where: { activity: { station: { projectId } } } }),
       db.elementObservation.count({ where: { cycle: { session: { activity: { station: { projectId } } } } } }),
       computeStageSummary(projectId),
@@ -117,7 +117,7 @@ export async function getProjectDetail(projectId: string) {
       updatedAt: project.updatedAt.toISOString(),
       settings: Object.fromEntries(project.settings.map((s) => [s.key, s.value])),
     },
-    dependencyCounts: { stations, activities, elements, operators, groups, sessions, observations },
+    dependencyCounts: { stations, activities, elements, operators, allowanceDefinitions: definitions, sessions, observations },
     stageSummary: summaries,
   }
 }

@@ -545,7 +545,7 @@ function ProjectOperationsCard({
     'فعالیت‌ها': dependencyCounts.activities,
     'عناصر کاری': dependencyCounts.elements,
     'اپراتورها': dependencyCounts.operators,
-    'گروه‌های مجاز': dependencyCounts.groups,
+    'تعریف‌های الونس': dependencyCounts.allowanceDefinitions,
     'جلسات زمان‌سنجی': dependencyCounts.sessions,
     'مشاهدات خام': dependencyCounts.observations,
   }
@@ -696,8 +696,8 @@ function DuplicateProjectDialog({
     { key: 'operators', label: 'اپراتورها', desc: 'فهرست اپراتورهای این مطالعه' },
     {
       key: 'groupsAndAllowances',
-      label: 'گروه‌ها و دسته‌های مجاز',
-      desc: 'گروه‌های فعالیت، دسته‌های مجاز و مقادیر گروهی',
+      label: 'تعریف‌های الونس و تخصیص‌ها',
+      desc: 'تعریف‌های مرکزی الونس و تخصیص‌های سلسله‌مراتتی',
     },
     { key: 'ratingTables', label: 'جدول‌های وستینگهاوس', desc: 'جدول‌های مرجع، نمرات و ارزیابی‌های ثبت‌شدهٔ عناصر' },
     { key: 'rawObservations', label: 'مشاهدات خام', desc: 'داده‌های خام زمان‌سنجی ثبت‌شده' },

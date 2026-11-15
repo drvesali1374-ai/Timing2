@@ -77,17 +77,17 @@ const ALLOWANCES_SECTION_HELP = {
 
 // ── کمکی‌ها ──
 
-export type AllowanceScope = 'PROJECT' | 'STATION' | 'ACTIVITY' | 'WORK_ELEMENT'
+// v1.5.2 §۱۳ — سطح PROJECT از UI حذف شد (زبانهٔ «الونس‌های خط تولید»)؛
+// تخصیص از فرم‌های ایستگاه/فعالیت/عنصر انجام می‌شود.
+export type AllowanceScope = 'STATION' | 'ACTIVITY' | 'WORK_ELEMENT'
 
 const SCOPE_FETCH = {
-  PROJECT: allowancesApi.projectAllowances,
   STATION: allowancesApi.stationAllowances,
   ACTIVITY: allowancesApi.activityAllowances,
   WORK_ELEMENT: allowancesApi.elementAllowances,
 } as const
 
 const SCOPE_PUT = {
-  PROJECT: allowancesApi.putProjectAllowances,
   STATION: allowancesApi.putStationAllowances,
   ACTIVITY: allowancesApi.putActivityAllowances,
   WORK_ELEMENT: allowancesApi.putElementAllowances,
@@ -219,13 +219,11 @@ export function AllowanceSection({
   }
 
   const scopeTitle =
-    scopeType === 'PROJECT'
-      ? 'سطح خط تولید (همه ایستگاه‌ها و فعالیت‌ها)'
-      : scopeType === 'STATION'
-        ? 'سطح ایستگاه (فعالیت‌ها و عناصر زیرمجموعه)'
-        : scopeType === 'ACTIVITY'
-          ? 'سطح فعالیت (عناصر کاری زیرمجموعه)'
-          : 'سطح عنصر کاری'
+    scopeType === 'STATION'
+      ? 'سطح ایستگاه (فعالیت‌ها و عناصر زیرمجموعه)'
+      : scopeType === 'ACTIVITY'
+        ? 'سطح فعالیت (عناصر کاری زیرمجموعه)'
+        : 'سطح عنصر کاری'
 
   const rows = data?.resolved.rows ?? []
   const summary = data?.resolved.summary

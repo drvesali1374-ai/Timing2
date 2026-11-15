@@ -260,7 +260,6 @@ function ReportPaper({
             <span className="text-xs font-normal text-slate-600">
               {' '}
               — ایستگاه {sec.activity.stationName} · {sec.activity.processTypeLabel}
-              {sec.activity.groupName ? ` · گروه ${sec.activity.groupName}` : ''}
             </span>
           </h2>
 

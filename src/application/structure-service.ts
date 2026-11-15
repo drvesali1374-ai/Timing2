@@ -56,7 +56,6 @@ export async function listStations(projectId: string) {
       activities: {
         orderBy: { sortOrder: 'asc' },
         include: {
-          group: { select: { id: true, name: true } },
           _count: { select: { workElements: true, sessions: true } },
         },
       },
@@ -164,7 +163,6 @@ export async function listActivities(stationId: string) {
     where: { stationId },
     orderBy: { sortOrder: 'asc' },
     include: {
-      group: { select: { id: true, name: true } },
       _count: { select: { workElements: true, sessions: true } },
     },
   })
@@ -172,12 +170,6 @@ export async function listActivities(stationId: string) {
 
 export async function createActivity(stationId: string, input: ActivityCreateInput) {
   const station = await assertStation(stationId)
-  if (input.groupId) {
-    const group = await db.activityGroup.findUnique({ where: { id: input.groupId } })
-    if (!group || group.projectId !== station.projectId) {
-      throw new AppError('GROUP_NOT_IN_PROJECT', 'گروه انتخاب‌شده به این پروژه تعلق ندارد.', 422)
-    }
-  }
   const maxOrder = await db.activity.aggregate({ where: { stationId }, _max: { sortOrder: true } })
   const activity = await db.activity.create({
     data: {
@@ -185,7 +177,6 @@ export async function createActivity(stationId: string, input: ActivityCreateInp
       name: input.name,
       description: input.description ?? null,
       processType: input.processType,
-      groupId: input.groupId ?? null,
       targetSampleCount: input.targetSampleCount ?? null,
       sortOrder: (maxOrder._max.sortOrder ?? -1) + 1,
     },
@@ -209,25 +200,19 @@ export async function updateActivity(activityId: string, input: ActivityUpdateIn
       throw new AppError('CONFLICT', 'این فعالیت جای دیگری تغییر کرده؛ تازه‌سازی کنید.', 409)
     }
   }
-  if (input.groupId) {
-    const group = await db.activityGroup.findUnique({ where: { id: input.groupId } })
-    if (!group || group.projectId !== existing.station.projectId) {
-      throw new AppError('GROUP_NOT_IN_PROJECT', 'گروه انتخاب‌شده به این پروژه تعلق ندارد.', 422)
-    }
-  }
   const data: Record<string, unknown> = {}
-  for (const key of ['name', 'description', 'processType', 'groupId', 'targetSampleCount'] as const) {
+  for (const key of ['name', 'description', 'processType', 'targetSampleCount'] as const) {
     if (input[key] !== undefined) data[key] = input[key]
   }
   const updated = await db.activity.update({ where: { id: activityId }, data })
   // تغییر پارامتر مؤثر بر محاسبات → نتایج قبلی نیازمند محاسبه مجدد — FR-27
-  if (input.groupId !== undefined || input.targetSampleCount !== undefined) {
+  if (input.targetSampleCount !== undefined) {
     await markProjectCalculationsStale(existing.station.projectId)
   }
   await recordAudit({
     entityType: 'Activity', entityId: activityId, action: 'UPDATE', entityName: updated.name,
-    before: { name: existing.name, processType: existing.processType, groupId: existing.groupId, targetSampleCount: existing.targetSampleCount },
-    after: { name: updated.name, processType: updated.processType, groupId: updated.groupId, targetSampleCount: updated.targetSampleCount },
+    before: { name: existing.name, processType: existing.processType, targetSampleCount: existing.targetSampleCount },
+    after: { name: updated.name, processType: updated.processType, targetSampleCount: updated.targetSampleCount },
     projectId: existing.station.projectId,
   })
   // همگام‌سازی گره‌های نمودار (شناسه پایدار؛ فقط برچسب/نوع به‌روز می‌شود و در صورت لزوم از OPC حذف می‌شود) — FR-20.8/10
@@ -392,7 +377,6 @@ export async function getStructureTree(projectId: string) {
       where: { station: { projectId } },
       orderBy: { sortOrder: 'asc' },
       include: {
-        group: { select: { id: true, name: true } },
         _count: { select: { workElements: true } },
       },
     }),

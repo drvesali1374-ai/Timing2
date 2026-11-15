@@ -94,8 +94,6 @@ const ENTITY_LABELS: Record<string, string> = {
   Activity: 'فعالیت',
   WorkElement: 'عنصر کاری',
   Operator: 'اپراتور',
-  ActivityGroup: 'گروه فعالیت',
-  AllowanceCategory: 'دسته مجاز',
   RatingTable: 'جدول ارزیابی',
   RatingAssessment: 'ارزیابی',
   Backup: 'پشتیبان',
@@ -730,7 +728,7 @@ function PackageTab({ projectId }: { projectId: string }) {
       </div>
       <div className="space-y-4 p-5">
         <p className="text-sm leading-7 text-muted-foreground">
-          بسته شامل manifest، مشخصات پروژه، ساختار تولید، تنظیمات، گروه‌های مجاز، داده‌های خام،
+          بسته شامل manifest، مشخصات پروژه، ساختار تولید، تنظیمات، تعریف‌های الونس، داده‌های خام،
           ارزیابی وستینگهاوس و تاریخچه است. فایل با نسخه ساختار داده (schema) و checksum برای تشخیص
           خرابی همراه است.
         </p>

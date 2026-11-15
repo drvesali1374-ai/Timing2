@@ -140,8 +140,6 @@ export interface ActivityAnalysisDto {
     stationName: string
     processType: string
     targetSampleCount: number | null
-    groupId: string | null
-    groupName: string | null
     projectId: string
   }
   settings: {
@@ -234,7 +232,6 @@ export async function getActivityAnalysis(activityId: string): Promise<ActivityA
     where: { id: activityId },
     include: {
       station: { select: { name: true, project: { select: { id: true } } } },
-      group: { select: { id: true, name: true } },
       workElements: {
         orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
         include: { rating: { include: { ratingTable: { select: { name: true, version: true } } } } },
@@ -561,8 +558,6 @@ export async function getActivityAnalysis(activityId: string): Promise<ActivityA
       stationName: activity.station.name,
       processType: activity.processType,
       targetSampleCount: activity.targetSampleCount,
-      groupId: activity.groupId,
-      groupName: activity.group?.name ?? null,
       projectId,
     },
     settings: {

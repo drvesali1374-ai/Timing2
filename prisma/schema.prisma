@@ -27,16 +27,14 @@ model Project {
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
-  stations            Station[]
-  operators           Operator[]
-  activityGroups      ActivityGroup[]
-  allowanceCategories AllowanceCategory[]
+  stations             Station[]
+  operators            Operator[]
   allowanceDefinitions AllowanceDefinition[]
-  ratingTables        RatingTable[]
-  chartNodes          ChartNode[]
-  calculationRuns     CalculationRun[]
-  settings            ProjectSetting[]
-  finalization        FinalizationInfo?
+  ratingTables         RatingTable[]
+  chartNodes           ChartNode[]
+  calculationRuns      CalculationRun[]
+  settings             ProjectSetting[]
+  finalization         FinalizationInfo?
 
   @@map("projects")
 }
@@ -58,14 +56,14 @@ model ProjectSetting {
 // ═══════════════ ساختار تولید ═══════════════
 
 model Station {
-  id          String   @id @default(uuid())
-  projectId   String   @map("project_id")
+  id          String     @id @default(uuid())
+  projectId   String     @map("project_id")
   name        String
   description String?
-  sortOrder   Int      @default(0) @map("sort_order")
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
-  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  sortOrder   Int        @default(0) @map("sort_order")
+  createdAt   DateTime   @default(now()) @map("created_at")
+  updatedAt   DateTime   @updatedAt @map("updated_at")
+  project     Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
   activities  Activity[]
 
   @@index([projectId])
@@ -73,91 +71,73 @@ model Station {
 }
 
 model Activity {
-  id                String   @id @default(uuid())
-  stationId         String   @map("station_id")
-  groupId           String?  @map("group_id")
+  id                String         @id @default(uuid())
+  stationId         String         @map("station_id")
   name              String
   description       String?
-  processType       String   @default("OPERATION") @map("process_type") // OPERATION|INSPECTION|TRANSPORT|DELAY|STORAGE
-  sortOrder         Int      @default(0) @map("sort_order")
-  targetSampleCount Int?     @map("target_sample_count") // تعداد نمونه هدف در سطح کل فعالیت — FR-12
-  createdAt         DateTime @default(now()) @map("created_at")
-  updatedAt         DateTime @updatedAt @map("updated_at")
-  station           Station          @relation(fields: [stationId], references: [id], onDelete: Cascade)
-  group             ActivityGroup?   @relation(fields: [groupId], references: [id], onDelete: SetNull)
+  processType       String         @default("OPERATION") @map("process_type") // OPERATION|INSPECTION|TRANSPORT|DELAY|STORAGE
+  sortOrder         Int            @default(0) @map("sort_order")
+  targetSampleCount Int?           @map("target_sample_count") // تعداد نمونه هدف در سطح کل فعالیت — FR-12
+  createdAt         DateTime       @default(now()) @map("created_at")
+  updatedAt         DateTime       @updatedAt @map("updated_at")
+  station           Station        @relation(fields: [stationId], references: [id], onDelete: Cascade)
   workElements      WorkElement[]
   sessions          StudySession[]
-  allowanceOverrides ActivityAllowanceOverride[]
 
   @@index([stationId])
   @@map("activities")
 }
 
 model WorkElement {
-  id          String   @id @default(uuid())
-  activityId  String   @map("activity_id")
-  name        String
-  description String?
+  id               String               @id @default(uuid())
+  activityId       String               @map("activity_id")
+  name             String
+  description      String?
   // ── v1.5.0: «نوع عنصر کاری» از UI حذف شد (§۳ دستورالعمل) ──
   // ستون به‌صورت legacy حفظ می‌شود تا داده/تحلیل تاریخی دست‌نخورده بماند؛
   // در هیچ فرم، DTO یا UI به‌عنوان ویژگی فعال ظاهر نمی‌شود.
-  elementType String   @default("MANUAL") @map("element_type") // LEGACY: MANUAL|MACHINE|WAITING|OVERLAP
+  elementType      String               @default("MANUAL") @map("element_type") // LEGACY: MANUAL|MACHINE|WAITING|OVERLAP
   // حالت ورود پیش‌فرض مستقل از نوع عنصر — MANUAL→SEQ / سایر→INT مهاجرت شد (§۳.۲)
-  defaultEntryMode String @default("SEQ") @map("default_entry_mode") // SEQ | INT
+  defaultEntryMode String               @default("SEQ") @map("default_entry_mode") // SEQ | INT
   // خط زمانی پیش‌فرض مستقل از نوع عنصر — MACHINE/OVERLAP→MACHINE / سایر→OPERATOR (§۳.۲)
-  defaultLaneType  String @default("OPERATOR") @map("default_lane_type") // OPERATOR | MACHINE
-  sortOrder   Int      @default(0) @map("sort_order")
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
-  activity       Activity           @relation(fields: [activityId], references: [id], onDelete: Cascade)
-  observations   ElementObservation[]
-  rating         RatingAssessment?
+  defaultLaneType  String               @default("OPERATOR") @map("default_lane_type") // OPERATOR | MACHINE
+  sortOrder        Int                  @default(0) @map("sort_order")
+  createdAt        DateTime             @default(now()) @map("created_at")
+  updatedAt        DateTime             @updatedAt @map("updated_at")
+  activity         Activity             @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  observations     ElementObservation[]
+  rating           RatingAssessment?
 
   @@index([activityId])
   @@map("work_elements")
 }
 
-// ═══════════════ گروه‌ها و مجازها ═══════════════
-// ── مدل جدید الونس‌ها (جلسه اول بازطراحی) ──
+// ═══════════════ الونس‌ها ═══════════════
+// ── مدل الونس‌ها (جلسه اول بازطراحی) ──
 // سلسله‌مراتب: Project/Line → Station → Activity → WorkElement
 // تعریف مرکزی (AllowanceDefinition) از تخصیص (AllowanceAssignment) جدا است.
-// مدل‌های قدیمی (ActivityGroup/AllowanceCategory/GroupAllowance/
-// ActivityAllowanceOverride) به‌صورت legacy حفظ می‌شوند؛ پس از migration
-// منبع دوم محاسبه نیستند (§۴.۱.۸ سند جلسه اول).
-
-model ActivityGroup {
-  id          String   @id @default(uuid())
-  projectId   String   @map("project_id")
-  name        String
-  description String?
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
-  project         Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  activities      Activity[]
-  groupAllowances GroupAllowance[]
-
-  @@index([projectId])
-  @@map("activity_groups")
-}
+// v1.5.2 بازبینی نهایی §۱۲/§۱۳ — خوشهٔ قدیمی گروه/دسته/بازنویسی
+// (ActivityGroup/AllowanceCategory/GroupAllowance/ActivityAllowanceOverride)
+// به‌طور کامل حذف شد؛ تعریف‌های مرکزی و تخصیص سلسله‌مراتتی معتبرند.
 
 // تعریف مرکزی الونس — هر پروژه فهرست مرکزی خود را دارد.
 // مقدار پیش‌فرض صرفاً پیشنهاد اولیه فرم تخصیص است؛ به‌تنهایی اعمال نمی‌شود.
 model AllowanceDefinition {
-  id                  String   @id @default(uuid())
-  projectId           String   @map("project_id")
+  id                  String                @id @default(uuid())
+  projectId           String                @map("project_id")
   title               String
   code                String?
   description         String?
-  defaultValueType    String?  @map("default_value_type") // PERCENT | FIXED_TIME — فقط همراه مقدار پیش‌فرض
-  defaultValuePercent Float?   @map("default_value_percent") // اعشاری محاسباتی (۱۵٪ = 0.15)
-  defaultTimeSeconds  Float?   @map("default_time_seconds") // نرمال‌شده برحسب ثانیه
-  isActive            Boolean  @default(true) @map("is_active")
-  sortOrder           Int      @default(0) @map("sort_order")
-  isArchived          Boolean  @default(false) @map("is_archived") // آرشیو به‌جای حذف دارای‌سابقه
-  createdAt           DateTime @default(now()) @map("created_at")
-  updatedAt           DateTime @updatedAt @map("updated_at")
-  project     Project               @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  assignments AllowanceAssignment[]
+  defaultValueType    String?               @map("default_value_type") // PERCENT | FIXED_TIME — فقط همراه مقدار پیش‌فرض
+  defaultValuePercent Float?                @map("default_value_percent") // اعشاری محاسباتی (۱۵٪ = 0.15)
+  defaultTimeSeconds  Float?                @map("default_time_seconds") // نرمال‌شده برحسب ثانیه
+  isActive            Boolean               @default(true) @map("is_active")
+  sortOrder           Int                   @default(0) @map("sort_order")
+  isArchived          Boolean               @default(false) @map("is_archived") // آرشیو به‌جای حذف دارای‌سابقه
+  createdAt           DateTime              @default(now()) @map("created_at")
+  updatedAt           DateTime              @updatedAt @map("updated_at")
+  project             Project               @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  assignments         AllowanceAssignment[]
 
   @@index([projectId])
   @@map("allowance_definitions")
@@ -167,81 +147,36 @@ model AllowanceDefinition {
 // scopeId برای PROJECT همان projectId است.
 // ارث‌بری با resolve در زمان درخواست انجام می‌شود؛ کپی تکراری ذخیره نمی‌شود.
 model AllowanceAssignment {
-  id               String   @id @default(uuid())
-  definitionId     String   @map("definition_id")
-  scopeType        String   @map("scope_type") // PROJECT | STATION | ACTIVITY | WORK_ELEMENT
-  scopeId          String   @map("scope_id")
-  mode             String   @default("ACTIVE") // ACTIVE | EXCLUDE
-  valueType        String   @map("value_type") // PERCENT | FIXED_TIME
-  percentValue     Float?   @map("percent_value") // فقط برای PERCENT
-  timeValueSeconds Float?   @map("time_value_seconds") // فقط برای FIXED_TIME — برحسب ثانیه
-  applicationBasis String?  @map("application_basis") // PER_ELEMENT_EXECUTION | PER_CYCLE — فقط برای زمان ثابت
-  createdAt        DateTime @default(now()) @map("created_at")
-  updatedAt        DateTime @updatedAt @map("updated_at")
-  definition AllowanceDefinition @relation(fields: [definitionId], references: [id], onDelete: Cascade)
+  id               String              @id @default(uuid())
+  definitionId     String              @map("definition_id")
+  scopeType        String              @map("scope_type") // PROJECT | STATION | ACTIVITY | WORK_ELEMENT
+  scopeId          String              @map("scope_id")
+  mode             String              @default("ACTIVE") // ACTIVE | EXCLUDE
+  valueType        String              @map("value_type") // PERCENT | FIXED_TIME
+  percentValue     Float?              @map("percent_value") // فقط برای PERCENT
+  timeValueSeconds Float?              @map("time_value_seconds") // فقط برای FIXED_TIME — برحسب ثانیه
+  applicationBasis String?             @map("application_basis") // PER_ELEMENT_EXECUTION | PER_CYCLE — فقط برای زمان ثابت
+  createdAt        DateTime            @default(now()) @map("created_at")
+  updatedAt        DateTime            @updatedAt @map("updated_at")
+  definition       AllowanceDefinition @relation(fields: [definitionId], references: [id], onDelete: Cascade)
 
   @@unique([definitionId, scopeType, scopeId])
   @@index([scopeType, scopeId])
   @@map("allowance_assignments")
 }
 
-model AllowanceCategory {
-  id        String   @id @default(uuid())
-  projectId String   @map("project_id")
-  name      String
-  code      String?
-  isActive  Boolean  @default(true) @map("is_active")
-  sortOrder Int      @default(0) @map("sort_order")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-  project        Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  groupAllowances        GroupAllowance[]
-  activityAllowanceOverrides ActivityAllowanceOverride[]
-
-  @@index([projectId])
-  @@map("allowance_categories")
-}
-
-// مقدار گروه برای هر دسته — درصد به‌صورت اعشاری محاسباتی (۱۵٪ = 0.15) — FR-15
-model GroupAllowance {
-  id           String   @id @default(uuid())
-  groupId      String   @map("group_id")
-  categoryId   String   @map("category_id")
-  percentValue Float    @map("percent_value")
-  updatedAt    DateTime @updatedAt @map("updated_at")
-  group        ActivityGroup     @relation(fields: [groupId], references: [id], onDelete: Cascade)
-  category     AllowanceCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
-
-  @@unique([groupId, categoryId])
-  @@map("group_allowances")
-}
-
-// بازنویسی مقدار دسته در سطح فعالیت — FR-04
-model ActivityAllowanceOverride {
-  id           String   @id @default(uuid())
-  activityId   String   @map("activity_id")
-  categoryId   String   @map("category_id")
-  percentValue Float    @map("percent_value")
-  updatedAt    DateTime @updatedAt @map("updated_at")
-  activity     Activity          @relation(fields: [activityId], references: [id], onDelete: Cascade)
-  category     AllowanceCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
-
-  @@unique([activityId, categoryId])
-  @@map("activity_allowance_overrides")
-}
-
 // ═══════════════ اپراتورها و جلسات ═══════════════
 
 model Operator {
-  id          String   @id @default(uuid())
-  projectId   String   @map("project_id")
-  displayName String   @map("display_name")
+  id          String         @id @default(uuid())
+  projectId   String         @map("project_id")
+  displayName String         @map("display_name")
   code        String?
   notes       String?
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
-  project  Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  sessions StudySession[]
+  createdAt   DateTime       @default(now()) @map("created_at")
+  updatedAt   DateTime       @updatedAt @map("updated_at")
+  project     Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  sessions    StudySession[]
 
   @@index([projectId])
   @@map("operators")
@@ -250,18 +185,18 @@ model Operator {
 // جلسه: ترکیب فعالیت × اپراتور × روش اندازه‌گیری — FR-06
 // روش اندازه‌گیری پس از ایجاد قابل تغییر نیست (جلسه جدید لازم است)
 model StudySession {
-  id           String    @id @default(uuid())
-  activityId   String    @map("activity_id")
-  operatorId   String    @map("operator_id")
-  timingMethod String    @map("timing_method") // SNAPBACK | CONTINUOUS
-  status       String    @default("OPEN") // OPEN | CLOSED
+  id           String             @id @default(uuid())
+  activityId   String             @map("activity_id")
+  operatorId   String             @map("operator_id")
+  timingMethod String             @map("timing_method") // SNAPBACK | CONTINUOUS
+  status       String             @default("OPEN") // OPEN | CLOSED
   notes        String?
-  startedAt    DateTime  @default(now()) @map("started_at")
-  endedAt      DateTime? @map("ended_at")
-  updatedAt    DateTime  @updatedAt @map("updated_at")
-  activity Activity          @relation(fields: [activityId], references: [id], onDelete: Cascade)
-  operator Operator          @relation(fields: [operatorId], references: [id], onDelete: Cascade)
-  cycles   CycleObservation[]
+  startedAt    DateTime           @default(now()) @map("started_at")
+  endedAt      DateTime?          @map("ended_at")
+  updatedAt    DateTime           @updatedAt @map("updated_at")
+  activity     Activity           @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  operator     Operator           @relation(fields: [operatorId], references: [id], onDelete: Cascade)
+  cycles       CycleObservation[]
 
   @@index([activityId])
   @@index([operatorId])
@@ -270,14 +205,14 @@ model StudySession {
 
 // چرخه: یک ردیف جدول زمان‌سنجی — FR-07
 model CycleObservation {
-  id         String   @id @default(uuid())
-  sessionId  String   @map("session_id")
-  cycleNo    Int      @map("cycle_no")
-  notes      String?
-  isComplete Boolean  @default(false) @map("is_complete")
-  createdAt  DateTime @default(now()) @map("created_at")
-  updatedAt  DateTime @updatedAt @map("updated_at")
-  session      StudySession        @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  id           String               @id @default(uuid())
+  sessionId    String               @map("session_id")
+  cycleNo      Int                  @map("cycle_no")
+  notes        String?
+  isComplete   Boolean              @default(false) @map("is_complete")
+  createdAt    DateTime             @default(now()) @map("created_at")
+  updatedAt    DateTime             @updatedAt @map("updated_at")
+  session      StudySession         @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   lanes        TimelineLane[]
   observations ElementObservation[]
 
@@ -287,11 +222,11 @@ model CycleObservation {
 
 // خط زمانی مستقل (اپراتور/ماشین) برای کار هم‌زمان — FR-10
 model TimelineLane {
-  id       String  @id @default(uuid())
-  cycleId  String  @map("cycle_id")
-  laneType String  @map("lane_type") // OPERATOR | MACHINE | OTHER
-  label    String
-  cycle    CycleObservation    @relation(fields: [cycleId], references: [id], onDelete: Cascade)
+  id           String               @id @default(uuid())
+  cycleId      String               @map("cycle_id")
+  laneType     String               @map("lane_type") // OPERATOR | MACHINE | OTHER
+  label        String
+  cycle        CycleObservation     @relation(fields: [cycleId], references: [id], onDelete: Cascade)
   observations ElementObservation[]
 
   @@index([cycleId])
@@ -301,26 +236,26 @@ model TimelineLane {
 // مشاهده عنصر در چرخه — قلب سیستم — FR-08/09/10/11
 // داده خام (RawDuration/CumulativeReading/Start-EndOffset) و وضعیت محاسباتی جدا هستند
 model ElementObservation {
-  id                String   @id @default(uuid())
-  cycleId           String   @map("cycle_id")
-  workElementId     String   @map("work_element_id")
-  laneId            String?  @map("lane_id")
-  rawDuration       Float?   @map("raw_duration") // روش برگشت به صفر: مقدار خام ثبت‌شده
-  cumulativeReading Float?   @map("cumulative_reading") // روش پیوسته: قرائت تجمعی خام
-  startOffset       Float?   @map("start_offset") // هم‌پوشانی: شروع نسبت به مبدأ چرخه
-  endOffset         Float?   @map("end_offset") // هم‌پوشانی: پایان نسبت به مبدأ چرخه
-  derivedDuration   Float?   @map("derived_duration") // مقدار تفاضلی/بازه‌ای محاسبه‌شده (قابل بازسازی)
-  validityStatus    String   @default("VALID") @map("validity_status") // VALID|SUSPECT|EXCLUDED|INVALID
-  isUserExcluded    Boolean  @default(false) @map("is_user_excluded")
-  exclusionReason   String?  @map("exclusion_reason")
-  outlierScore      Float?   @map("outlier_score")
-  outlierRule       String?  @map("outlier_rule")
+  id                String           @id @default(uuid())
+  cycleId           String           @map("cycle_id")
+  workElementId     String           @map("work_element_id")
+  laneId            String?          @map("lane_id")
+  rawDuration       Float?           @map("raw_duration") // روش برگشت به صفر: مقدار خام ثبت‌شده
+  cumulativeReading Float?           @map("cumulative_reading") // روش پیوسته: قرائت تجمعی خام
+  startOffset       Float?           @map("start_offset") // هم‌پوشانی: شروع نسبت به مبدأ چرخه
+  endOffset         Float?           @map("end_offset") // هم‌پوشانی: پایان نسبت به مبدأ چرخه
+  derivedDuration   Float?           @map("derived_duration") // مقدار تفاضلی/بازه‌ای محاسبه‌شده (قابل بازسازی)
+  validityStatus    String           @default("VALID") @map("validity_status") // VALID|SUSPECT|EXCLUDED|INVALID
+  isUserExcluded    Boolean          @default(false) @map("is_user_excluded")
+  exclusionReason   String?          @map("exclusion_reason")
+  outlierScore      Float?           @map("outlier_score")
+  outlierRule       String?          @map("outlier_rule")
   // جلسه ۲ — snapshot تشخیصی در لحظه پرچم‌گذاری SUSPECT (مقدار/روش/آستانه/آمار)
-  outlierSnapshot   String?  @map("outlier_snapshot") // JSON: {value, method, threshold, statistics, flaggedAt}
-  updatedAt         DateTime @updatedAt @map("updated_at")
-  cycle        CycleObservation @relation(fields: [cycleId], references: [id], onDelete: Cascade)
-  workElement WorkElement      @relation(fields: [workElementId], references: [id], onDelete: Cascade)
-  lane        TimelineLane?    @relation(fields: [laneId], references: [id], onDelete: SetNull)
+  outlierSnapshot   String?          @map("outlier_snapshot") // JSON: {value, method, threshold, statistics, flaggedAt}
+  updatedAt         DateTime         @updatedAt @map("updated_at")
+  cycle             CycleObservation @relation(fields: [cycleId], references: [id], onDelete: Cascade)
+  workElement       WorkElement      @relation(fields: [workElementId], references: [id], onDelete: Cascade)
+  lane              TimelineLane?    @relation(fields: [laneId], references: [id], onDelete: SetNull)
 
   @@index([cycleId])
   @@index([workElementId])
@@ -358,16 +293,16 @@ model ParallelElementRelation {
 
 // جدول مرجع نسخه‌دار — FR-13 (نام، نسخه، منبع، توضیح)
 model RatingTable {
-  id        String   @id @default(uuid())
-  projectId String   @map("project_id")
-  name      String
-  version   Int      @default(1)
-  source    String?
-  notes     String?
-  isDefault Boolean  @default(false) @map("is_default")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-  project     Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  id          String             @id @default(uuid())
+  projectId   String             @map("project_id")
+  name        String
+  version     Int                @default(1)
+  source      String?
+  notes       String?
+  isDefault   Boolean            @default(false) @map("is_default")
+  createdAt   DateTime           @default(now()) @map("created_at")
+  updatedAt   DateTime           @updatedAt @map("updated_at")
+  project     Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
   grades      RatingTableGrade[]
   assessments RatingAssessment[]
 
@@ -377,15 +312,15 @@ model RatingTable {
 
 // درجه‌های جدول (۴ عامل × درجه‌ها) — قابل ویرایش با ذخیره نسخه جدید
 model RatingTableGrade {
-  id            String  @id @default(uuid())
-  ratingTableId String  @map("rating_table_id")
+  id            String      @id @default(uuid())
+  ratingTableId String      @map("rating_table_id")
   factor        String // SKILL | EFFORT | CONDITIONS | CONSISTENCY
-  gradeCode     String  @map("grade_code") // A1, B2, C, D, ...
+  gradeCode     String      @map("grade_code") // A1, B2, C, D, ...
   label         String // برچسب فارسی درجه
   value         Float // مقدار مثبت/منفی (+0.06 یا -0.05)
   hint          String? // توضیح/راهنمای فارسی
-  sortOrder     Int     @default(0) @map("sort_order")
-  ratingTable RatingTable @relation(fields: [ratingTableId], references: [id], onDelete: Cascade)
+  sortOrder     Int         @default(0) @map("sort_order")
+  ratingTable   RatingTable @relation(fields: [ratingTableId], references: [id], onDelete: Cascade)
 
   @@unique([ratingTableId, factor, gradeCode])
   @@map("rating_table_grades")
@@ -393,23 +328,23 @@ model RatingTableGrade {
 
 // ارزیابی در سطح عنصر کاری — مشترک برای تمام مشاهدات همان عنصر — FR-13/۱۰.۲
 model RatingAssessment {
-  id               String   @id @default(uuid())
-  workElementId    String   @unique @map("work_element_id")
-  ratingTableId    String   @map("rating_table_id")
-  skillGrade       String?  @map("skill_grade")
-  effortGrade      String?  @map("effort_grade")
-  conditionsGrade  String?  @map("conditions_grade")
-  consistencyGrade String?  @map("consistency_grade")
-  skillValue       Float    @default(0) @map("skill_value")
-  effortValue      Float    @default(0) @map("effort_value")
-  conditionsValue  Float    @default(0) @map("conditions_value")
-  consistencyValue Float    @default(0) @map("consistency_value")
-  totalFactor      Float    @default(1) @map("total_factor") // R = 1 + S + E + C + Cons
+  id               String      @id @default(uuid())
+  workElementId    String      @unique @map("work_element_id")
+  ratingTableId    String      @map("rating_table_id")
+  skillGrade       String?     @map("skill_grade")
+  effortGrade      String?     @map("effort_grade")
+  conditionsGrade  String?     @map("conditions_grade")
+  consistencyGrade String?     @map("consistency_grade")
+  skillValue       Float       @default(0) @map("skill_value")
+  effortValue      Float       @default(0) @map("effort_value")
+  conditionsValue  Float       @default(0) @map("conditions_value")
+  consistencyValue Float       @default(0) @map("consistency_value")
+  totalFactor      Float       @default(1) @map("total_factor") // R = 1 + S + E + C + Cons
   notes            String?
-  createdAt        DateTime @default(now()) @map("created_at")
-  updatedAt        DateTime @updatedAt @map("updated_at")
-  workElement WorkElement @relation(fields: [workElementId], references: [id], onDelete: Cascade)
-  ratingTable RatingTable @relation(fields: [ratingTableId], references: [id], onDelete: Restrict)
+  createdAt        DateTime    @default(now()) @map("created_at")
+  updatedAt        DateTime    @updatedAt @map("updated_at")
+  workElement      WorkElement @relation(fields: [workElementId], references: [id], onDelete: Cascade)
+  ratingTable      RatingTable @relation(fields: [ratingTableId], references: [id], onDelete: Restrict)
 
   @@map("rating_assessments")
 }
@@ -426,7 +361,7 @@ model CalculationRun {
   status           String   @default("PENDING") // PENDING | DONE | STALE
   createdAt        DateTime @default(now()) @map("created_at")
   updatedAt        DateTime @updatedAt @map("updated_at")
-  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project          Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   @@index([projectId])
   @@map("calculation_runs")
@@ -445,7 +380,7 @@ model ChartNode {
   isManual   Boolean  @default(false) @map("is_manual")
   sortOrder  Int      @default(0) @map("sort_order")
   updatedAt  DateTime @updatedAt @map("updated_at")
-  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project    Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   @@index([projectId, chartType])
   @@map("chart_nodes")

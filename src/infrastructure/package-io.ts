@@ -39,11 +39,11 @@ export interface ProjectPackage {
 /** جداول متعلق به هر بخش قابل انتخاب در کپی/خروجی — FR-01/FR-25 */
 export const SECTION_TABLES: Record<string, DomainTable[]> = {
   settings: ['projectSetting'],
-  structure: ['station', 'activity', 'workElement', 'activityAllowanceOverride'],
+  structure: ['station', 'activity', 'workElement'],
   operators: ['operator'],
-  // تعریف مرکزی + تخصیص‌های سلسله‌مراتبی (جلسه اول) —
-  // جداول قدیمی گروه/دسته نیز برای سازگاری بسته‌های قدیمی منتقل می‌شوند
-  groupsAndAllowances: ['activityGroup', 'allowanceCategory', 'groupAllowance', 'allowanceDefinition', 'allowanceAssignment'],
+  // تعریف مرکزی + تخصیص‌های سلسله‌مراتتی (جلسه اول) —
+  // v1.5.2 §۱۲ — جداول قدیمی گروه/دسته حذف شدند؛ در ورود بسته‌های قدیمی نادیده گرفته می‌شوند
+  groupsAndAllowances: ['allowanceDefinition', 'allowanceAssignment'],
   // ارزیابی‌های ثبت‌شدهٔ عناصر نیز بخشی از دادهٔ وستینگهاوس‌اند — FR-25
   ratingTables: ['ratingTable', 'ratingTableGrade', 'ratingAssessment'],
   rawObservations: ['studySession', 'cycleObservation', 'timelineLane', 'elementObservation'],
@@ -156,15 +156,11 @@ const FK_MAP: Record<string, string[]> = {
   project: [],
   projectSetting: ['projectId'],
   station: ['projectId'],
-  activityGroup: ['projectId'],
-  allowanceCategory: ['projectId'],
   allowanceDefinition: ['projectId'],
   operator: ['projectId'],
   ratingTable: ['projectId'],
-  activity: ['stationId', 'groupId'],
+  activity: ['stationId'],
   ratingTableGrade: ['ratingTableId'],
-  groupAllowance: ['groupId', 'categoryId'],
-  activityAllowanceOverride: ['activityId', 'categoryId'],
   // scopeId چندشکلی است و در remapProjectData به‌صورت اختصاصی بازنویسی می‌شود
   allowanceAssignment: ['definitionId'],
   workElement: ['activityId'],
@@ -191,7 +187,7 @@ const ASSIGNMENT_SCOPE_TABLE: Record<string, string> = {
 
 /** فیلدهای FK اختیاری — اگر مبدأ کپی نشده باشد null می‌شوند؛
  *  FK اجباری حل‌نشده باعث حذف ردیف بی‌معنا می‌شود (مثلاً Override بدون دسته مجاز) */
-const NULLABLE_FKS = new Set(['activity.groupId', 'chartNode.activityId', 'elementObservation.laneId'])
+const NULLABLE_FKS = new Set(['chartNode.activityId', 'elementObservation.laneId'])
 
 /** بازتولید تمام شناسه‌های یک snapshot داده پروژه (remap)
  *  شناسه جدید UUID تازه است؛ ارجاعات داخلی بازنویسی می‌شوند */
@@ -263,8 +259,6 @@ function remapProjectData(
 function reverseFkTable(table: string, fk: string): string {
   if (fk === 'projectId') return 'project'
   if (fk === 'stationId') return 'station'
-  if (fk === 'groupId') return 'activityGroup'
-  if (fk === 'categoryId') return 'allowanceCategory'
   if (fk === 'definitionId') return 'allowanceDefinition'
   if (fk === 'activityId') return 'activity'
   if (fk === 'ratingTableId') return 'ratingTable'
@@ -279,9 +273,13 @@ function reverseFkTable(table: string, fk: string): string {
   throw new Error(`نگاشت ناشناخته: ${table}.${fk}`)
 }
 
-/** سازگاری بسته‌های قدیمی (schema ≤ v۳) با ساختار v۱.۵.۲ §۲:
- *  overlapRelation → parallelElementRelation؛ observationOverlap حذف
- *  (مقادیر عددی ماتریس دیگر جایی در ساختار ندارند). */
+/** سازگاری بسته‌های قدیمی با ساختار جاری:
+ *  • schema ≤ v۳ — v1.5.2 §۲: overlapRelation → parallelElementRelation؛
+ *    observationOverlap حذف (مقادیر عددی ماتریس جایی در ساختار ندارند).
+ *  • پیش از v1.5.2 بازبینی نهایی §۱۲ — جداول قدیمی گروه/دسته/بازنویسی
+ *    (activityGroup/allowanceCategory/groupAllowance/activityAllowanceOverride)
+ *    حذف و ستون groupId فعالیت‌ها کنار گذاشته می‌شود؛ دادهٔ معتبر
+ *    تعریف مرکزی/تخصیص سلسله‌مراتتی دست‌نخورده باقی می‌ماند. */
 function normalizeLegacyPackageData(
   data: Record<string, Record<string, unknown>[]>
 ): Record<string, Record<string, unknown>[]> {
@@ -291,6 +289,20 @@ function normalizeLegacyPackageData(
   }
   delete out.overlapRelation
   delete out.observationOverlap
+  // §۱۲ — خوشهٔ قدیمی گروه/دسته
+  delete out.activityGroup
+  delete out.allowanceCategory
+  delete out.groupAllowance
+  delete out.activityAllowanceOverride
+  if (Array.isArray(out.activity)) {
+    out.activity = out.activity.map((row) => {
+      if ('groupId' in row) {
+        const { groupId: _legacyGroupId, ...rest } = row
+        return rest
+      }
+      return row
+    })
+  }
   return out
 }
 
@@ -326,10 +338,6 @@ export async function importProjectPackage(jsonText: string): Promise<{ projectI
     })
     return { projectId: newProjectId }
   })
-  // بسته‌های قدیمی (schema v1) تعریف‌های مرکزی ندارند —
-  // مهاجرت idempotent پس از درج اجرا می‌شود (§۴)
-  const { migrateProjectAllowancesIfNeeded } = await import('../application/effective-allowance-service')
-  await migrateProjectAllowancesIfNeeded(result.projectId)
   // v1.5.0 §۳.۳ — بستهٔ قدیمی دارای elementType: نرمال‌سازی به پیش‌فرض‌های فنی مستقل.
   // v1.5.1 §۹ — روابط بین‌فعالیت بسته‌های قدیمی دیگر آرشیو نمی‌شوند؛
   // وضعیت اصلی isActive حفظ می‌شود (سیاست CROSS_ACTIVITY_NOT_SUPPORTED لغو شد).
@@ -439,8 +447,5 @@ export async function duplicateProject(
     })
     return { projectId: newProjectId }
   })
-  // مبدأ مهاجرت‌نشده (داده قدیمی بدون تعریف مرکزی) — مهاجرت idempotent
-  const { migrateProjectAllowancesIfNeeded } = await import('../application/effective-allowance-service')
-  await migrateProjectAllowancesIfNeeded(result.projectId)
   return result
 }

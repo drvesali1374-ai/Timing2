@@ -17,15 +17,11 @@ export const DOMAIN_TABLES_INSERT_ORDER = [
   'project',
   'projectSetting',
   'station',
-  'activityGroup',
-  'allowanceCategory',
   'allowanceDefinition',
   'operator',
   'ratingTable',
   'activity',
   'ratingTableGrade',
-  'groupAllowance',
-  'activityAllowanceOverride',
   'workElement',
   'allowanceAssignment',
   'studySession',
@@ -76,7 +72,7 @@ function whereForProject(table: DomainTable, projectId: string): Record<string, 
   // جدول خود پروژه با کلید اصلی فیلتر می‌شود
   if (table === 'project') return { id: projectId }
   const direct: DomainTable[] = [
-    'projectSetting', 'station', 'activityGroup', 'allowanceCategory', 'allowanceDefinition',
+    'projectSetting', 'station', 'allowanceDefinition',
     'operator', 'ratingTable', 'chartNode', 'chartEdge', 'calculationRun', 'finalizationInfo',
   ]
   if (direct.includes(table)) return { projectId }
@@ -86,10 +82,6 @@ function whereForProject(table: DomainTable, projectId: string): Record<string, 
       return { station: { projectId } }
     case 'ratingTableGrade':
       return { ratingTable: { projectId } }
-    case 'groupAllowance':
-      return { group: { projectId } }
-    case 'activityAllowanceOverride':
-      return { activity: { station: { projectId } } }
     case 'allowanceAssignment':
       // همهٔ تخصیص‌های تعریف‌های همین پروژه — scopeها همیشه درون پروژه‌اند (اعتبارسنجی سرویس)
       return { definition: { projectId } }
@@ -154,24 +146,13 @@ export async function checksumOf(data: unknown): Promise<string> {
 const FK_DEPENDENCIES: Record<string, { table: string; fk: string; nullable: boolean }[]> = {
   projectSetting: [{ table: 'project', fk: 'projectId', nullable: false }],
   station: [{ table: 'project', fk: 'projectId', nullable: false }],
-  activityGroup: [{ table: 'project', fk: 'projectId', nullable: false }],
-  allowanceCategory: [{ table: 'project', fk: 'projectId', nullable: false }],
   allowanceDefinition: [{ table: 'project', fk: 'projectId', nullable: false }],
   operator: [{ table: 'project', fk: 'projectId', nullable: false }],
   ratingTable: [{ table: 'project', fk: 'projectId', nullable: false }],
   activity: [
     { table: 'station', fk: 'stationId', nullable: false },
-    { table: 'activityGroup', fk: 'groupId', nullable: true },
   ],
   ratingTableGrade: [{ table: 'ratingTable', fk: 'ratingTableId', nullable: false }],
-  groupAllowance: [
-    { table: 'activityGroup', fk: 'groupId', nullable: false },
-    { table: 'allowanceCategory', fk: 'categoryId', nullable: false },
-  ],
-  activityAllowanceOverride: [
-    { table: 'activity', fk: 'activityId', nullable: false },
-    { table: 'allowanceCategory', fk: 'categoryId', nullable: false },
-  ],
   allowanceAssignment: [
     // scopeId چندشکلی است — در enforceReferentialIntegrity به‌صورت اختصاصی بررسی می‌شود
     { table: 'allowanceDefinition', fk: 'definitionId', nullable: false },

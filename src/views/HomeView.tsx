@@ -228,7 +228,7 @@ export default function HomeView() {
         'فعالیت‌ها': detail.dependencyCounts.activities,
         'عناصر کاری': detail.dependencyCounts.elements,
         'اپراتورها': detail.dependencyCounts.operators,
-        'گروه‌های مجاز': detail.dependencyCounts.groups,
+        'تعریف‌های الونس': detail.dependencyCounts.allowanceDefinitions,
         'جلسات زمان‌سنجی': detail.dependencyCounts.sessions,
         'مشاهدات خام': detail.dependencyCounts.observations,
       })
@@ -412,7 +412,7 @@ export default function HomeView() {
               {[
                 'پروژه مطالعه بسازید — نام خط تولید، محصول و تاریخ مطالعه را ثبت کنید.',
                 'ساختار خط (ایستگاه، فعالیت، عنصر کاری) و اپراتورها را تعریف کنید.',
-                'گروه‌های مجاز و ارزیابی وستینگهاوس را تنظیم کنید؛ زمان‌سنجی و گزارش‌ها در فازهای بعدی فعال می‌شوند.',
+                'تعریف‌های الونس و ارزیابی وستینگهاوس را تنظیم کنید؛ زمان‌سنجی و گزارش‌ها در فازهای بعدی فعال می‌شوند.',
               ].map((step, i) => (
                 <li key={i} className="flex items-start gap-2 rounded-xl bg-muted p-3 text-xs leading-6">
                   <span className="num mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full bg-brand-soft text-[11px] font-bold text-brand">
@@ -947,8 +947,8 @@ function DuplicateProjectDialog({
     { key: 'operators', label: 'اپراتورها', desc: 'فهرست اپراتورهای این مطالعه' },
     {
       key: 'groupsAndAllowances',
-      label: 'گروه‌ها و دسته‌های مجاز',
-      desc: 'گروه‌های فعالیت، دسته‌های مجاز و مقادیر گروهی',
+      label: 'تعریف‌های الونس و تخصیص‌ها',
+      desc: 'تعریف‌های مرکزی الونس و تخصیص‌های سلسله‌مراتتی',
     },
     { key: 'ratingTables', label: 'جدول‌های وستینگهاوس', desc: 'جدول‌های مرجع ارزیابی و نمرات آنها' },
     { key: 'rawObservations', label: 'مشاهدات خام', desc: 'داده‌های خام زمان‌سنجی ثبت‌شده' },

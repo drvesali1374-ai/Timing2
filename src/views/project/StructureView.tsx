@@ -69,12 +69,10 @@ import { SortableList } from '@/components/common/SortableList'
 import { useAutosave } from '@/hooks/use-autosave'
 import { useIsMobile } from '@/hooks/use-mobile'
 import {
-  allowancesApi,
   projectsApi,
   structureApi,
   type ActivityDto,
   type ElementDto,
-  type GroupDto,
   type StationDto,
 } from '@/lib/api/endpoints'
 import { api } from '@/lib/api-client'
@@ -104,7 +102,6 @@ interface ActivityFormState {
   name: string
   description: string
   processType: string
-  groupId: string // '' یعنی بدون گروه
 }
 
 interface ElementFormState {
@@ -113,11 +110,9 @@ interface ElementFormState {
 }
 
 const EMPTY_STATION_FORM: StationFormState = { name: '', description: '' }
-const EMPTY_ACTIVITY_FORM: ActivityFormState = { name: '', description: '', processType: 'OPERATION', groupId: '' }
+const EMPTY_ACTIVITY_FORM: ActivityFormState = { name: '', description: '', processType: 'OPERATION' }
 const EMPTY_ELEMENT_FORM: ElementFormState = { name: '', description: '' }
 
-/** مقدار Sentinel — Radix Select مقدار رشته خالی قبول نمی‌کند */
-const NO_GROUP = 'none'
 
 // ── محتوای راهنمای آیکونی — FR-28 / ۷.۵ ──
 const LINE_HELP = {
@@ -146,13 +141,6 @@ const PROCESS_TYPE_HELP = {
   input: 'ماهیت غالب فعالیت را انتخاب کنید؛ پیش‌فرض «عملیات» است.',
   example: 'برای کنترل کیفیت «بازرسی» و برای انتقال قطعه بین ایستگاه‌ها «حمل‌ونقل» را انتخاب کنید.',
   note: 'این نوع صرفاً دسته‌بندی و نمادگذاری است و روی محاسبات زمان اثری ندارد.',
-} as const
-
-const GROUP_ASSIGN_HELP = {
-  what: 'گروه فعالیت فقط برای طبقه‌بندی فعالیت‌های مشابه است؛ دیگر منبع اعمال الونس نیست. الونس‌ها به‌صورت سلسله‌مراتبی از خط ← ایستگاه ← فعالیت ← عنصر resolve می‌شوند.',
-  input: 'گروه دلخواه را انتخاب کنید یا «بدون گروه» بگذارید.',
-  example: '«کار دستی سبک»، «کار ماشینی سنگین»',
-  note: 'مقادیر قدیمی گروه‌ها هنگام مهاجرت به تخصیص سطح فعالیت تبدیل شده‌اند تا نتیجه پروژه‌های موجود حفظ شود.',
 } as const
 
 const ELEMENT_NAME_HELP = {
@@ -239,10 +227,6 @@ export default function StructureView({ projectId }: { projectId: string }) {
       productName: d.project.productName,
     }),
   })
-  const groupsQuery = useQuery({
-    queryKey: qk.groups(projectId),
-    queryFn: () => allowancesApi.groups(projectId),
-  })
   // درخت، _count.sessions را برنمی‌گرداند؛ هنگام باز شدن دیالوگ تأیید حذف،
   // فهرست ایستگاه‌ها (که شمارش جلسات دارد) به‌صورت تازه بارگذاری می‌شود — FR-26
   const deleteDepsQuery = useQuery({
@@ -257,7 +241,6 @@ export default function StructureView({ projectId }: { projectId: string }) {
   })
 
   const stations = treeQuery.data?.stations ?? []
-  const groups = groupsQuery.data?.items ?? []
   const selectedStation = useMemo(
     () => stations.find((s) => s.id === selectedStationId) ?? null,
     [stations, selectedStationId]
@@ -527,7 +510,6 @@ export default function StructureView({ projectId }: { projectId: string }) {
           name: activityCreateForm.name.trim(),
           description: activityCreateForm.description.trim() || null,
           processType: activityCreateForm.processType,
-          groupId: activityCreateForm.groupId || null,
         },
       })
     } finally {
@@ -845,9 +827,6 @@ export default function StructureView({ projectId }: { projectId: string }) {
             <ActivityEditForm
               key={activityEditor.activity.id}
               activity={activityEditor.activity}
-              groups={groups}
-              groupsLoading={groupsQuery.isLoading}
-              groupsError={groupsQuery.isError}
               onClose={() => setActivityEditor(null)}
               onSaved={onActivitySaved}
             />
@@ -907,36 +886,6 @@ export default function StructureView({ projectId }: { projectId: string }) {
                         ))}
                       </SelectContent>
                     </Select>
-                  </div>
-                  <div className="space-y-1.5">
-                    <div className="flex items-center gap-1">
-                      <Label>گروه فعالیت (طبقه‌بندی)</Label>
-                      <HelpDot label="گروه فعالیت" content={GROUP_ASSIGN_HELP} />
-                    </div>
-                    <Select
-                      value={activityCreateForm.groupId || NO_GROUP}
-                      onValueChange={(v) =>
-                        setActivityCreateForm((s) => ({ ...s, groupId: v === NO_GROUP ? '' : v }))
-                      }
-                      disabled={groupsQuery.isLoading}
-                    >
-                      <SelectTrigger aria-label="گروه فعالیت">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent dir="rtl">
-                        <SelectItem value={NO_GROUP}>بدون گروه</SelectItem>
-                        {groups.map((g) => (
-                          <SelectItem key={g.id} value={g.id}>
-                            {g.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    {groupsQuery.isError && (
-                      <p className="text-xs leading-5 text-red">
-                        بارگذاری گروه‌ها ناموفق بود؛ فعلاً تنها «بدون گروه» در دسترس است.
-                      </p>
-                    )}
                   </div>
                 </div>
               </div>
@@ -1512,7 +1461,6 @@ function ActivityNode(p: ActivityNodeProps) {
   const { activity, prefs, parentSelected, isSelected, isOpen, hasSearch } = p
   const elements = p.visibleElements(activity)
   const elementCount = activityElementCount(activity)
-  const groupLabel = activity.group?.name ?? null
 
   return (
     <Collapsible
@@ -1529,7 +1477,7 @@ function ActivityNode(p: ActivityNodeProps) {
               ? 'border-border/60 bg-surface-2/90 hover:border-brand/35'
               : 'border-border/60 bg-surface-2/80 hover:border-brand/35'
         )}
-        title={`${processLabelOf(activity.processType)}${groupLabel ? ` · گروه: ${groupLabel}` : ''} · ${formatInt(elementCount, prefs)} عنصر کاری`}
+        title={`${processLabelOf(activity.processType)} · ${formatInt(elementCount, prefs)} عنصر کاری`}
       >
         <div className="flex items-stretch gap-1 py-1 pe-1 ps-8">
           {/* chevron — فقط باز/بسته عناصر کاری؛ مستقل از انتخاب (§۲.۴) */}
@@ -1573,7 +1521,7 @@ function ActivityNode(p: ActivityNodeProps) {
             </div>
             {/* شمارش عناصر در خط مجزا زیر عنوان — همیشه نمایان (v1.5.2 §۲.۳) */}
             <p className="num text-[10.5px] leading-4 text-muted-foreground">
-              {formatInt(elementCount, prefs)} عنصر کاری{groupLabel ? ` · گروه: ${groupLabel}` : ''}
+              {formatInt(elementCount, prefs)} عنصر کاری
             </p>
           </div>
           {/* عملیات: ورود به فعالیت + ویرایش + حذف در یک ردیف افقی —
@@ -1859,7 +1807,6 @@ function StationDetailsPanel({
                     <span className="block truncate text-sm font-bold">{a.name}</span>
                     <span className="num block truncate text-[11px] text-muted-foreground">
                       {formatInt(activityElementCount(a), prefs)} عنصر کاری
-                      {a.group ? ` · گروه ${a.group.name}` : ''}
                     </span>
                   </span>
                   <ChevronDown className="size-4 shrink-0 -rotate-90 text-faint transition-colors group-hover:text-brand" aria-hidden />
@@ -1899,16 +1846,10 @@ function StationDetailsPanel({
 
 function ActivityEditForm({
   activity,
-  groups,
-  groupsLoading,
-  groupsError,
   onClose,
   onSaved,
 }: {
   activity: ActivityDto
-  groups: GroupDto[]
-  groupsLoading: boolean
-  groupsError: boolean
   onClose: () => void
   onSaved: () => void
 }) {
@@ -1916,7 +1857,6 @@ function ActivityEditForm({
     name: activity.name,
     description: activity.description ?? '',
     processType: activity.processType,
-    groupId: activity.groupId ?? '',
   }))
   const updatedAtRef = useRef(activity.updatedAt)
 
@@ -1928,7 +1868,6 @@ function ActivityEditForm({
         name: value.name.trim(),
         description: value.description.trim() || null,
         processType: value.processType,
-        groupId: value.groupId || null,
         expectedUpdatedAt: updatedAtRef.current,
       })
       updatedAtRef.current = res.activity.updatedAt
@@ -1984,34 +1923,6 @@ function ActivityEditForm({
                 ))}
               </SelectContent>
             </Select>
-          </div>
-          <div className="space-y-1.5">
-            <div className="flex items-center gap-1">
-              <Label>گروه فعالیت (طبقه‌بندی)</Label>
-              <HelpDot label="گروه فعالیت" content={GROUP_ASSIGN_HELP} />
-            </div>
-            <Select
-              value={form.groupId || NO_GROUP}
-              onValueChange={(v) => setForm((s) => ({ ...s, groupId: v === NO_GROUP ? '' : v }))}
-              disabled={groupsLoading}
-            >
-              <SelectTrigger aria-label="گروه فعالیت">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent dir="rtl">
-                <SelectItem value={NO_GROUP}>بدون گروه</SelectItem>
-                {groups.map((g) => (
-                  <SelectItem key={g.id} value={g.id}>
-                    {g.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {groupsError && (
-              <p className="text-xs leading-5 text-red">
-                بارگذاری گروه‌ها ناموفق بود؛ فعلاً تنها «بدون گروه» در دسترس است.
-              </p>
-            )}
           </div>
         </div>
       </div>

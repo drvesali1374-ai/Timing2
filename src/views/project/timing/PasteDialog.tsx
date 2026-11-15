@@ -147,7 +147,7 @@ export function PasteDialog({
   const doPreview = async () => {
     setPreviewing(true)
     try {
-      await runPreview.mutateAsync()
+      await runPreview.mutateAsync(undefined)
     } finally {
       setPreviewing(false)
     }

@@ -33,8 +33,8 @@ export interface StageSummaryDto {
     activities: number
     elements: number
     operators: number
-    groups: number
-    categories: number
+    /** v1.5.2 §۱۲ — جایگزین گروه/دسته قدیمی */
+    allowanceDefinitions: number
     elementsWithRating: number
     finalized: boolean
   }
@@ -58,7 +58,7 @@ export interface ProjectDetailDto {
     activities: number
     elements: number
     operators: number
-    groups: number
+    allowanceDefinitions: number
     sessions: number
     observations: number
   }
@@ -79,7 +79,6 @@ export interface StationDto {
 export interface ActivityDto {
   id: string
   stationId: string
-  groupId: string | null
   name: string
   description: string | null
   processType: string
@@ -87,7 +86,6 @@ export interface ActivityDto {
   targetSampleCount: number | null
   createdAt: string
   updatedAt: string
-  group?: { id: string; name: string } | null
   _count?: { workElements: number; sessions: number }
   elements?: ElementDto[]
 }
@@ -113,31 +111,6 @@ export interface OperatorDto {
   updatedAt: string
   sessionsCount: number
   activitiesCount: number
-}
-
-export interface GroupDto {
-  id: string
-  projectId: string
-  name: string
-  description: string | null
-  createdAt: string
-  updatedAt: string
-  totalA: number
-  groupAllowances: { categoryId: string; percentValue: number; category: { name: string; isActive: boolean } }[]
-  activities: { id: string; name: string; station: { name: string } }[]
-}
-
-export interface CategoryDto {
-  id: string
-  projectId: string
-  name: string
-  code: string | null
-  isActive: boolean
-  sortOrder: number
-  createdAt: string
-  updatedAt: string
-  groupValuesCount: number
-  overrideCount: number
 }
 
 export interface AllowanceDefinitionDto {
@@ -632,13 +605,10 @@ export const allowancesApi = {
   deleteDefinition: (id: string) =>
     api.del<{ archived: boolean; assignmentCount: number }>(`/api/allowance-definitions/${id}`),
 
-  // تخصیص در چهار سطح — resolve + عملیات (§۵)
-  projectAllowances: (projectId: string) => api.get<ScopeAllowancesDto>(`/api/projects/${projectId}/allowances`),
+  // تخصیص در سطوح — resolve + عملیات (§۵) — v1.5.2 §۱۳: سطح خط از UI حذف شد
   stationAllowances: (stationId: string) => api.get<ScopeAllowancesDto>(`/api/stations/${stationId}/allowances`),
   activityAllowances: (activityId: string) => api.get<ScopeAllowancesDto>(`/api/activities/${activityId}/allowances`),
   elementAllowances: (elementId: string) => api.get<ScopeAllowancesDto>(`/api/elements/${elementId}/allowances`),
-  putProjectAllowances: (projectId: string, ops: AllowanceOpInput[], expectedUpdatedAt?: string) =>
-    api.put<ScopeAllowancesDto>(`/api/projects/${projectId}/allowances`, { ops, expectedUpdatedAt }),
   putStationAllowances: (stationId: string, ops: AllowanceOpInput[], expectedUpdatedAt?: string) =>
     api.put<ScopeAllowancesDto>(`/api/stations/${stationId}/allowances`, { ops, expectedUpdatedAt }),
   putActivityAllowances: (activityId: string, ops: AllowanceOpInput[], expectedUpdatedAt?: string) =>
@@ -646,13 +616,6 @@ export const allowancesApi = {
   putElementAllowances: (elementId: string, ops: AllowanceOpInput[], expectedUpdatedAt?: string) =>
     api.put<ScopeAllowancesDto>(`/api/elements/${elementId}/allowances`, { ops, expectedUpdatedAt }),
 
-  // گروه‌های فعالیت — فقط طبقه‌بندی (پس از migration منبع دوم محاسبه نیست)
-  groups: (projectId: string) => api.get<{ items: GroupDto[] }>(`/api/projects/${projectId}/groups`),
-  createGroup: (projectId: string, body: { name: string; description?: string | null }) =>
-    api.post<{ group: GroupDto }>(`/api/projects/${projectId}/groups`, body),
-  updateGroup: (id: string, body: Record<string, unknown>, changeId?: string) =>
-    api.put<{ group: GroupDto }>(`/api/groups/${id}`, body, changeId),
-  deleteGroup: (id: string) => api.del<{ deleted: boolean; removedCounts: { values: number; activities: number } }>(`/api/groups/${id}`),
 }
 
 // ── وستینگهاوس ──
@@ -762,8 +725,6 @@ export interface ActivityAnalysisDto {
     stationName: string
     processType: string
     targetSampleCount: number | null
-    groupId: string | null
-    groupName: string | null
     projectId: string
   }
   settings: {
@@ -1147,7 +1108,6 @@ export interface ReportActivitySectionDto {
     name: string
     stationName: string
     processTypeLabel: string
-    groupName: string | null
     description: string | null
     targetSampleCount: number | null
   }

@@ -2,8 +2,8 @@
 
 // ═══════════════════════════════════════════════════════════
 // صفحه اختصاصی فعالیت — FR-03 (چهار زبانه)
-// ۱. مشخصات: فرم ذخیره خودکار (expectedUpdatedAt) + مجازهای
-//    مؤثر (FR-04: ارث گروه + بازنویسی با debounce) + عملیات
+// ۱. مشخصات: فرم ذخیره خودکار (expectedUpdatedAt) +
+//    الونس‌های سلسله‌مراتتی سطح فعالیت + عملیات
 // ۲. عناصر کاری: SortableList با D&D، ویرایش autosave، حذف
 //    با شمارش وابستگی‌ها (FR-26)
 // ۳. زمان‌سنجی و ۴. تحلیل نتایج: برگهٔ زمان‌سنجی و تحلیل کامل همان فعالیت
@@ -64,7 +64,6 @@ import {
   structureApi,
   type ActivityDto,
   type ElementDto,
-  type GroupDto,
 } from '@/lib/api/endpoints'
 import { qk } from '@/lib/api/keys'
 import {
@@ -85,8 +84,6 @@ import { ProcessSymbol } from '@/components/common/ProcessSymbol'
 type Prefs = ReturnType<typeof useDisplayPrefs>
 type TabKey = 'info' | 'elements' | 'timing' | 'analysis'
 
-/** مقدار Sentinel — Radix Select مقدار رشته خالی قبول نمی‌کند */
-const NO_GROUP = 'none'
 /** سقف مقدار اعشاری درصد طبق اعتبارسنجی API (۰٫۹۹۹۹ = ۹۹٫۹۹٪) — FR-15 */
 const MAX_PERCENT_DECIMAL = 0.9999
 /** تأخیر debounce ذخیره بازنویسی مجازها */
@@ -96,7 +93,6 @@ interface ActivityInfoFormState {
   name: string
   description: string
   processType: string
-  groupId: string
   targetSampleCount: number | null
 }
 
@@ -135,13 +131,6 @@ const PROCESS_TYPE_HELP = {
   example: 'برای کنترل کیفیت «بازرسی» و برای انتقال قطعه «حمل‌ونقل» را انتخاب کنید.',
 } as const
 
-const GROUP_ASSIGN_HELP = {
-  what: 'گروه مجازها مجموعه‌ای از درصدهای مجاز است که فعالیت مقادیر آن را به ارث می‌برد؛ با انتخاب گروه، جدول «مجازهای مؤثر» پایین فعال می‌شود.',
-  input: 'گروه مناسب ماهیت فعالیت را انتخاب کنید یا «بدون گروه» بگذارید.',
-  example: '«کار دستی سبک»، «کار ماشینی سنگین»',
-  note: 'بدون گروه هیچ مجازی اعمال نمی‌شود؛ در همین صفحه می‌توانید پس از انتخاب گروه، مقدار هر دسته را بازنویسی کنید.',
-} as const
-
 const ELEMENT_NAME_HELP = {
   what: 'عنصر کاری کوچک‌ترین واحد قابل‌اندازه‌گیری فعالیت است؛ شناسه آن پایدار است و تغییر نام، ارتباط تاریخی و گره‌های نموداری را از بین نمی‌برد.',
   input: 'نامی کوتاه برای بخشی از کار که در یک حرکت اجرا می‌شود.',
@@ -174,7 +163,6 @@ function ActivityScreen({ projectId, activityId }: { projectId: string; activity
   const qc = useQueryClient()
   const navigate = useAppStore((s) => s.navigate)
   const [tab, setTab] = useState<TabKey>('info')
-  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false)
 
   // ── داده‌ها ──
   const elementsQ = useQuery({
@@ -197,12 +185,6 @@ function ActivityScreen({ projectId, activityId }: { projectId: string; activity
     enabled: stationId !== null,
   })
 
-  const groupsQ = useQuery({
-    queryKey: qk.groups(projectId),
-    queryFn: () => allowancesApi.groups(projectId),
-  })
-  const groups = groupsQ.data?.items ?? []
-
   const stationName = useMemo(
     () => treeQ.data?.stations.find((s) => s.id === stationId)?.name ?? null,
     [treeQ.data, stationId]
@@ -224,30 +206,11 @@ function ActivityScreen({ projectId, activityId }: { projectId: string; activity
     void qc.invalidateQueries({ queryKey: qk.structure(projectId) })
     void qc.invalidateQueries({ queryKey: ['activities'] })
     void qc.invalidateQueries({ queryKey: ['elements'] })
-    void qc.invalidateQueries({ queryKey: qk.groups(projectId) })
     void qc.invalidateQueries({ queryKey: ['scope-allowances'] })
     void qc.invalidateQueries({ queryKey: qk.projectSummary(projectId) })
     void qc.invalidateQueries({ queryKey: qk.projects() })
     void qc.invalidateQueries({ queryKey: qk.ratingMatrix(projectId) })
   }
-
-  // ── حذف فعالیت — پس از موفقیت به ساختار بازمی‌گردیم ──
-  const deleteActivityMutation = useMutation({
-    mutationFn: () => structureApi.deleteActivity(activityId),
-    onSuccess: (res) => {
-      invalidateActivityScope()
-      toast.success(`فعالیت «${activityName}» به‌طور دائمی حذف شد`, {
-        description: removedCountsText(prefs, [
-          ['عنصر کاری', res.removedCounts.elements],
-          ['جلسه زمان‌سنجی', res.removedCounts.sessions],
-          ['مشاهده', res.removedCounts.observations],
-        ]),
-      })
-      setConfirmDeleteOpen(false)
-      navigate({ name: 'project', projectId, stage: 'structure' })
-    },
-    onError: (err) => toast.error(err instanceof Error ? err.message : 'حذف فعالیت ناموفق بود'),
-  })
 
   const goBack = () => navigate({ name: 'project', projectId, stage: 'structure' })
 
@@ -319,17 +282,6 @@ function ActivityScreen({ projectId, activityId }: { projectId: string; activity
           ) : (
             <Skeleton className="h-6 w-24 shrink-0 rounded-full" />
           )}
-          {/* حذف فعالیت در هدر اصلی — در همهٔ زبانه‌ها در دسترس — v1.5.2 §۳ */}
-          <Button
-            variant="outline"
-            size="icon"
-            className="size-9 shrink-0 border-red/30 text-red hover:border-red/50 hover:bg-red-soft hover:text-red"
-            onClick={() => setConfirmDeleteOpen(true)}
-            aria-label="حذف این فعالیت"
-            title="حذف این فعالیت — دائمی است؛ شمارش وابستگی‌ها پیش از تأیید نمایش داده می‌شود"
-          >
-            <Trash2 className="size-4" aria-hidden />
-          </Button>
         </div>
 
         <p className="num text-xs text-muted-foreground">
@@ -404,9 +356,6 @@ function ActivityScreen({ projectId, activityId }: { projectId: string; activity
             <ActivityInfoForm
               key={activity.id}
               activity={activity}
-              groups={groups}
-              groupsLoading={groupsQ.isLoading}
-              groupsError={groupsQ.isError}
               prefs={prefs}
               onSaved={invalidateActivityScope}
             />
@@ -468,19 +417,6 @@ function ActivityScreen({ projectId, activityId }: { projectId: string; activity
         </TabsContent>
       </Tabs>
 
-      {/* تأیید حذف دائمی فعالیت — FR-26 */}
-      <ConfirmDeleteDialog
-        open={confirmDeleteOpen}
-        onOpenChange={setConfirmDeleteOpen}
-        title="حذف دائمی فعالیت"
-        entityName={activityName}
-        dependencies={{
-          'عنصر کاری': elements.length,
-          'جلسه زمان‌سنجی': activity?._count?.sessions ?? 0,
-        }}
-        onConfirm={() => deleteActivityMutation.mutate()}
-        loading={deleteActivityMutation.isPending}
-      />
     </div>
   )
 }
@@ -490,16 +426,10 @@ function ActivityScreen({ projectId, activityId }: { projectId: string; activity
 // ═══════════════════════════════════════════════════════════
 function ActivityInfoForm({
   activity,
-  groups,
-  groupsLoading,
-  groupsError,
   prefs,
   onSaved,
 }: {
   activity: ActivityDto
-  groups: GroupDto[]
-  groupsLoading: boolean
-  groupsError: boolean
   prefs: Prefs
   onSaved: () => void
 }) {
@@ -507,7 +437,6 @@ function ActivityInfoForm({
     name: activity.name,
     description: activity.description ?? '',
     processType: activity.processType,
-    groupId: activity.groupId ?? '',
     targetSampleCount: activity.targetSampleCount,
   }))
   const updatedAtRef = useRef(activity.updatedAt)
@@ -520,7 +449,6 @@ function ActivityInfoForm({
         name: value.name.trim(),
         description: value.description.trim() || null,
         processType: value.processType,
-        groupId: value.groupId || null,
         targetSampleCount: value.targetSampleCount,
         expectedUpdatedAt: updatedAtRef.current,
       })
@@ -585,34 +513,6 @@ function ActivityInfoForm({
                 ))}
               </SelectContent>
             </Select>
-          </div>
-          <div className="space-y-1.5">
-            <div className="flex items-center gap-1">
-              <Label>گروه مجازها</Label>
-              <HelpDot label="گروه مجازها" content={GROUP_ASSIGN_HELP} />
-            </div>
-            <Select
-              value={form.groupId || NO_GROUP}
-              onValueChange={(v) => setForm((s) => ({ ...s, groupId: v === NO_GROUP ? '' : v }))}
-              disabled={groupsLoading}
-            >
-              <SelectTrigger className="w-full" aria-label="گروه مجازها">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={NO_GROUP}>بدون گروه</SelectItem>
-                {groups.map((g) => (
-                  <SelectItem key={g.id} value={g.id}>
-                    {g.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {groupsError && (
-              <p className="text-[11px] leading-5 text-red">
-                بارگذاری گروه‌ها ناموفق بود؛ فعلاً تنها «بدون گروه» در دسترس است.
-              </p>
-            )}
           </div>
         </div>
 

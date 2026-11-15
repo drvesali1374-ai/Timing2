@@ -16,7 +16,6 @@ export function GET(req: NextRequest, ctx: Ctx) {
         name: activity.name,
         description: activity.description,
         processType: activity.processType,
-        groupId: activity.groupId,
         targetSampleCount: activity.targetSampleCount,
         stationId: activity.stationId,
         updatedAt: activity.updatedAt.toISOString(),

@@ -27,7 +27,6 @@ function zodToAppError(e: ZodError): AppError {
     displayName: 'نام نمایشی',
     percentValue: 'درصد مجاز',
     targetSampleCount: 'تعداد نمونه هدف',
-    groupId: 'گروه',
     processType: 'نوع فرایندی',
   }
   const fieldLabel = first ? friendly[first.path.split('.')[0]] ?? first.path : ''

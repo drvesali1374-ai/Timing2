@@ -23,12 +23,10 @@ export async function markDeleted(tx: Tx, entityType: string, ids: string[]): Pr
 
 /** شناسه تمام فرزندان وابسته به یک پروژه (برای نشانگذاری پیش از حذف) */
 export async function collectProjectTreeIds(projectId: string): Promise<Record<string, string[]>> {
-  const [settings, stations, groups, categories, operators, ratingTables, chartNodes, chartEdges, runs, finalization, parallelRelations] =
+  const [settings, stations, operators, ratingTables, chartNodes, chartEdges, runs, finalization, parallelRelations] =
     await Promise.all([
       db.projectSetting.findMany({ where: { projectId }, select: { id: true } }),
       db.station.findMany({ where: { projectId }, select: { id: true } }),
-      db.activityGroup.findMany({ where: { projectId }, select: { id: true } }),
-      db.allowanceCategory.findMany({ where: { projectId }, select: { id: true } }),
       db.operator.findMany({ where: { projectId }, select: { id: true } }),
       db.ratingTable.findMany({ where: { projectId }, select: { id: true } }),
       db.chartNode.findMany({ where: { projectId }, select: { id: true } }),
@@ -45,8 +43,6 @@ export async function collectProjectTreeIds(projectId: string): Promise<Record<s
     Project: [projectId],
     ProjectSetting: settings.map((x) => x.id),
     Station: stationIds,
-    ActivityGroup: groups.map((x) => x.id),
-    AllowanceCategory: categories.map((x) => x.id),
     Operator: operators.map((x) => x.id),
     RatingTable: ratingTables.map((x) => x.id),
     ChartNode: chartNodes.map((x) => x.id),
@@ -61,7 +57,7 @@ export async function collectProjectTreeIds(projectId: string): Promise<Record<s
 /** درخت وابستگی ایستگاه‌ها — شامل خودِ ایستگاه‌ها (نشانگر حذف باید ریشه را هم بپوشاند تا با Restore شبح خالی برنگردد — FR-26) */
 export async function collectStationsTreeIds(stationIds: string[]): Promise<Record<string, string[]>> {
   if (stationIds.length === 0) {
-    return { Station: [], Activity: [], WorkElement: [], StudySession: [], CycleObservation: [], TimelineLane: [], ElementObservation: [], ActivityAllowanceOverride: [], RatingAssessment: [], ChartNode: [], ChartEdge: [] }
+    return { Station: [], Activity: [], WorkElement: [], StudySession: [], CycleObservation: [], TimelineLane: [], ElementObservation: [], RatingAssessment: [], ChartNode: [], ChartEdge: [] }
   }
   const activities = await db.activity.findMany({
     where: { stationId: { in: stationIds } },
@@ -75,12 +71,11 @@ export async function collectStationsTreeIds(stationIds: string[]): Promise<Reco
 /** درخت وابستگی فعالیت‌ها — شامل خودِ فعالیت‌ها (نشانگر حذف باید ریشه را هم بپوشاند — FR-26) */
 export async function collectActivitiesTreeIds(activityIds: string[]): Promise<Record<string, string[]>> {
   if (activityIds.length === 0) {
-    return { Activity: [], WorkElement: [], StudySession: [], CycleObservation: [], TimelineLane: [], ElementObservation: [], ActivityAllowanceOverride: [], RatingAssessment: [], ChartNode: [], ChartEdge: [] }
+    return { Activity: [], WorkElement: [], StudySession: [], CycleObservation: [], TimelineLane: [], ElementObservation: [], RatingAssessment: [], ChartNode: [], ChartEdge: [] }
   }
-  const [elements, sessions, overrides, chartNodes] = await Promise.all([
+  const [elements, sessions, chartNodes] = await Promise.all([
     db.workElement.findMany({ where: { activityId: { in: activityIds } }, select: { id: true } }),
     db.studySession.findMany({ where: { activityId: { in: activityIds } }, select: { id: true } }),
-    db.activityAllowanceOverride.findMany({ where: { activityId: { in: activityIds } }, select: { id: true } }),
     // گره‌های خودکار نمودارِ این فعالیت‌ها (گره دستی activityId=null دارد و شامل نمی‌شود) — FR-20.10
     db.chartNode.findMany({
       where: { activityId: { in: activityIds }, isManual: false },
@@ -117,7 +112,6 @@ export async function collectActivitiesTreeIds(activityIds: string[]): Promise<R
     Activity: [...activityIds],
     WorkElement: elementIds,
     StudySession: sessionIds,
-    ActivityAllowanceOverride: overrides.map((x) => x.id),
     RatingAssessment: ratings.map((x) => x.id),
     CycleObservation: cycleIds,
     TimelineLane: lanes,

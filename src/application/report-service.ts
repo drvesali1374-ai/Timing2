@@ -8,7 +8,7 @@
 //  • تعداد نمونه و وضعیت هدف
 //  • داده‌های خارج‌شده با دلیل
 //  • جدول وستینگهاوس (۴ عامل + جدول مرجع + ضریب کل)
-//  • دسته‌های مجاز مؤثر با منبع (گروه / بازنویسی فعالیت)
+//  • الونس‌های مؤثر سلسله‌مراتتی با منبع
 //  • فرمول زمان استاندارد
 //
 // قاعدهٔ صداقت:
@@ -82,7 +82,6 @@ export interface ActivityReportSection {
     name: string
     stationName: string
     processTypeLabel: string
-    groupName: string | null
     description: string | null
     targetSampleCount: number | null
   }
@@ -361,7 +360,6 @@ export async function getStudyReport(
         name: an.activity.name,
         stationName: an.activity.stationName,
         processTypeLabel: PROCESS_TYPE_LABELS[an.activity.processType as ProcessType] ?? an.activity.processType,
-        groupName: an.activity.groupName,
         description: actDesc?.description ?? null,
         targetSampleCount: an.activity.targetSampleCount,
       },
