@@ -561,7 +561,7 @@ export async function createChartEdge(
   projectId: string,
   sourceNodeId: string,
   targetNodeId: string,
-  anchors?: { sourceAnchor?: 'top' | 'bottom' | 'left' | 'right'; targetAnchor?: 'top' | 'bottom' | 'left' | 'right' }
+  anchors?: { sourceAnchor?: 'top' | 'bottom' | 'left' | 'right' | null; targetAnchor?: 'top' | 'bottom' | 'left' | 'right' | null }
 ) {
   await assertProject(projectId)
   if (sourceNodeId === targetNodeId) {

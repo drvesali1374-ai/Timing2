@@ -118,11 +118,12 @@
     function renderAll() {
       if (!root.isConnected) return;
       U.clear(root);
-      root.appendChild(U.h('header', { class: 'flex items-center gap-3' },
+      /* v1.5.2 §۱۸ — سربرگ چسبان بخش (معادل SectionHeading وب) */
+      root.appendChild(UI.stickyHeading(U.h('header', { class: 'flex items-center gap-3' },
         U.h('span', { class: 'chip-icon' }, U.icon('barChart')),
         U.h('div', { class: 'min-w-0' },
           U.h('h1', { class: 'text-xl font-extrabold', text: 'تحلیل نتایج' }),
-          U.h('p', { class: 'text-sm text-muted', text: 'آمار، داده غیرعادی و مقایسه اپراتورها' }))));
+          U.h('p', { class: 'text-sm text-muted', text: 'آمار، داده غیرعادی و مقایسه اپراتورها' })))));
 
       root.appendChild(calcStatusCard(projectId, renderAll));
       root.appendChild(outlierSettingsCard(renderAll));

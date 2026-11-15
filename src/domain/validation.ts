@@ -397,9 +397,9 @@ export const chartNodeUpdateSchema = z
 export const chartEdgeCreateSchema = z.object({
   sourceNodeId: z.string().uuid('گره مبدأ معتبر نیست'),
   targetNodeId: z.string().uuid('گره مقصد معتبر نیست'),
-  // جلسه ۲ §۱۵.۴ — anchorهای اتصال (اختیاری؛ تهی = خودکار)
-  sourceAnchor: z.enum(['top', 'bottom', 'left', 'right']).optional(),
-  targetAnchor: z.enum(['top', 'bottom', 'left', 'right']).optional(),
+  // جلسه ۲ §۱۵.۴ + v1.5.2 §۱۰.۴ — anchorهای اتصال (اختیاری؛ تهی = خودکار)
+  sourceAnchor: z.enum(['top', 'bottom', 'left', 'right']).nullish(),
+  targetAnchor: z.enum(['top', 'bottom', 'left', 'right']).nullish(),
 })
 
 /** v1.5.2 §۱۰.۵ — ظاهر یال دستی: نوع خط + رنگ (تهی = پیش‌فرض نمودار) */

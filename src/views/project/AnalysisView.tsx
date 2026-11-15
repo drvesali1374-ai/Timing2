@@ -29,6 +29,7 @@ import { Label } from '@/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Skeleton } from '@/components/ui/skeleton'
 import { EmptyState } from '@/components/common/Feedback'
+import { SectionHeading } from '@/components/common/SectionHeading'
 import { HelpDot } from '@/components/common/HelpDot'
 import { PersianNumberInput } from '@/components/common/PersianNumberInput'
 import { analysisApi, calculationsApi, settingsApi } from '@/lib/api/endpoints'
@@ -134,6 +135,21 @@ export default function AnalysisView({ projectId }: { projectId: string }) {
 
   return (
     <div className="space-y-5">
+      {/* سربرگ چسبان بخش — v1.5.2 §۱۸ */}
+      <SectionHeading>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="chip-icon bg-brand-soft text-brand">
+              <BarChart3 className="size-6" aria-hidden />
+            </div>
+            <div>
+              <h1 className="text-xl font-extrabold">تحلیل نتایج</h1>
+              <p className="text-xs text-muted-foreground">آمار، دادهٔ غیرعادی و مقایسهٔ اپراتورها</p>
+            </div>
+          </div>
+        </div>
+      </SectionHeading>
+
       {/* ── کارت Snapshot محاسبات — FR-27 ── */}
       <Card className="rounded-2xl">
         <CardHeader className="pb-3">

@@ -229,18 +229,10 @@ export default function ChartCanvas({ projectId, chartType }: { projectId: strin
   /** §۶-۶ — یال انتخاب‌شدهٔ فعلی (اگر هنوز موجود باشد) */
   const selectedEdge = useMemo(() => edges.find((e) => e.id === selectedEdgeId) ?? null, [edges, selectedEdgeId])
 
-  /** §۱۰.۸ — تاریخچهٔ Undo/Redy بوم؛ busy = جهش در حال اجرا */
-  const historyBusy = () =>
-    savePositionMutation.isPending ||
-    moveOrderMutation.isPending ||
-    layoutMutation.isPending ||
-    restoreSnapshotMutation.isPending ||
-    createNodeMutation.isPending ||
-    updateContentMutation.isPending ||
-    deleteNodeMutation.isPending ||
-    createEdgeMutation.isPending ||
-    deleteEdgeMutation.isPending ||
-    edgeAppearanceMutation.isPending
+  /** §۱۰.۸ — تاریخچهٔ Undo/Redo بوم؛ busy = جهش در حال اجرا.
+   *  ارجاع از طریق ref — جهش‌ها بعد از این نقطه تعریف می‌شوند. */
+  const busySnapshot = useRef<Record<string, boolean>>({})
+  const historyBusy = useCallback(() => Object.values(busySnapshot.current).some(Boolean), [])
   const { push: pushHistory, undo, redo, canUndo, canRedo, undoLabel, redoLabel } = useChartHistory(historyBusy)
 
   useEffect(() => {
@@ -533,7 +525,7 @@ export default function ChartCanvas({ projectId, chartType }: { projectId: strin
     onError: (e: Error) => toast.error(e.message),
   })
 
-  // ── تبدیل مختصات صفحه ↔ بوم (مستقل از زوم) ──
+  // ── تبدیل مختصات صفحه ↔ بوم (مستقل از زوم) ─ـ
   const toChartCoords = useCallback((clientX: number, clientY: number): Position => {
     const rect = contentRef.current?.getBoundingClientRect()
     if (!rect) return { x: 0, y: 0 }
@@ -576,6 +568,21 @@ export default function ChartCanvas({ projectId, chartType }: { projectId: strin
     }
     setDragging(null)
   }
+
+  // §۱۰.۸ — وضعیت مشغول بودن جهش‌ها برای غیرفعال‌سازی Undo/Redo در حین اجرا
+  useEffect(() => {
+    busySnapshot.current = {
+      move: savePositionMutation.isPending || moveOrderMutation.isPending,
+      layout: layoutMutation.isPending || restoreSnapshotMutation.isPending,
+      node: createNodeMutation.isPending || updateContentMutation.isPending || deleteNodeMutation.isPending,
+      edge: createEdgeMutation.isPending || deleteEdgeMutation.isPending || edgeAppearanceMutation.isPending,
+    }
+  }, [
+    savePositionMutation.isPending, moveOrderMutation.isPending,
+    layoutMutation.isPending, restoreSnapshotMutation.isPending,
+    createNodeMutation.isPending, updateContentMutation.isPending, deleteNodeMutation.isPending,
+    createEdgeMutation.isPending, deleteEdgeMutation.isPending, edgeAppearanceMutation.isPending,
+  ])
 
   // ── zoom ──
   const zoomAt = useCallback((clientX: number, clientY: number, factor: number) => {

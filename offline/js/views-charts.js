@@ -232,6 +232,7 @@
     h.index = h.entries.length - 1;
   }
   var histBusy = false;
+  var histRender = null; /* render فعلی نما — توسط render() خودش تازه می‌شود */
   function histUndo(pid) {
     var h = histOf(pid);
     if (h.index < 0 || histBusy) return;
@@ -240,7 +241,7 @@
     try { e.undo(); h.index--; UI.toast('واگردانی شد: ' + e.label); }
     catch (err) { UI.toastError(err); }
     histBusy = false;
-    render();
+    if (histRender) histRender();
   }
   function histRedo(pid) {
     var h = histOf(pid);
@@ -250,7 +251,7 @@
     try { e.redo(); h.index++; UI.toast('ازنو اعمال شد: ' + e.label); }
     catch (err) { UI.toastError(err); }
     histBusy = false;
-    render();
+    if (histRender) histRender();
   }
   /* میانبرهای کیبورد — نصب یک‌باره؛ فقط وقتی نمای نمودار فعال است */
   var histKeysInstalled = false;
@@ -301,6 +302,7 @@
 
     function render() {
       cancelConnectFn = null;
+      histRender = render; /* §۱۰.۸ — تاریخچه پس از هر رندر خودش را ثبت می‌کند */
       U.clear(root);
       var chartType = chartTypeByProject[projectId];
       var view = getViewState(projectId + '|' + chartType);
@@ -415,64 +417,86 @@
       chart.edges.forEach(function (e) { if (e.id === selectedEdgeId) selectedEdge = e; });
       if (!selectedEdge) { selectedEdgeId = null; delete selectedEdgeByProject[projectId]; }
 
-      /* ── نوار ابزار — چیدمان هم‌ارز وب: دکمه‌ها → زوم → حذف انتخاب‌شده → چیپ‌ها ── */
+      /* ── نوار ابزار — v1.5.2 §۱۰.۱: دسته‌بندی کاربردی
+          [ایجاد/ویرایش] │ [بوم] │ [Undo/Redo §۱۰.۸] │ [زوم] │ [ظاهر/حذف یال §۱۰.۵]
+          │ [خروجی PDF تم متمایز] → چیپ‌ها در ms-auto ── */
+      var hist = histOf(projectId);
       root.appendChild(U.h('div', { class: 'flex flex-wrap items-center gap-2 mb-1' },
-        U.h('button', {
-          class: 'btn btn-sm btn-brand', type: 'button',
-          onclick: function () { openManualNodeDialog(null); },
-        }, U.icon('plus'), 'گره دستی'),
-        U.h('button', {
-          class: 'btn btn-sm btn-brand', type: 'button',
-          onclick: function () {
-            try {
-              /* §۱۵.۵ — ابتدا چیدمان دستی فعلی به‌عنوان snapshot ذخیره شود */
-              var oldNodes = nodes.map(function (n) { return { id: n.id, positionX: n.positionX, positionY: n.positionY }; });
-              var oldCanvas = { width: CW, height: CH };
-              var positions = DB.autoLayout(nodes, chart.edges);
-              DB.saveChartLayout(projectId, chartType, positions);
-              /* saveChartLayout خودش snapshot می‌گیرد؛ snapshot دستی قبلی را دوباره می‌نویسیم */
-              if (typeof DB.saveChartLayoutSnapshot === 'function') {
-                DB.saveChartLayoutSnapshot(projectId, chartType, oldNodes, oldCanvas);
-              }
-              UI.toast('چیدمان خودکار اعمال شد؛ چیدمان دستی قبلی ذخیره شد و با «بازگردانی چیدمان دستی» قابل بازیابی است.', { duration: 8000 });
-              render();
-            } catch (err) { UI.toastError(err); }
-          },
-        }, U.icon('layers'), 'چیدمان خودکار'),
-        U.h('button', {
-          class: 'btn btn-sm btn-outline', type: 'button', disabled: !hasSnapshot,
-          title: snapshot && snapshot.savedAt
-            ? 'آخرین چیدمان دستی ذخیره‌شده: ' + U.formatDateTime(snapshot.savedAt)
-            : 'هنوز چیدمان دستی ذخیره نشده است',
-          onclick: function () {
-            try {
-              var snap = DB.getChartLayoutSnapshot(projectId, chartType);
-              if (!snap || !snap.nodes || !snap.nodes.length) {
-                UI.toast('چیدمان دستی ذخیره‌شده‌ای وجود ندارد.', { type: 'error' });
-                return;
-              }
-              var positions = {};
-              snap.nodes.forEach(function (sn) { positions[sn.id] = { x: sn.positionX, y: sn.positionY }; });
-              DB.saveChartLayout(projectId, chartType, positions);
-              UI.toast('آخرین چیدمان دستی بازگردانی شد.', {
-                description: snap.savedAt ? 'ذخیره‌شده در ' + U.formatDateTime(snap.savedAt) : undefined,
-              });
-              render();
-            } catch (err) { UI.toastError(err); }
-          },
-        }, U.icon('history'), 'بازگردانی چیدمان دستی'),
-        U.h('button', {
-          class: 'btn btn-sm btn-outline', type: 'button',
-          onclick: function () { openCanvasSizeDialog(); },
-        }, lucideIcon(SVG_RULER), 'ابعاد بوم'),
-        U.h('button', {
-          class: 'btn btn-sm btn-outline', type: 'button',
-          onclick: function () { openPdfDialog(); },
-        }, U.icon('printer'), 'خروجی PDF'),
-        U.h('button', {
-          class: 'btn btn-sm btn-outline', type: 'button', 'aria-label': 'بازخوانی نمودار از فعالیت‌ها',
-          onclick: function () { render(); },
-        }, U.icon('refresh'), 'بازخوانی'),
+        /* ── ایجاد و ویرایش نمودار ── */
+        U.h('div', { class: 'tb-group', role: 'group', 'aria-label': 'ایجاد و ویرایش نمودار' },
+          U.h('button', {
+            class: 'btn btn-sm btn-brand', type: 'button',
+            onclick: function () { openManualNodeDialog(null); },
+          }, U.icon('plus'), 'گره دستی'),
+          U.h('button', {
+            class: 'btn btn-sm btn-ghost', type: 'button',
+            onclick: function () {
+              try {
+                /* §۱۵.۵ — ابتدا چیدمان دستی فعلی به‌عنوان snapshot ذخیره شود */
+                var oldNodes = nodes.map(function (n) { return { id: n.id, positionX: n.positionX, positionY: n.positionY }; });
+                var oldCanvas = { width: CW, height: CH };
+                var positions = DB.autoLayout(nodes, chart.edges);
+                DB.saveChartLayout(projectId, chartType, positions);
+                if (typeof DB.saveChartLayoutSnapshot === 'function') {
+                  DB.saveChartLayoutSnapshot(projectId, chartType, oldNodes, oldCanvas);
+                }
+                /* §۱۰.۸ — Undo چیدمان خودکار = بازگشت همهٔ مختصات قبلی */
+                histPush(projectId, 'چیدمان خودکار', function () {
+                  var restore = {};
+                  oldNodes.forEach(function (on) { restore[on.id] = { x: on.positionX, y: on.positionY }; });
+                  DB.saveChartLayout(projectId, chartType, restore);
+                }, function () {
+                  DB.saveChartLayout(projectId, chartType, positions);
+                });
+                UI.toast('چیدمان خودکار اعمال شد؛ چیدمان دستی قبلی ذخیره شد و با «بازگردانی چیدمان دستی» قابل بازیابی است.', { duration: 8000 });
+                render();
+              } catch (err) { UI.toastError(err); }
+            },
+          }, U.icon('layers'), 'چیدمان خودکار'),
+          U.h('button', {
+            class: 'btn btn-sm btn-ghost', type: 'button', disabled: !hasSnapshot,
+            title: snapshot && snapshot.savedAt
+              ? 'آخرین چیدمان دستی ذخیره‌شده: ' + U.formatDateTime(snapshot.savedAt)
+              : 'هنوز چیدمان دستی ذخیره نشده است',
+            onclick: function () {
+              try {
+                var snap = DB.getChartLayoutSnapshot(projectId, chartType);
+                if (!snap || !snap.nodes || !snap.nodes.length) {
+                  UI.toast('چیدمان دستی ذخیره‌شده‌ای وجود ندارد.', { type: 'error' });
+                  return;
+                }
+                var positions = {};
+                snap.nodes.forEach(function (sn) { positions[sn.id] = { x: sn.positionX, y: sn.positionY }; });
+                DB.saveChartLayout(projectId, chartType, positions);
+                UI.toast('آخرین چیدمان دستی بازگردانی شد.', {
+                  description: snap.savedAt ? 'ذخیره‌شده در ' + U.formatDateTime(snap.savedAt) : undefined,
+                });
+                render();
+              } catch (err) { UI.toastError(err); }
+            },
+          }, U.icon('history'), 'بازگردانی چیدمان دستی')),
+        /* ── بوم ── */
+        U.h('div', { class: 'tb-group', role: 'group', 'aria-label': 'ابزار بوم' },
+          U.h('button', {
+            class: 'btn btn-sm btn-ghost', type: 'button',
+            onclick: function () { openCanvasSizeDialog(); },
+          }, lucideIcon(SVG_RULER), 'ابعاد بوم'),
+          U.h('button', {
+            class: 'btn btn-sm btn-ghost', type: 'button', 'aria-label': 'بازخوانی نمودار از فعالیت‌ها',
+            onclick: function () { render(); },
+          }, U.icon('refresh'), 'بازخوانی')),
+        /* ── §۱۰.۸ — Undo/Redo ── */
+        U.h('div', { class: 'tb-group', role: 'group', 'aria-label': 'واگردانی و ازنو' },
+          U.h('button', {
+            class: 'icon-btn sm', type: 'button', disabled: hist.index < 0,
+            'aria-label': 'واگردانی (Ctrl+Z)', title: hist.index >= 0 ? 'واگردانی: ' + hist.entries[hist.index].label : 'واگردانی',
+            onclick: function () { histUndo(projectId); },
+          }, lucideIcon(SVG_UNDO)),
+          U.h('button', {
+            class: 'icon-btn sm', type: 'button', disabled: hist.index >= hist.entries.length - 1,
+            'aria-label': 'ازنو (Ctrl+Y)', title: hist.index < hist.entries.length - 1 ? 'ازنو: ' + hist.entries[hist.index + 1].label : 'ازنو',
+            onclick: function () { histRedo(projectId); },
+          }, lucideIcon(SVG_REDO))),
         U.h('div', { class: 'zoom-group', role: 'group', 'aria-label': 'کنترل زوم' },
           U.h('button', {
             class: 'icon-btn sm', type: 'button', 'aria-label': 'کوچک‌نمایی', title: 'کوچک‌نمایی',
