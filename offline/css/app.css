@@ -891,63 +891,7 @@ code.inline { background: var(--muted); padding: 1px 7px; border-radius: 6px; fo
 .rot-n90 { transform: rotate(-90deg); }
 .drop-target { outline: 2px dashed var(--brand); outline-offset: -2px; border-radius: var(--radius); }
 
-/* ── v1.5.2 §۸ — کارت‌های گروه‌های فعالیت (هم‌ارز GroupsView.tsx) ──
-   gc-grid : چیدمان کارت‌ها با items-start → ارتفاع طبیعی هر کارت (§۸-۳)
-   gc-card : کارت گروه با پس‌زمینهٔ surface-2 ملایم
-   gc-act  : زیرکارت فعالیت — پس‌زمینهٔ card + قاب ظریف؛ هماهنگ با کارت
-             گروه ولی قابل‌تمایز (§۸-۲). موبایل: پشته‌ای؛ ≥sm: هم‌ردیف (§۸-۵) */
-.gc-grid { display: grid; gap: 16px; align-items: start; }
-@media (min-width: 640px) { .gc-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-.gc-card {
-  display: flex; flex-direction: column; padding: 16px;
-  border: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
-  background: color-mix(in srgb, var(--surface-2) 50%, transparent);
-  border-radius: calc(var(--radius) + 5px);
-}
-.gc-title { font-size: 15px; font-weight: 700; line-height: 1.6; color: var(--foreground); overflow-wrap: break-word; }
-.gc-desc { font-size: 12px; line-height: 1.7; color: var(--muted-foreground); margin-top: 4px; overflow-wrap: break-word; }
-.gc-meta { font-size: 11px; line-height: 1.8; color: var(--faint); margin-top: 8px; }
-.gc-list {
-  list-style: none; margin: 16px 0 0; padding: 16px 0 0;
-  border-top: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
-  display: flex; flex-direction: column; gap: 8px;
-}
-.gc-act {
-  display: flex; flex-direction: column; gap: 4px; width: 100%;
-  text-align: right; padding: 8px 12px; cursor: pointer; font-family: inherit;
-  border: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
-  border-radius: var(--radius);
-  background: color-mix(in srgb, var(--card) 80%, transparent);
-  transition: border-color .15s, background .15s;
-}
-.gc-act:hover {
-  border-color: color-mix(in srgb, var(--brand) 40%, transparent);
-  background: color-mix(in srgb, var(--brand-soft) 40%, transparent);
-}
-.gc-act-name { min-width: 0; overflow-wrap: break-word; font-size: 12px; font-weight: 600; line-height: 1.7; color: var(--foreground); }
-.gc-act-station {
-  display: flex; align-items: flex-start; gap: 4px; min-width: 0;
-  width: fit-content; align-self: flex-start;
-  font-size: 11px; line-height: 1.8; color: var(--muted-foreground);
-}
-.gc-act-station .icon { width: 13px; height: 13px; margin-top: 3px; color: var(--faint); }
-.gc-act-station span { min-width: 0; overflow-wrap: break-word; }
-.gc-more {
-  display: flex; align-items: center; gap: 6px; padding: 6px 12px; cursor: pointer;
-  border: none; background: transparent; color: var(--brand);
-  font-size: 11px; font-weight: 700; font-family: inherit;
-  border-radius: calc(var(--radius) - 2px);
-}
-.gc-more:hover { background: var(--brand-soft); }
-.gc-empty {
-  border: 1px dashed color-mix(in srgb, var(--border) 70%, transparent);
-  border-radius: var(--radius); padding: 10px 12px; text-align: center;
-  font-size: 11px; line-height: 1.8; color: var(--muted-foreground);
-}
 @media (min-width: 640px) {
-  .gc-act { flex-direction: row; align-items: flex-start; justify-content: space-between; gap: 12px; }
-  .gc-act-name { flex: 1 1 0%; }
-  .gc-act-station { flex-shrink: 0; max-width: 55%; }
 }
 
 

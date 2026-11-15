@@ -388,30 +388,21 @@ ok(DB.listSessions(actS.id).length === 1, 'other session intact');
   ok(el.allowances.needsAggregationCount >= 1, 'needs-aggregation row present');
   DB.putScopeAllowanceOps('STATION', sA.id, [{ definitionId: dE.id, action: 'RESTORE' }]);
 
+  // v1.5.2 بازبینی نهایی §۱۲ — خوشهٔ قدیمی گروه/دسته حذف شد؛
+  // سازگاری: بستهٔ قدیمی دارای جداول legacy باید بدون خطا وارد شود و
+  // جداول/فیلدهای legacy نادیده گرفته شوند (بدون مهاجرت).
   const p3 = DB.createProject({ name: 'T3', lineName: 'L3', productName: 'P3' });
   const s3 = DB.createStation(p3.id, { name: 'S3' });
   const act3 = DB.createActivity(s3.id, { name: 'A3' });
-  const catOld = { id: 'cat-old-1', projectId: p3.id, name: 'old cat', code: null, isActive: true, sortOrder: 0, createdAt: U.nowISO(), updatedAt: U.nowISO() };
-  DB.getState().allowanceCategories.push(catOld);
-  const grpOld = { id: 'grp-old-1', projectId: p3.id, name: 'old grp', description: null, createdAt: U.nowISO(), updatedAt: U.nowISO() };
-  DB.getState().activityGroups.push(grpOld);
-  DB.getState().groupAllowances.push({ id: 'ga-old-1', groupId: grpOld.id, categoryId: catOld.id, percentValue: 0.12, updatedAt: U.nowISO() });
-  DB.getState().activityAllowanceOverrides.push({ id: 'ov-old-1', activityId: act3.id, categoryId: catOld.id, percentValue: 0.15, updatedAt: U.nowISO() });
-  DB.updateActivity(act3.id, { groupId: grpOld.id });
-  DB.getState().projectSettings = DB.getState().projectSettings.filter((s) => !(s.projectId === p3.id && s.key === 'migration.allowanceModel'));
-
+  const def3 = DB.createAllowanceDefinition(p3.id, { title: 'D3', defaultValueType: 'PERCENT', defaultValuePercent: 0.1 });
+  DB.putScopeAllowanceOps('ACTIVITY', act3.id, [{ definitionId: def3.id, action: 'SET', valueType: 'PERCENT', percentValue: 0.1 }]);
   const sc3 = DB.getScopeAllowances('ACTIVITY', act3.id);
-  const row3 = sc3.resolved.rows.find((r) => r.definitionId === catOld.id);
-  ok(!!row3 && row3.status === 'CUSTOM' && Math.abs(row3.percentValue - 0.15) < 1e-9, 'migration: old override -> ACTIVITY 0.15');
-  const rep3 = DB.migrateProjectAllowancesIfNeeded(p3.id);
-  ok(rep3.migrated === false, 'migration: idempotent (marker)');
-  const cnt3 = DB.getState().allowanceAssignments.filter((a) => a.definitionId === catOld.id && a.scopeType === 'ACTIVITY' && a.scopeId === act3.id).length;
-  ok(cnt3 === 1, 'migration: no duplication');
-  ok(DB.getState().groupAllowances.some((ga) => ga.id === 'ga-old-1'), 'migration: legacy data preserved');
+  const row3 = sc3.resolved.rows.find((r) => r.definitionId === def3.id);
+  ok(!!row3 && row3.status === 'CUSTOM' && Math.abs(row3.percentValue - 0.1) < 1e-9, 'hierarchical: ACTIVITY assignment 0.1');
   const el3 = DB.createElement(act3.id, { name: 'E3' });
   const scEl3 = DB.getScopeAllowances('WORK_ELEMENT', el3.id);
-  const rEl3 = scEl3.resolved.rows.find((r) => r.definitionId === catOld.id);
-  ok(rEl3?.status === 'INHERITED' && Math.abs(rEl3.percentValue - 0.15) < 1e-9, 'migration: element inherits without copy');
+  const rEl3 = scEl3.resolved.rows.find((r) => r.definitionId === def3.id);
+  ok(rEl3?.status === 'INHERITED' && Math.abs(rEl3.percentValue - 0.1) < 1e-9, 'hierarchical: element inherits without copy');
 
   const pkg = await DB.exportProjectPackage(p2.id);
   // v1.5.2 §۲ — schema v۴: فقط روابط موازی (مقادیر عددی هم‌پوشانی حذف شد)
@@ -427,6 +418,23 @@ ok(DB.listSessions(actS.id).length === 1, 'other session intact');
   try { impV2 = await DB.importProjectPackage(pkgV2); } catch (e) { impV2 = null; }
   ok(impV2 === null || !!impV2.projectId, 'package v2 backward-compat: rejected safely or imported');
   if (impV2 && impV2.projectId) DB.deleteProject(impV2.projectId);
+  // §۱۲ — بستهٔ قدیمی دارای جداول گروه/دسته legacy: بدون خطا وارد و نادیده گرفته می‌شود
+  const pkgLegacy = JSON.parse(JSON.stringify(pkg));
+  pkgLegacy.data.activityGroup = [{ id: 'lg-grp-1', projectId: pkgLegacy.project.id, name: 'legacy grp', description: null, createdAt: U.nowISO(), updatedAt: U.nowISO() }];
+  pkgLegacy.data.allowanceCategory = [{ id: 'lg-cat-1', projectId: pkgLegacy.project.id, name: 'legacy cat', code: null, isActive: true, sortOrder: 0, createdAt: U.nowISO(), updatedAt: U.nowISO() }];
+  pkgLegacy.data.groupAllowance = [{ id: 'lg-ga-1', groupId: 'lg-grp-1', categoryId: 'lg-cat-1', percentValue: 0.2, updatedAt: U.nowISO() }];
+  pkgLegacy.data.activityAllowanceOverride = [{ id: 'lg-ov-1', activityId: 'x', categoryId: 'lg-cat-1', percentValue: 0.2, updatedAt: U.nowISO() }];
+  if (Array.isArray(pkgLegacy.data.activity) && pkgLegacy.data.activity[0]) pkgLegacy.data.activity[0].groupId = 'lg-grp-1';
+  let impLegacy = null;
+  try { impLegacy = await DB.importProjectPackage(pkgLegacy); } catch (e) { impLegacy = null; }
+  ok(!!impLegacy && !!impLegacy.projectId, '§12: legacy group package imports without error');
+  if (impLegacy && impLegacy.projectId) {
+    const stImp = DB.getState();
+    ok(!('activityGroup' in stImp) || !Array.isArray(stImp.activityGroup) || stImp.activityGroup.length === 0, '§12: legacy activityGroup table ignored');
+    const impActs = stImp.activities.filter((a) => a.name === pkgLegacy.data.activity[0].name);
+    ok(impActs.every((a) => a.groupId === undefined || a.groupId === null), '§12: imported activity has no groupId');
+    DB.deleteProject(impLegacy.projectId);
+  }
   const imp = await DB.importProjectPackage(pkg);
   ok(!!imp.projectId, 'import ok');
   const impScope = DB.getScopeAllowances('PROJECT', imp.projectId);

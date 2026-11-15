@@ -188,8 +188,8 @@ const defNId = defN.id ?? defN.definition?.id;
   put('STATION', stationId, [{ definitionId: defTId, action: 'RESTORE' }]);
 }
 
-// ═══ §M — مهاجرت در اولین درخواست (الزام ۲ — آفلاین synchronous) ═══
-console.log('\n── §M مهاجرت پروژه قدیمی در اولین درخواست ──');
+// ═══ §M — v1.5.2 §۱۲: خوشهٔ قدیمی حذف شد؛ رفتار جدید = نادیده‌گرفتن ═══
+console.log('\n── §M پروژه با تعریف مرکزی (جایگزین مهاجرت قدیمی) ──');
 {
   const p2 = DB.createProject({ name: 'قدیمی آفلاین', lineName: 'خط قدیم', productName: 'محصول قدیم' });
   const p2Id = p2.id ?? p2.project?.id;
@@ -199,39 +199,27 @@ console.log('\n── §M مهاجرت پروژه قدیمی در اولین د�
   const a2Id = a2.id ?? a2.activity?.id;
 
   const state = DB.getState();
-  const cat1 = { id: U.uid(), projectId: p2Id, name: 'نیازهای شخصی (قدیم)', code: null, isActive: true, sortOrder: 0, createdAt: U.nowISO(), updatedAt: U.nowISO() };
-  const cat2 = { id: U.uid(), projectId: p2Id, name: 'خستگی (قدیم)', code: null, isActive: true, sortOrder: 1, createdAt: U.nowISO(), updatedAt: U.nowISO() };
-  const catOff = { id: U.uid(), projectId: p2Id, name: 'دسته خاموش (قدیم)', code: null, isActive: false, sortOrder: 2, createdAt: U.nowISO(), updatedAt: U.nowISO() };
-  state.allowanceCategories.push(cat1, cat2, catOff);
-  DB.createGroup(p2Id, { name: 'گروه قدیم', description: null });
-  const grp = state.activityGroups.find((g) => g.projectId === p2Id);
-  state.groupAllowances.push(
-    { id: U.uid(), groupId: grp.id, categoryId: cat1.id, percentValue: 0.12, createdAt: U.nowISO(), updatedAt: U.nowISO() },
-    { id: U.uid(), groupId: grp.id, categoryId: cat2.id, percentValue: 0.07, createdAt: U.nowISO(), updatedAt: U.nowISO() },
-    { id: U.uid(), groupId: grp.id, categoryId: catOff.id, percentValue: 0.2, createdAt: U.nowISO(), updatedAt: U.nowISO() },
-  );
-  state.activityAllowanceOverrides.push({ id: U.uid(), activityId: a2Id, categoryId: cat1.id, percentValue: 0.15, createdAt: U.nowISO(), updatedAt: U.nowISO() });
-  const actRow = state.activities.find((a) => a.id === a2Id);
-  actRow.groupId = grp.id;
-  // state درون‌حافظه‌ای — بدون نیاز به commit
+  // مدل سلسله‌مراتتی: تعریف مرکزی + تخصیص ACTIVITY (معادل نتیجهٔ مهاجرت قدیم)
+  const d1 = DB.createAllowanceDefinition(p2Id, { title: 'نیازهای شخصی (قدیم)', defaultValueType: 'PERCENT', defaultValuePercent: 0.12 });
+  const d2 = DB.createAllowanceDefinition(p2Id, { title: 'خستگی (قدیم)', defaultValueType: 'PERCENT', defaultValuePercent: 0.07 });
+  DB.putScopeAllowanceOps('ACTIVITY', a2Id, [
+    { definitionId: d1.id, action: 'SET', valueType: 'PERCENT', percentValue: 0.15 },
+    { definitionId: d2.id, action: 'SET', valueType: 'PERCENT', percentValue: 0.07 },
+  ]);
 
-  // اولین درخواست — مهاجرت باید کامل شده باشد
   const scope = get('ACTIVITY', a2Id);
-  const r1 = rowOf(scope, cat1.id);
-  ok(Boolean(r1) && r1.definitionId === cat1.id, 'M1. اولین GET: تعریف مهاجرت‌شده موجود');
-  ok(r1.status === 'CUSTOM' && Math.abs(r1.percentValue - 0.15) < 1e-9, 'M2. Override بر گروه اولویت داشت (0.15)', { s: r1.status, v: r1.percentValue });
-  const r2 = rowOf(scope, cat2.id);
-  ok(r2 && Math.abs(r2.percentValue - 0.07) < 1e-9, 'M3. مقدار گروه cat2 = 0.07');
-  const offRow = rowOf(scope, catOff.id);
-  ok(!offRow || offRow.percentValue === null, 'M4. دسته غیرفعال مؤثر نیست');
-  close(scope.resolved.summary.totalPercent, 0.22, 'M5. محاسبه قبل/بعد مهاجرت یکسان (0.22)');
+  const r1 = rowOf(scope, d1.id);
+  ok(Boolean(r1) && r1.definitionId === d1.id, 'M1. تعریف مرکزی موجود');
+  ok(r1.status === 'CUSTOM' && Math.abs(r1.percentValue - 0.15) < 1e-9, 'M2. تخصیص سطح فعالیت 0.15', { s: r1.status, v: r1.percentValue });
+  const r2 = rowOf(scope, d2.id);
+  ok(r2 && Math.abs(r2.percentValue - 0.07) < 1e-9, 'M3. مقدار d2 = 0.07');
+  close(scope.resolved.summary.totalPercent, 0.22, 'M5. جمع الونس مؤثر (0.22)');
 
-  // اجرای مجدد — بدون تکرار
-  const before = state.allowanceAssignments.filter((a) => a.definitionId === cat1.id || a.definitionId === cat2.id).length;
+  const before = state.allowanceAssignments.filter((a) => a.definitionId === d1.id || a.definitionId === d2.id).length;
   get('ACTIVITY', a2Id);
   get('ACTIVITY', a2Id);
-  const after = state.allowanceAssignments.filter((a) => a.definitionId === cat1.id || a.definitionId === cat2.id).length;
-  ok(before === 2 && after === 2, 'M6. مهاجرت مکرر داده تکراری نمی‌سازد', { before, after });
+  const after = state.allowanceAssignments.filter((a) => a.definitionId === d1.id || a.definitionId === d2.id).length;
+  ok(before === 2 && after === 2, 'M6. خواندن مکرر داده تکراری نمی‌سازد', { before, after });
 }
 
 // ═══ §P — هم‌ارزی عددی با موتور آنلاین (الزام ۶) ═══

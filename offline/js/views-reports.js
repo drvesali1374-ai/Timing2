@@ -40,7 +40,7 @@
   var ST_STATUS_XLS = { OK: 'قابل ارائه', NEEDS_AGGREGATION_RULE: 'قاعدهٔ تجمیع', INCOMPLETE: 'ناقص' };
   var ST_STATUS_A4 = { NEEDS_AGGREGATION_RULE: 'نیازمند قاعدهٔ تجمیع', INCOMPLETE: 'نیازمند تکمیل داده' };
   var VALIDITY_SHORT = { VALID: 'معتبر', SUSPECT: 'مشکوک', EXCLUDED: 'خارج‌شده', INVALID: 'نامعتبر' };
-  var ALLOWANCE_SOURCE_LABELS = { OVERRIDE: 'اختصاصی فعالیت', GROUP: 'گروه', NONE: '—' };
+  var ALLOWANCE_SOURCE_LABELS = { OVERRIDE: 'اختصاصی فعالیت', NONE: '—' };
   var OUTLIER_RULE_LABELS = { MODIFIED_Z_MAD: 'Z تعدیل‌شده', IQR_FENCE: 'IQR' };
   var METHOD_SHORT = { SNAPBACK: 'برگشت به صفر', CONTINUOUS: 'پیوسته' };
 

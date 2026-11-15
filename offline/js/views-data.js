@@ -79,7 +79,7 @@
   };
   var ENTITY_LABELS = {
     Project: 'پروژه', Station: 'ایستگاه', Activity: 'فعالیت', WorkElement: 'عنصر کاری',
-    Operator: 'اپراتور', ActivityGroup: 'گروه فعالیت', AllowanceCategory: 'دسته مجاز',
+    Operator: 'اپراتور',
     RatingTable: 'جدول ارزیابی', RatingAssessment: 'ارزیابی', StudySession: 'جلسهٔ زمان‌سنجی',
     CalculationRun: 'اجرای محاسبه', ChartNode: 'گره نمودار', BackupRecord: 'پشتیبان',
   };

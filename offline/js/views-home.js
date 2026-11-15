@@ -150,13 +150,13 @@
     st.workElements.forEach(function (e) { if (!!actIds[e.activityId]) elIds[e.id] = true; });
     var sessions = st.studySessions.filter(function (s) { return !!actIds[s.activityId]; }).length;
     var observations = st.elementObservations.filter(function (o) { return !!elIds[o.workElementId]; }).length;
-    var c = summary && summary.counts ? summary.counts : { stations: 0, activities: 0, elements: 0, operators: 0, groups: 0 };
+    var c = summary && summary.counts ? summary.counts : { stations: 0, activities: 0, elements: 0, operators: 0, allowanceDefinitions: 0 };
     return {
       'ایستگاه': c.stations,
       'فعالیت': c.activities,
       'عنصر کاری': c.elements,
       'اپراتور': c.operators,
-      'گروه مجاز': c.groups,
+      'تعریف الونس': c.allowanceDefinitions,
       'جلسه زمان‌سنجی': sessions,
       'مشاهده خام': observations,
     };
@@ -367,7 +367,7 @@
     var ROWS = [
       { key: 'structure', label: 'ساختار و تنظیمات', desc: 'ایستگاه‌ها، فعالیت‌ها، عناصر کاری و تنظیمات محاسبات' },
       { key: 'operators', label: 'اپراتورها', desc: 'فهرست اپراتورهای این مطالعه' },
-      { key: 'groupsAndAllowances', label: 'گروه‌ها و دسته‌های مجاز', desc: 'گروه‌های فعالیت، دسته‌های مجاز و مقادیر گروهی' },
+      { key: 'groupsAndAllowances', label: 'تعریف‌های الونس و تخصیص‌ها', desc: 'تعریف‌های مرکزی الونس و تخصیص‌های سلسله‌مراتتی' },
       { key: 'ratingTables', label: 'جدول‌های وستینگهاوس', desc: 'جدول‌های مرجع ارزیابی و نمرات آنها' },
       { key: 'rawObservations', label: 'مشاهدات خام', desc: 'داده‌های خام زمان‌سنجی ثبت‌شده' },
     ];
@@ -584,7 +584,7 @@
       var STEPS = [
         'پروژه مطالعه بسازید — نام خط تولید، محصول و تاریخ مطالعه را ثبت کنید.',
         'ساختار خط (ایستگاه، فعالیت، عنصر کاری) و اپراتورها را تعریف کنید.',
-        'گروه‌های مجاز و ارزیابی وستینگهاوس را تنظیم کنید؛ زمان‌سنجی و گزارش‌ها در فازهای بعدی فعال می‌شوند.',
+        'تعریف‌های الونس و ارزیابی وستینگهاوس را تنظیم کنید؛ زمان‌سنجی و گزارش‌ها در فازهای بعدی فعال می‌شوند.',
       ];
       var startBtn = U.h('button', { class: 'btn btn-brand', type: 'button' }, U.icon('plus'), 'شروع: ایجاد اولین پروژه');
       startBtn.addEventListener('click', function () {

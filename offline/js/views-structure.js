@@ -50,13 +50,6 @@
     example: '«بستن درب پنل» یا «کنترل کیفیت نهایی»',
     note: 'نوع رویداد فرایندی فعالیت در نمودارهای فرایند (فاز ۵) با نماد ASCME نمایش داده می‌شود.',
   };
-  var GROUP_ASSIGN_HELP = {
-    what: 'گروه فعالیت فقط برای طبقه‌بندی فعالیت‌های مشابه است؛ دیگر منبع اعمال الونس نیست. الونس‌ها به‌صورت سلسله‌مراتبی از خط ← ایستگاه ← فعالیت ← عنصر resolve می‌شوند.',
-    input: 'گروه دلخواه را انتخاب کنید یا «بدون گروه» بگذارید.',
-    example: '«کار دستی سبک»، «کار ماشینی سنگین»',
-    note: 'مقادیر قدیمی گروه‌ها هنگام مهاجرت به تخصیص سطح فعالیت تبدیل شده‌اند تا نتیجه پروژه‌های موجود حفظ شود.',
-  };
-
   var ELEMENT_NAME_HELP = {
     what: 'عنصر کاری کوچک‌ترین واحد قابل‌اندازه‌گیری فعالیت است؛ شناسه آن پایدار است و تغییر نام، ارتباط تاریخی و گره‌های نموداری را از بین نمی‌برد.',
     input: 'نامی کوتاه برای بخشی از کار که در یک حرکت اجرا می‌شود.',
@@ -467,12 +460,6 @@
       return { value: pt, label: processSymbolOf(pt) + ' ' + processLabelOf(pt) };
     });
   }
-  function groupOptions(projectId) {
-    return [{ value: '', label: 'بدون گروه' }].concat(DB.listGroups(projectId).map(function (g) {
-      return { value: g.group.id, label: g.group.name };
-    }));
-  }
-
   function selectStation(projectId, stationId) {
     _selectedStation[projectId] = stationId;
     appRefresh();
@@ -508,8 +495,6 @@
       _selectedStation[projectId] = null;
     }
 
-    var groupMap = {};
-    DB.listGroups(projectId).forEach(function (g) { groupMap[g.group.id] = g.group; });
 
     var totalActs = 0, totalEls = 0;
     stations.forEach(function (s) {
@@ -518,7 +503,7 @@
       acts.forEach(function (a) { totalEls += DB.sortElements(a.id).length; });
     });
 
-    var ctx = { projectId: projectId, project: project, selectedId: sel, selectedActivityId: _selectedActivity[projectId] || null, groupMap: groupMap };
+    var ctx = { projectId: projectId, project: project, selectedId: sel, selectedActivityId: _selectedActivity[projectId] || null };
 
     // ── سربرگ — چسبان زیر نوار اصلی (v1.5.2 §۸) ──
     container.appendChild(UI.stickyHeading(U.h('div', { class: 'flex flex-wrap items-center gap-3' },
@@ -762,7 +747,6 @@
   // chevron مستقل؛ ورود به صفحهٔ فعالیت از دکمهٔ ثانویه واضح.
   // شمارش عناصر در خط مجزا زیر عنوان (§۲.۳)
   function activityTreeRow(a, acts, station, ctx, hasSearch) {
-    var group = ctx.groupMap[a.groupId];
     var els = DB.sortElements(a.id);
     var elsCount = els.length;
     var isSelected = ctx.selectedActivityId === a.id;
@@ -794,7 +778,7 @@
       U.h('span', { class: 'min-w-0 flex-1' },
         U.h('span', { class: 't2-activity-title', text: a.name }),
         // شمارش عناصر در خط مجزا زیر عنوان — همیشه نمایان (§۲.۳)
-        U.h('span', { class: 't2-activity-meta num', text: U.formatInt(elsCount) + ' عنصر کاری' + (group ? ' · گروه: ' + group.name : '') })),
+        U.h('span', { class: 't2-activity-meta num', text: U.formatInt(elsCount) + ' عنصر کاری' })),
       // نماد نوع فرایند — بدون قاب اضافه (v1.5.2 §۳)
       U.h('span', {
         class: 'shrink-0',
@@ -1059,7 +1043,6 @@
     } else {
       var grid = U.h('div', { class: 'grid sm:grid-cols-2 gap-3 mt-3' });
       acts.forEach(function (a) {
-        var group = ctx.groupMap[a.groupId];
         grid.appendChild(U.h('button', {
           class: 'card card-premium card-hover p-3', type: 'button',
           style: { textAlign: 'start', width: '100%', display: 'flex', alignItems: 'center', gap: '10px' },
@@ -1069,7 +1052,7 @@
           symbolTile(a.processType, 'نوع رویداد فرایندی: ' + processLabelOf(a.processType)),
           U.h('span', { class: 'min-w-0 flex-1' },
             U.h('span', { class: 'block truncate font-semibold text-sm', text: a.name }),
-            U.h('span', { class: 'block truncate text-xs text-muted num mt-1', text: U.formatInt(DB.sortElements(a.id).length) + ' عنصر کاری · ' + (group ? 'گروه ' + group.name : 'بدون گروه') })),
+            U.h('span', { class: 'block truncate text-xs text-muted num mt-1', text: U.formatInt(DB.sortElements(a.id).length) + ' عنصر کاری' })),
           U.h('span', { class: 'text-faint shrink-0' }, U.icon('arrowLeft'))));
       });
       actsCard.appendChild(grid);
@@ -1150,9 +1133,7 @@
     var nameInput = U.h('input', { class: 'input', value: isEdit ? activity.name : '', placeholder: 'مثلاً: بستن درب پنل' });
     var descInput = U.h('textarea', { class: 'textarea', value: isEdit ? (activity.description || '') : '', placeholder: 'مثلاً: بستن ۴ پیچ با پیچ‌گوشتی برقی' });
     var processType = isEdit ? activity.processType : 'OPERATION';
-    var groupId = isEdit ? (activity.groupId || '') : '';
     var typeSelect = UI.selectEl(processTypeOptions(), processType, function (v) { processType = v; }, 'نوع رویداد فرایندی');
-    var groupSelect = UI.selectEl(groupOptions(ctx.projectId), groupId, function (v) { groupId = v; }, 'گروه فعالیت (طبقه‌بندی)');
 
     UI.dialog({
       title: isEdit ? 'ویرایش فعالیت' : 'فعالیت جدید',
@@ -1161,7 +1142,6 @@
         body.appendChild(UI.field('نام فعالیت', nameInput, ACTIVITY_NAME_HELP));
         body.appendChild(UI.field('شرح فعالیت (اختیاری)', descInput));
         body.appendChild(UI.field('نوع رویداد فرایندی', typeSelect));
-        body.appendChild(UI.field('گروه فعالیت (طبقه‌بندی)', groupSelect, GROUP_ASSIGN_HELP));
       },
       footerBuilder: function (close) {
         return U.h('div', { class: 'dialog-footer' },
@@ -1176,7 +1156,6 @@
                 name: name,
                 description: descInput.value.trim() || null,
                 processType: processType,
-                groupId: groupId || null,
               };
               try {
                 if (isEdit) {
@@ -1343,7 +1322,6 @@
       name: activity.name,
       description: activity.description || '',
       processType: activity.processType,
-      groupId: activity.groupId || '',
       targetSampleCount: activity.targetSampleCount,
     };
     var nameInput = U.h('input', { class: 'input', value: form.name, placeholder: 'مثلاً: بستن درب پنل' });
@@ -1351,7 +1329,6 @@
     var descInput = U.h('textarea', { class: 'textarea', value: form.description, placeholder: 'مثلاً: بستن ۴ پیچ با پیچ‌گوشتی برقی' });
     descInput.addEventListener('input', function () { form.description = descInput.value; });
     var typeSelect = UI.selectEl(processTypeOptions(), form.processType, function (v) { form.processType = v; }, 'نوع رویداد فرایندی');
-    var groupSelect = UI.selectEl(groupOptions(ctx.projectId), form.groupId, function (v) { form.groupId = v; }, 'گروه فعالیت (طبقه‌بندی)');
 
     // «تعداد نمونه هدف» — ذخیره خودکار با تأخیر ۶۰۰ms
     var sampleTimer = null;
@@ -1377,7 +1354,6 @@
           name: name,
           description: form.description.trim() || null,
           processType: form.processType,
-          groupId: form.groupId || null,
           targetSampleCount: form.targetSampleCount,
         });
         UI.toast('مشخصات فعالیت ذخیره شد');
@@ -1392,9 +1368,7 @@
       U.h('div', { class: 'flex flex-col gap-3 mt-4' },
         UI.field('نام فعالیت', nameInput),
         UI.field('شرح فعالیت (اختیاری)', descInput),
-        U.h('div', { class: 'grid grid-cols-1 md:grid-cols-2 gap-3' },
-          UI.field('نوع رویداد فرایندی', typeSelect),
-          UI.field('گروه فعالیت (طبقه‌بندی)', groupSelect)),
+        UI.field('نوع رویداد فرایندی', typeSelect),
         UI.field('تعداد نمونه هدف', sampleInput, TARGET_SAMPLE_HELP)),
       U.h('div', { class: 'flex flex-wrap items-center justify-between gap-2 mt-4' },
         U.h('p', { class: 'text-xs text-muted num', text: 'ایجاد: ' + U.formatDateTime(activity.createdAt) + ' · آخرین تغییر: ' + U.formatDateTime(activity.updatedAt) }),

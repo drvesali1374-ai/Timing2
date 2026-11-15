@@ -1,21 +1,18 @@
 /* ═══════════════════════════════════════════════════════════
    نمای «مجازها و الونس‌ها» — بازطراحی جلسه اول
-   • زبانه تعریف‌های مرکزی: فهرست مرکزی الونس‌های پروژه
-     (تفکیک تعریف از تخصیص — §۲.۲) با ایجاد/ویرایش/آرشیو
-   • زبانه الونس‌های خط تولید: تخصیص سطح PROJECT از طریق
-     بخش واحد «الونس‌ها و زمان‌های مجاز» (§۶)
-   • زبانه گروه‌های فعالیت: فقط طبقه‌بندی — پس از migration
-     گروه‌ها دیگر منبع دوم اعمال الونس نیستند (§۵)
-   • _allowanceSection: کامپوننت مشترک برای چهار سطح
-     (خط/ایستگاه/فعالیت/عنصر) — mirrors AllowanceSection.tsx
-   پورت هم‌ارز از src/views/project/GroupsView.tsx +
+   • فهرست مرکزی الونس‌های پروژه (تفکیک تعریف از تخصیص — §۲.۲)
+     با ایجاد/ویرایش/آرشیو
+   • v1.5.2 بازبینی نهایی §۱۲/§۱۳ — زبانه‌های «الونس‌های خط تولید»
+     و «گروه‌های فعالیت» حذف شدند؛ تخصیص از فرم‌های ایستگاه/
+     فعالیت/عنصر انجام می‌شود.
+   • _allowanceSection: کامپوننت مشترک برای سطوح
+     (ایستگاه/فعالیت/عنصر) — mirrors AllowanceSection.tsx
+   پورت هم‌ارز از src/views/project/AllowancesView.tsx +
    src/views/project/allowances/AllowanceSection.tsx
    ═══════════════════════════════════════════════════════════ */
 (function (g) {
   'use strict';
   var U = g.T2U, UI = g.T2UI, DB = g.T2DB;
-
-  var activeTab = 'definitions';
 
   // ── محتوای راهنمای آیکونی ──
   var DEFINITIONS_HELP = {
@@ -23,18 +20,6 @@
     input: 'عنوان الزامی است؛ کد، توضیحات و مقدار پیش‌فرض اختیاری‌اند. مقدار پیش‌فرض صرفاً پیشنهاد اولیه فرم تخصیص است.',
     example: '«نیازهای شخصی» (کد PP-۱، پیش‌فرض ۵٪) یا «استراحت شیفت» (زمان ثابت ۳۰۰ ثانیه، هر چرخه).',
     note: 'حذف تعریف دارای تخصیص/سابقه، به‌جای نابودی سوابق، آن را بایگانی می‌کند؛ تغییر عنوان ارتباط تخصیص‌ها را از بین نمی‌برد (ارتباط با ID است).',
-  };
-  var PROJECT_SCOPE_HELP = {
-    what: 'الونس‌های این سطح به همه ایستگاه‌ها، فعالیت‌ها و عناصر کاری پروژه ارث می‌رسند؛ مگر آنکه در سطح پایین‌تر جایگزین یا حذف از ارث‌بری شوند.',
-    input: 'با «افزودن الونس» از فهرست مرکزی انتخاب کنید؛ درصد یا زمان ثابت با مبنا ثبت می‌شود.',
-    example: 'الونس نیازهای شخصی ۵٪ در سطح خط = پیش‌فرض کل خط؛ یک ایستگاه خاص می‌تواند مقدار خودش را جایگزین کند.',
-    note: 'الونس زمانی سطح خط را با مبنا «هر چرخه» ثبت کنید تا در زمان تک‌تک عناصر ضرب نشود.',
-  };
-  var GROUPS_HELP = {
-    what: 'گروه‌های فعالیت صرفاً برای طبقه‌بندی و برچسب‌گذاری فعالیت‌های مشابه‌اند. پس از مهاجرت به مدل سلسله‌مراتبی، مقادیر الونس از سطوح خط/ایستگاه/فعالیت/عنصر resolve می‌شوند و گروه منبع دوم محاسبه نیست.',
-    input: 'گروه بسازید و در فرم «مشخصات فعالیت» به فعالیت‌ها نسبت دهید.',
-    example: 'گروه «کار دستی سبک» یا «کار ماشینی سنگین».',
-    note: 'مقادیر قدیمی گروه‌ها در زمان مهاجرت به تخصیص سطح فعالیت تبدیل شده‌اند تا نتیجه پروژه‌های موجود حفظ شود.',
   };
   var DEFAULT_VALUE_HELP = {
     what: 'مقدار پیش‌فرض فقط پیشنهاد اولیه فرم تخصیص است؛ به‌تنهایی به معنی اعمال الونس نیست و تغییر آن تخصیص‌های قبلی را تغییر نمی‌دهد.',
@@ -67,8 +52,8 @@
       valueEl);
   }
 
+  // v1.5.2 §۱۳ — سطح PROJECT از UI حذف شد (زبانهٔ «الونس‌های خط تولید»)
   var SCOPE_TITLES = {
-    PROJECT: 'سطح خط تولید (همه ایستگاه‌ها و فعالیت‌ها)',
     STATION: 'سطح ایستگاه (فعالیت‌ها و عناصر زیرمجموعه)',
     ACTIVITY: 'سطح فعالیت (عناصر کاری زیرمجموعه)',
     WORK_ELEMENT: 'سطح عنصر کاری',
@@ -77,7 +62,6 @@
   function render(container, projectId) {
     U.clear(container);
     var defs = DB.listAllowanceDefinitions(projectId);
-    var groups = DB.getState().activityGroups.filter(function (x) { return x.projectId === projectId; });
     var activeCount = defs.filter(function (d) { return d.isActive && !d.isArchived; }).length;
     var archivedCount = defs.filter(function (d) { return d.isArchived; }).length;
 
@@ -87,24 +71,14 @@
         U.h('span', { class: 'chip-icon brand', 'aria-hidden': 'true' }, U.icon('percent')),
         U.h('div', null,
           U.h('h1', { class: 'text-xl font-extrabold', text: 'مجازها و الونس‌ها' }),
-          U.h('p', { class: 'num text-xs text-muted' },
-            activeCount.toLocaleString('fa-IR') + ' تعریف فعال' +
-            (archivedCount > 0 ? ' · ' + archivedCount.toLocaleString('fa-IR') + ' بایگانی‌شده' : '') +
-            ' · ' + groups.length.toLocaleString('fa-IR') + ' گروه فعالیت')))));
+          U.h('p', { class: 'text-xs text-muted', text: 'تعریف مرکزی الونس‌ها و تخصیص سلسله‌مراتتی به ایستگاه، فعالیت و عنصر' })))));
 
-    var tabs = UI.tabsBar([
-      { key: 'definitions', label: 'تعریف‌های مرکزی', icon: 'layers' },
-      // v1.5.2 §۵.۴: آیکون‌های یکپارچه — SlidersHorizontal / ListTree
-      { key: 'project', label: 'الونس‌های خط تولید', icon: 'sliders' },
-      { key: 'groups', label: 'گروه‌های فعالیت', icon: 'listTree' },
-    ], activeTab, function (k) { activeTab = k; render(container, projectId); });
+    // v1.5.2 بازبینی نهایی §۱۲/§۱۳/§۱۴ — زبانه‌ها حذف؛ تعریف‌های مرکزی
+    // مستقیماً زیر سربرگ با فاصلهٔ عمودی مناسب (mt-6 هم‌ارز وب)
+    var body = U.h('div', { class: 'space-y-4', style: { marginTop: '1.5rem' } });
+    renderDefinitionsTab(body, projectId);
 
-    var body = U.h('div', { class: 'space-y-4' });
-    if (activeTab === 'definitions') renderDefinitionsTab(body, projectId);
-    else if (activeTab === 'project') renderProjectTab(body, projectId);
-    else renderGroupsTab(body, projectId);
-
-    container.appendChild(U.h('div', { class: 'space-y-5 animate-view-in' }, header, tabs, body));
+    container.appendChild(U.h('div', { class: 'space-y-5 animate-view-in' }, header, body));
   }
   g.T2VIEWS.allowances = render;
 
@@ -304,187 +278,6 @@
       } catch (err) { UI.toastError(err); }
     });
   }
-
-  // ═══════════════ زبانه الونس‌های خط تولید ═══════════════
-
-  function renderProjectTab(body, projectId) {
-    // v1.5.2 §۵.۱: کارت توضیحی مستقل حذف شد؛ راهنمای ظریف یک‌خطی با HelpDot
-    body.appendChild(U.h('div', { class: 'flex items-start gap-2 px-1 mb-3 text-[11px] leading-5 text-muted' },
-      UI.helpDot('الونس‌های سطح خط تولید', PROJECT_SCOPE_HELP),
-      U.h('p', { text: 'این الونس‌ها به تمام ایستگاه‌ها، فعالیت‌ها و عناصر کاری ارث می‌رسند؛ در هر سطح پایین‌تر قابل جایگزینی یا حذف از ارث‌بری‌اند.' })));
-    var sectionEl = U.h('div');
-    body.appendChild(sectionEl);
-    g.T2VIEWS._allowanceSection(sectionEl, projectId, 'PROJECT', projectId);
-  }
-
-  // ═══════════════ زبانه گروه‌های فعالیت — فقط طبقه‌بندی ═══════════════
-  // v1.5.2 §۸ — بازطراحی کارت‌های گروه (هم‌ارز GroupsView.tsx):
-  // • §۸-۱ تایپوگرافی منسجم: عنوان ۱۵px/۷۰۰، توضیح ۱۲px، متادیتا ۱۱px،
-  //   نام فعالیت ۱۲px/۶۰۰ — بدون جهش نامنظم اندازه
-  // • §۸-۲ هر فعالیت یک زیرکارت gc-act با پس‌زمینهٔ ملایمِ متمایز
-  // • §۸-۳ gc-grid با items-start — ارتفاع طبیعی بر اساس محتوا
-  // • §۸-۴ نام فعالیت + نام ایستگاه (با آیکون factory) و wrap کامل؛
-  //   «نمایش همه / نمایش کمتر» برای فهرست‌های بلند
-
-  /** آستانه نمایش فهرست جمع‌وجور قبل از دکمهٔ «نمایش همه» */
-  var GROUP_COLLAPSED_COUNT = 5;
-  /** وضعیت باز/بستهٔ فهرست فعالیت‌های هر گروه — پایدار بین رندرها */
-  var _groupExpanded = {}; // groupId -> bool
-
-  function groupCard(grp, acts, projectId, onDelete, redraw) {
-    var expanded = !!_groupExpanded[grp.id];
-    var showAll = expanded || acts.length <= GROUP_COLLAPSED_COUNT;
-    var visibleActs = showAll ? acts : acts.slice(0, GROUP_COLLAPSED_COUNT);
-    var hiddenCount = acts.length - visibleActs.length;
-
-    // فهرست فعالیت‌ها — فاصلهٔ کافی از سربرگ + جداکنندهٔ ظریف (§۸-۲)
-    var list;
-    if (acts.length > 0) {
-      list = U.h('ul', { class: 'gc-list' });
-      visibleActs.forEach(function (a) {
-        list.appendChild(U.h('li', null,
-          // زیرکارت فعالیت — موبایل: پشته‌ای؛ ≥sm: هم‌ردیف (§۸-۵)
-          U.h('button', {
-            class: 'gc-act',
-            onclick: function () { g.T2APP.navigate('/p/' + projectId + '/activity/' + a.id); },
-          },
-            // نام فعالیت — wrap کامل؛ بدون بریده‌شدن (§۸-۱)
-            U.h('span', { class: 'gc-act-name', text: a.name }),
-            // ایستگاهِ فعالیت — همراهی مشخص با آیکون، بدون سرریز (§۸-۴)
-            U.h('span', { class: 'gc-act-station' },
-              U.icon('factory'),
-              U.h('span', { text: a.stationName })))));
-      });
-      // نمایش همه فعالیت‌ها / نمایش کمتر — دسترسی به فهرست کامل (§۸-۴)
-      if (acts.length > GROUP_COLLAPSED_COUNT) {
-        list.appendChild(U.h('li', null,
-          U.h('button', {
-            class: 'gc-more num',
-            'aria-expanded': String(expanded),
-            onclick: function () { _groupExpanded[grp.id] = !expanded; redraw(); },
-          },
-            U.icon(expanded ? 'chevronUp' : 'chevronDown'),
-            expanded ? 'نمایش کمتر' : 'نمایش همه فعالیت‌ها (' + hiddenCount.toLocaleString('fa-IR') + ' مورد دیگر)')));
-      }
-    } else {
-      // گروه بدون فعالیت — جای‌نگهدار ظریف به‌جای فضای خالی (§۸-۳)
-      list = U.h('div', { class: 'gc-list' },
-        U.h('p', { class: 'gc-empty', text: 'فعالیتی به این گروه نسبت داده نشده است' }));
-    }
-
-    // §۸-۳: gc-card داخل gc-grid با align-items:start — ارتفاع طبیعی
-    return U.h('article', { class: 'gc-card' },
-      U.h('div', { class: 'flex items-start justify-between gap-2' },
-        U.h('div', { class: 'min-w-0 flex-1' },
-          // تایپوگرافی سلسله‌مراتبی (§۸-۱)
-          U.h('h3', { class: 'gc-title', text: grp.name }),
-          grp.description ? U.h('p', { class: 'gc-desc', text: grp.description }) : null,
-          U.h('p', { class: 'num gc-meta', text: acts.length.toLocaleString('fa-IR') + ' فعالیت · ساخته‌شده ' + U.formatDateTime(grp.createdAt) })),
-        U.h('button', {
-          class: 'icon-btn sm danger shrink-0', 'aria-label': 'حذف گروه ' + grp.name,
-          onclick: function () { onDelete(grp, acts); },
-        }, U.icon('trash'))),
-      list);
-  }
-
-  function renderGroupsTab(body, projectId) {
-    var wrap = U.h('div');
-    body.appendChild(wrap);
-
-    function draw() {
-      U.clear(wrap);
-      var state = DB.getState();
-      var groups = state.activityGroups.filter(function (x) { return x.projectId === projectId; });
-      var actsByGroup = {};
-      state.activities.forEach(function (a) {
-        if (!a.groupId) return;
-        if (!actsByGroup[a.groupId]) actsByGroup[a.groupId] = [];
-        var st = state.stations.find(function (s) { return s.id === a.stationId; });
-        actsByGroup[a.groupId].push({ id: a.id, name: a.name, stationName: st ? st.name : '؟' });
-      });
-
-      var head = U.h('div', { class: 'card-head flex flex-wrap items-center justify-between gap-3 p-4 pb-3' },
-        U.h('div', { class: 'flex items-center gap-2.5' },
-          // v1.5.2 §۵.۴: ListTree — آیکون یکپارچهٔ گروه‌های فعالیت
-          U.h('span', { class: 'chip-icon cyan', 'aria-hidden': 'true' }, U.icon('listTree')),
-          U.h('div', null,
-            U.h('h2', { class: 'text-sm font-extrabold', text: 'گروه‌های فعالیت' }),
-            U.h('p', { class: 'text-[11px] text-muted', text: 'طبقه‌بندی فعالیت‌های مشابه — منبع محاسبه نیست' })),
-          UI.helpDot('گروه‌های فعالیت', GROUPS_HELP)),
-        U.h('button', { class: 'btn btn-brand btn-sm gap-1.5', type: 'button', onclick: openCreateGroup },
-          U.icon('plus'), 'گروه جدید'));
-
-      // فاصلهٔ محتوا از سربرگ بخش — نه چسبیده، نه شلوغ (v1.5.2 §۸)
-      var content = U.h('div', { class: 'p-4 pt-4' });
-      if (groups.length === 0) {
-        content.appendChild(U.h('div', { class: 'rounded-xl border border-dashed p-6 text-center', style: { borderColor: 'var(--border)' } },
-          U.h('p', { class: 'text-sm font-bold', text: 'هنوز گروه فعالیتی ثبت نشده است' }),
-          U.h('p', { class: 'mx-auto mt-1 max-w-lg text-xs leading-5 text-muted', text: 'گروه‌ها صرفاً برچسب طبقه‌بندی فعالیت‌ها هستند؛ الونس‌ها از مدل سلسله‌مراتبی (خط → ایستگاه → فعالیت → عنصر) اعمال می‌شوند.' }),
-          U.h('button', { class: 'btn btn-brand btn-sm mt-3 gap-1.5', type: 'button', onclick: openCreateGroup }, U.icon('plus'), 'اولین گروه')));
-      } else {
-        // §۸-۳: gc-grid با align-items:start — کارت‌های هم‌ردیف به ارتفاع هم کشیده نمی‌شوند
-        var grid = U.h('div', { class: 'gc-grid' });
-        groups.forEach(function (grp) {
-          var acts = actsByGroup[grp.id] || [];
-          grid.appendChild(groupCard(grp, acts, projectId, function (g2, acts2) { confirmDeleteGroup(g2, acts2, draw); }, draw));
-        });
-        content.appendChild(grid);
-      }
-      wrap.appendChild(U.h('section', { class: 'card card-premium overflow-hidden', 'aria-label': 'گروه‌های فعالیت' }, head, content));
-    }
-
-    function openCreateGroup() {
-      var nameInput = U.h('input', { class: 'input', placeholder: 'مثلاً: کار دستی سبک' });
-      var descInput = U.h('textarea', { class: 'textarea', rows: 2, placeholder: 'توضیح اختیاری…' });
-      var dlg = UI.dialog({
-        title: 'گروه فعالیت جدید',
-        desc: 'گروه فقط برای طبقه‌بندی فعالیت‌هاست؛ مقادیر الونس در سطوح خط/ایستگاه/فعالیت/عنصر تعیین می‌شوند.',
-        bodyBuilder: function (body) {
-          body.appendChild(U.h('div', { class: 'space-y-4' },
-            UI.field('نام گروه (الزامی)', nameInput),
-            UI.field('توضیحات (اختیاری)', descInput)));
-        },
-        footerBuilder: function () {
-          return U.h('div', { class: 'dialog-footer' },
-            U.h('button', { class: 'btn btn-outline', type: 'button', onclick: function () { dlg.close(); } }, 'انصراف'),
-            U.h('button', {
-              class: 'btn btn-brand gap-1.5', type: 'button',
-              onclick: function () {
-                if (!nameInput.value.trim()) { UI.toastError(new Error('نام گروه الزامی است')); return; }
-                try {
-                  DB.createGroup(projectId, { name: nameInput.value.trim(), description: descInput.value.trim() || null });
-                  g.T2Toast('گروه فعالیت ایجاد شد', { type: 'success' });
-                  dlg.close(); draw();
-                } catch (err) { UI.toastError(err); }
-              },
-            }, U.icon('plus'), 'ثبت گروه'));
-        },
-      });
-    }
-
-    function confirmDeleteGroup(grp, acts, onDone) {
-      UI.confirmDelete({
-        title: 'حذف گروه فعالیت',
-        name: grp.name,
-        deps: acts.length > 0 ? { 'فعالیت — فقط بدون گروه می‌شوند؛ داده آن‌ها حذف نمی‌شود': acts.length } : {},
-      }).then(function (yes) {
-        if (!yes) return;
-        try {
-          DB.deleteGroup(grp.id);
-          g.T2Toast('گروه «' + grp.name + '» حذف شد', {
-            type: 'success',
-            description: acts.length.toLocaleString('fa-IR') + ' فعالیتِ این گروه بدون گروه شد؛ داده آن‌ها حذف نشد.',
-          });
-          onDone();
-        } catch (err) { UI.toastError(err); }
-      });
-    }
-
-    draw();
-  }
-
-  // ═══════════════ بخش «الونس‌ها و زمان‌های مجاز» — کامپوننت مشترک چهار سطح (§۶) ═══════════════
-  // mirrors src/views/project/allowances/AllowanceSection.tsx
 
   var STATUS_BADGES = {
     INHERITED: { label: 'ارث‌رسیده', tone: 'brand' },
