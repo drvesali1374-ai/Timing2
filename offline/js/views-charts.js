@@ -206,6 +206,317 @@
       .join(' ');
   }
 
+  /* ═══════════════════════════════════════════════════════════
+     سند چاپ حرفه‌ای نمودار — پورت کامل و هم‌ارز chart-print.ts (وب)
+     ▸ سند چاپ از «دادهٔ» نمودار ساخته می‌شود، نه کلون DOM بوم:
+       – بدون شبکهٔ نقطه‌ای، بدون قاب خط‌چین، بدون هیچ اسکرول‌باری؛
+       – برچسب گره‌ها کامل و چندخطی چاپ می‌شود (بدون «…» برش)؛
+       – مسیر یال‌ها با ارتفاع واقعی کارت‌های چاپی بازمحاسبه می‌شود؛
+       – خروجی برداری (متن قابل انتخاب) از موتور چاپ مرورگر.
+     ▸ همان ثابت‌ها/CSS/صفحه‌بندی نسخهٔ وب — هم‌ارزی کامل.
+     ═══════════════════════════════════════════════════════════ */
+  var PRINT_NODE_W = NW;      /* عرض کارت چاپی = عرض کارت بوم */
+  var PRINT_PAD = 36;         /* فاصلهٔ امن اطراف محتوا */
+  var TILED_OVERLAP = 24;     /* هم‌پوشانی چسباندن صفحات تایل‌دار */
+  var TITLE_BLOCK_PX = 68;    /* ارتفاع رزرو عنوان + تاریخ + شمارهٔ صفحه (اندازه‌گیری واقعی + حاشیهٔ اطمینان) */
+  var PRINT_PAPER_MM = { A4: { w: 210, h: 297 }, A3: { w: 297, h: 420 } };
+  var PRINT_MM_TO_PX = 96 / 25.4;
+
+  var PRINT_SYMBOL_COLORS = {
+    OPERATION: '#7257ff',
+    INSPECTION: '#b9831b',
+    TRANSPORT: '#5f6f88',
+    DELAY: '#ef5b6b',
+    STORAGE: '#18b77b',
+    MATERIAL_INPUT: '#0e93a4',
+  };
+  var PRINT_TYPE_LABELS = {
+    OPERATION: 'عملیات', INSPECTION: 'بازرسی', TRANSPORT: 'حمل‌ونقل',
+    DELAY: 'تأخیر', STORAGE: 'انبارش', MATERIAL_INPUT: 'ورودی مواد/قطعات',
+  };
+  var PRINT_SYMBOL_SHAPES = {
+    OPERATION: '<circle cx="12" cy="12" r="8.5"/>',
+    INSPECTION: '<rect x="4.5" y="4.5" width="15" height="15" rx="2"/>',
+    TRANSPORT: '<path d="M4 11.1 12.4 4.3v4.3H20v5h-7.6v4.3z"/>',
+    DELAY: '<path d="M5 5h7.6a7 7 0 0 1 0 14H5z"/>',
+    STORAGE: '<path d="M4.5 5.5h15L12 19.6z"/>',
+    MATERIAL_INPUT: '<path d="M12 3.6 19.7 8v8L12 20.4 4.3 16V8z"/>',
+  };
+
+  function printEscapeHtml(s) {
+    return String(s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+  function printSymbolSvg(t) {
+    var color = PRINT_SYMBOL_COLORS[t] || PRINT_SYMBOL_COLORS.OPERATION;
+    var shape = PRINT_SYMBOL_SHAPES[t] || PRINT_SYMBOL_SHAPES.OPERATION;
+    return '<svg viewBox="0 0 24 24" width="24" height="24" xmlns="http://www.w3.org/2000/svg" fill="' + color + '" fill-opacity="0.12" ' +
+      'stroke="' + color + '" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true">' + shape + '</svg>';
+  }
+
+  /* CSS مشترک کارت‌های چاپی — برای اندازه‌گیری (screen) و چاپ (print) یکی است */
+  var CHART_PRINT_CSS = ''
+    + '.chart-print-card { position: absolute; width: ' + PRINT_NODE_W + 'px; box-sizing: border-box; direction: rtl; '
+    + 'background: #ffffff; border: 1px solid #b9c2d0; border-radius: 8px; padding: 8px 10px 7px; '
+    + "font-family: Vazirmatn, 'Segoe UI', Tahoma, sans-serif; break-inside: avoid; }"
+    + '.chart-print-card .cp-num { position: absolute; top: -9px; inset-inline-start: -9px; width: 20px; height: 20px; '
+    + 'border-radius: 50%; background: #ffffff; border: 1px solid #b9c2d0; color: #33415c; font-size: 10.5px; '
+    + 'font-weight: 700; display: inline-flex; align-items: center; justify-content: center; }'
+    + '.chart-print-card .cp-head { display: flex; align-items: flex-start; gap: 7px; }'
+    + '.chart-print-card .cp-sym { flex-shrink: 0; width: 24px; height: 24px; display: inline-flex; }'
+    + '.chart-print-card .cp-sym svg { width: 24px; height: 24px; display: block; }'
+    + '.chart-print-card .cp-label { font-size: 12.5px; font-weight: 700; line-height: 1.55; color: #0c1424; '
+    + 'overflow-wrap: break-word; word-break: break-word; min-width: 0; }'
+    + '.chart-print-card .cp-sub { margin-top: 3px; font-size: 10.5px; line-height: 1.5; color: #5a6b85; }'
+    + '.chart-print-svg { position: absolute; inset: 0; overflow: visible; pointer-events: none; }';
+
+  var printSharedStyleEl = null;
+  var printSharedStyleRefs = 0;
+  function acquirePrintSharedStyle() {
+    if (!printSharedStyleEl || !printSharedStyleEl.isConnected) {
+      printSharedStyleEl = document.createElement('style');
+      printSharedStyleEl.id = 'chart-print-shared-css';
+      printSharedStyleEl.textContent = CHART_PRINT_CSS;
+      document.head.appendChild(printSharedStyleEl);
+    }
+    printSharedStyleRefs++;
+    return printSharedStyleEl;
+  }
+  function releasePrintSharedStyle() {
+    printSharedStyleRefs = Math.max(0, printSharedStyleRefs - 1);
+    if (printSharedStyleRefs === 0 && printSharedStyleEl && printSharedStyleEl.isConnected) {
+      printSharedStyleEl.parentNode.removeChild(printSharedStyleEl);
+    }
+  }
+
+  function printCardHtml(n) {
+    var sub = (PRINT_TYPE_LABELS[n.nodeType] || n.nodeType) +
+      (n.isManual ? ' · گره دستی' : (n.stationName ? ' · ' + n.stationName : ''));
+    return '<span class="cp-num">' + printEscapeHtml(String(n.sortOrder + 1)) + '</span>' +
+      '<div class="cp-head"><span class="cp-sym">' + printSymbolSvg(n.nodeType) + '</span>' +
+      '<div class="cp-label">' + printEscapeHtml(n.label) + '</div></div>' +
+      '<div class="cp-sub">' + printEscapeHtml(sub) + '</div>';
+  }
+
+  /* اندازه‌گیری ارتفاع واقعی کارت چاپی (برچسب چندخطی) — offscreen */
+  function measurePrintCardHeight(n) {
+    var measurer = document.createElement('div');
+    measurer.style.cssText = 'position:fixed;left:-99999px;top:0;visibility:hidden;pointer-events:none;';
+    var card = document.createElement('div');
+    card.className = 'chart-print-card';
+    card.style.width = PRINT_NODE_W + 'px';
+    card.innerHTML = printCardHtml(n);
+    measurer.appendChild(card);
+    document.body.appendChild(measurer);
+    var h = card.offsetHeight;
+    measurer.parentNode.removeChild(measurer);
+    return h > 0 ? Math.ceil(h) : NH;
+  }
+
+  /* چیدمان سند چاپ: نرمال‌سازی مختصات به (۰،۰) + مسیر یال‌ها با ارتفاع چاپی.
+     نکتهٔ حیاتی: CSS مشترک کارت‌های چاپی «قبل از اندازه‌گیری» تزریق
+     می‌شود — بدون آن svg نماد ۳۰۰×۱۵۰px پیش‌فرض می‌شود و ارتفاع کارت
+     به‌شدت متورم می‌شود (مسیر یال‌ها از کارت‌ها جدا می‌شد). */
+  function buildPrintLayout(src) {
+    if (!src || !src.nodes || !src.nodes.length) return { width: 100, height: 100, cards: [], paths: [] };
+    acquirePrintSharedStyle();
+    try {
+      var heights = {};
+      src.nodes.forEach(function (n) { heights[n.id] = measurePrintCardHeight(n); });
+
+      var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      src.nodes.forEach(function (n) {
+        var h = heights[n.id] || NH;
+        minX = Math.min(minX, n.x - PRINT_PAD);
+        minY = Math.min(minY, n.y - PRINT_PAD);
+        maxX = Math.max(maxX, n.x + PRINT_NODE_W + PRINT_PAD);
+        maxY = Math.max(maxY, n.y + h + PRINT_PAD);
+      });
+      if (!isFinite(minX)) return { width: 100, height: 100, cards: [], paths: [] };
+
+      var cards = src.nodes.map(function (n) {
+        var h = heights[n.id] || NH;
+        var c = {}; for (var k in n) c[k] = n[k];
+        c.printX = n.x - minX;
+        c.printY = n.y - minY;
+        c.height = h;
+        return c;
+      });
+      var nodeMap = {};
+      cards.forEach(function (c) { nodeMap[c.id] = c; });
+
+      var paths = [];
+      (src.edges || []).forEach(function (e) {
+        var s = nodeMap[e.sourceId], t = nodeMap[e.targetId];
+        if (!s || !t) return;
+        var sp = { x: s.printX, y: s.printY }, tp = { x: t.printX, y: t.printY };
+        var auto = autoAnchors(sp, tp, s.height, t.height);
+        var sa = e.sourceAnchor || auto[0];
+        var ta = e.targetAnchor || auto[1];
+        paths.push({ edge: e, d: orthogonalPath(sp, sa, tp, ta, s.height, t.height) });
+      });
+
+      /* گستره نهایی: یال‌ها هم نباید بیرون قاب بمانند */
+      var w = maxX - minX, h2 = maxY - minY;
+      paths.forEach(function (p) {
+        var nums = p.d.match(/-?\d+(?:\.\d+)?/g);
+        if (!nums) return;
+        for (var i = 0; i + 1 < nums.length; i += 2) {
+          w = Math.max(w, Number(nums[i]) + PRINT_PAD);
+          h2 = Math.max(h2, Number(nums[i + 1]) + PRINT_PAD);
+        }
+      });
+      return { width: Math.ceil(w), height: Math.ceil(h2), cards: cards, paths: paths };
+    } finally {
+      releasePrintSharedStyle();
+    }
+  }
+
+  function printMarkerId(color, pageIdx) {
+    var suffix = color ? '-c-' + String(color).replace(/[^a-zA-Z0-9]/g, '') : '';
+    return 'pdf-arrow' + suffix + '-p' + pageIdx;
+  }
+  function printSvgForLayout(layout, pageIdx) {
+    var seen = {}, colors = [];
+    layout.paths.forEach(function (p) { if (p.edge.lineColor && !seen[p.edge.lineColor]) { seen[p.edge.lineColor] = 1; colors.push(p.edge.lineColor); } });
+    function mk(id, fill, size) {
+      return '<marker id="' + id + '" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="' + size + '" markerHeight="' + size + '" orient="auto-start-reverse">' +
+        '<path d="M 0 0 L 10 5 L 0 10 z" fill="' + fill + '"/></marker>';
+    }
+    var defs = mk(printMarkerId(null, pageIdx), '#7257ff', 8);
+    colors.forEach(function (c) { defs += mk(printMarkerId(c, pageIdx), c, 8); });
+
+    var paths = '';
+    layout.paths.forEach(function (p) {
+      var style = p.edge.lineStyle || 'SOLID';
+      var dash = style === 'DASHED' ? ' stroke-dasharray="6 4"' : (style === 'DOTTED' ? ' stroke-dasharray="1.5 3.5" stroke-linecap="round"' : '');
+      var stroke = p.edge.lineColor || '#7257ff';
+      var opacity = p.edge.lineColor ? 1 : (p.edge.isChain ? 0.8 : 1);
+      paths += '<path d="' + p.d + '" fill="none" stroke="' + stroke + '" stroke-opacity="' + opacity + '" stroke-width="2"' + dash +
+        ' marker-end="url(#' + printMarkerId(p.edge.lineColor, pageIdx) + ')"/>';
+    });
+    return '<svg class="chart-print-svg" width="' + layout.width + '" height="' + layout.height + '" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">' +
+      '<defs>' + defs + '</defs>' + paths + '</svg>';
+  }
+
+  /* ساخت سند کامل چاپ — #chart-pdf-root به body افزوده می‌شود؛ خروجی cleanup */
+  function buildPrintDocument(src, layout, opts) {
+    var base = PRINT_PAPER_MM[opts.paper];
+    var pm = opts.orientation === 'landscape' ? { w: base.h, h: base.w } : { w: base.w, h: base.h };
+    var frame = {
+      w: Math.max((pm.w - opts.marginMm * 2) * PRINT_MM_TO_PX, 100),
+      h: Math.max((pm.h - opts.marginMm * 2) * PRINT_MM_TO_PX - (opts.showTitle ? TITLE_BLOCK_PX : 6), 100),
+    };
+    var fitScale = Math.min(frame.w / layout.width, frame.h / layout.height);
+    var s = opts.mode === 'fit' ? fitScale : opts.tiledScale / 100;
+    var overlap = TILED_OVERLAP;
+    var cols = 1, rows = 1;
+    if (opts.mode === 'tiled') {
+      cols = Math.max(1, Math.ceil((layout.width * s) / (frame.w - overlap)));
+      rows = Math.max(1, Math.ceil((layout.height * s) / (frame.h - overlap)));
+    }
+    var pagesCount = cols * rows;
+
+    var pageStyle = document.createElement('style');
+    pageStyle.id = 'chart-pdf-page-style';
+    pageStyle.textContent = '@page { size: ' + pm.w + 'mm ' + pm.h + 'mm; margin: 0 }';
+
+    function chartAreaHtml(pageIdx) {
+      var cardsHtml = '';
+      layout.cards.forEach(function (c) {
+        cardsHtml += '<div class="chart-print-card" style="left:' + Math.round(c.printX) + 'px;top:' + Math.round(c.printY) + 'px">' + printCardHtml(c) + '</div>';
+      });
+      return '<div class="chart-print-area" style="position:relative;width:' + layout.width + 'px;height:' + layout.height + 'px">' +
+        printSvgForLayout(layout, pageIdx) + cardsHtml + '</div>';
+    }
+    function mkPage(col, row, idx, inner) {
+      var dateStr = new Date().toLocaleDateString('fa-IR');
+      return '<div class="chart-pdf-page" style="width:' + pm.w + 'mm;height:' + pm.h + 'mm">' +
+        '<div class="chart-pdf-crop chart-pdf-crop-tl"></div><div class="chart-pdf-crop chart-pdf-crop-tr"></div>' +
+        '<div class="chart-pdf-crop chart-pdf-crop-bl"></div><div class="chart-pdf-crop chart-pdf-crop-br"></div>' +
+        '<div class="chart-pdf-frame" style="position:absolute;inset:' + opts.marginMm + 'mm;overflow:hidden">' +
+        (opts.showTitle
+          ? '<div class="chart-pdf-title">' + printEscapeHtml(src.chartTitle) + (opts.mode === 'tiled' ? ' — بخش (ردیف ' + (row + 1) + '، ستون ' + (col + 1) + ')' : '') + '</div>' +
+            '<div class="chart-pdf-sub">تاریخ چاپ: ' + dateStr + '</div>'
+          : '') +
+        '<div class="chart-pdf-viewport" style="width:' + Math.floor(frame.w) + 'px;height:' + Math.floor(frame.h) + 'px;overflow:hidden;position:relative">' + inner + '</div>' +
+        (opts.showPageNumbers
+          ? '<div class="chart-pdf-num">صفحهٔ ' + idx + ' از ' + pagesCount + (opts.mode === 'tiled' ? ' — ردیف ' + (row + 1) + '، ستون ' + (col + 1) : '') + '</div>'
+          : '') +
+        '</div></div>';
+    }
+
+    var pages = [];
+    if (opts.mode === 'fit') {
+      var offX = Math.max(0, (frame.w - layout.width * s) / 2);
+      var offY = Math.max(0, (frame.h - layout.height * s) / 2);
+      pages.push(mkPage(0, 0, 1,
+        '<div style="position:absolute;left:' + offX + 'px;top:' + offY + 'px;transform:scale(' + s + ');transform-origin:0 0">' + chartAreaHtml(0) + '</div>'));
+    } else {
+      var vw = frame.w - overlap, vh = frame.h - overlap;
+      var idx = 1;
+      for (var row = 0; row < rows; row++) {
+        for (var col = 0; col < cols; col++) {
+          /* صفحهٔ (col,row) از نقطهٔ chart مبنای col*vw/s نمایش می‌دهد:
+             جای‌گذاری = -s*(col*vw/s) = -col*vw (تصحیح مقیاس تایل‌دار) */
+          var tx = -(col * vw), ty = -(row * vh);
+          pages.push(mkPage(col, row, idx,
+            '<div style="position:absolute;left:0;top:0;transform:translate(' + tx + 'px,' + ty + 'px) scale(' + s + ');transform-origin:0 0">' + chartAreaHtml(idx - 1) + '</div>'));
+          idx++;
+        }
+      }
+    }
+
+    var rootEl = document.createElement('div');
+    rootEl.id = 'chart-pdf-root';
+    rootEl.innerHTML = pages.join('');
+
+    var css = document.createElement('style');
+    css.id = 'chart-pdf-print-css';
+    css.textContent = ''
+      + '#chart-pdf-root { color-scheme: light; color: #0c1424; font-family: Vazirmatn, "Segoe UI", Tahoma, sans-serif; }'
+      + '#chart-pdf-root, #chart-pdf-root * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }'
+      + '#chart-pdf-root .chart-pdf-page { position: relative; background: #fff; overflow: hidden; box-sizing: border-box; }'
+      + '#chart-pdf-root .chart-pdf-page + .chart-pdf-page { page-break-before: always; }'
+      + '#chart-pdf-root .chart-pdf-title { font: bold 13px Vazirmatn, sans-serif; color: #111; text-align: center; margin-bottom: 2px; direction: rtl; }'
+      + '#chart-pdf-root .chart-pdf-sub { font: 10px Vazirmatn, sans-serif; color: #555; text-align: center; margin-bottom: 6px; direction: rtl; }'
+      + '#chart-pdf-root .chart-pdf-num { font: 10px Vazirmatn, sans-serif; color: #444; text-align: center; margin-top: 4px; direction: rtl; }'
+      + '#chart-pdf-root .chart-pdf-crop { position: absolute; width: 10mm; height: 10mm; border-color: #555; }'
+      + '#chart-pdf-root .chart-pdf-crop-tl { top: 3mm; left: 3mm; border-top: 1px solid #555; border-left: 1px solid #555; }'
+      + '#chart-pdf-root .chart-pdf-crop-tr { top: 3mm; right: 3mm; border-top: 1px solid #555; border-right: 1px solid #555; }'
+      + '#chart-pdf-root .chart-pdf-crop-bl { bottom: 3mm; left: 3mm; border-bottom: 1px solid #555; border-left: 1px solid #555; }'
+      + '#chart-pdf-root .chart-pdf-crop-br { bottom: 3mm; right: 3mm; border-bottom: 1px solid #555; border-right: 1px solid #555; }'
+      + '@media print {'
+      + ' body > *:not(#chart-pdf-root) { display: none !important; }'
+      + ' #chart-pdf-root { display: block !important; }'
+      /* CSS چاپ گزارش‌ها (app.css) «body *» را visibility:hidden می‌کند؛
+         بدون بازگرداندن آن برای سند نمودار، خروجی PDF سفید می‌شد. */
+      + ' #chart-pdf-root, #chart-pdf-root * { visibility: visible !important; }'
+      + ' #chart-pdf-root .chart-pdf-page { break-inside: avoid; }'
+      + '}'
+      + '@media screen { #chart-pdf-root { display: none; } }';
+
+    acquirePrintSharedStyle();
+    document.head.appendChild(pageStyle);
+    document.head.appendChild(css);
+    document.body.appendChild(rootEl);
+
+    var cleaned = false;
+    function cleanup() {
+      if (cleaned) return;
+      cleaned = true;
+      if (rootEl.parentNode) rootEl.parentNode.removeChild(rootEl);
+      if (css.parentNode) css.parentNode.removeChild(css);
+      if (pageStyle.parentNode) pageStyle.parentNode.removeChild(pageStyle);
+      releasePrintSharedStyle();
+    }
+    return { root: rootEl, cleanup: cleanup, pagesCount: pagesCount };
+  }
+
+  /* قلاب تست مرورگر — برای راستی‌آزمایی خروجی PDF با ابزار پردازش تصویر */
+  g.__T2C_PDF_TEST__ = { buildPrintLayout: buildPrintLayout, buildPrintDocument: buildPrintDocument };
+
   /* ── وضعیت ماژول — بین رندرها و ناوبری حفظ می‌شود ── */
   var chartTypeByProject = {};   /* projectId -> 'OPC' | 'FPC' */
   var viewStateByChart = {};     /* projectId|chartType -> { zoom, pan } */
@@ -297,8 +608,9 @@
     delete selectedEdgeByProject[projectId];
 
     var suppressClickUntil = 0; /* سرکوب click پس از درگ واقعی گره/زمینه */
-    /* منبع خروجی PDF — در هر رندر تازه می‌شود؛ cropX/Y = برش محتوای §۶-۵ */
-    var pdfCtx = { el: null, w: 0, h: 0, title: '', cropX: 0, cropY: 0 };
+    /* دادهٔ خروجی PDF — snapshot دادهٔ نمودار (نه DOM)؛ در هر رندر تازه
+       می‌شود و پس از درگ گره نیز به‌روز می‌گردد (سند چاپ از داده ساخته می‌شود) */
+    var pdfData = null;
 
     function render() {
       cancelConnectFn = null;
@@ -309,7 +621,7 @@
       var chart;
       try { chart = DB.getChart(projectId, chartType); }
       catch (err) {
-        pdfCtx.el = null;
+        pdfData = null;
         root.appendChild(U.h('div', { class: 'banner error' }, U.icon('alertTriangle'),
           U.h('div', null, 'خطا در بارگذاری نمودار: ' + (err && err.message ? err.message : err))));
         return;
@@ -346,8 +658,9 @@
         return null;
       }
 
-      /* v1.5.2 §۱۰.۲ — بلوک چسبان واحد: هدر صفحه + نوار زبانه‌های OPC/FPC
-         هنگام اسکرول هم‌اهنگ زیر TopBar ثابت می‌مانند (استثنای آگاهانهٔ این صفحه). */
+      /* v1.5.2 نهایی §۴ — بلوک چسبان واحد: هدر صفحه + زبانه‌های OPC/FPC +
+         «همهٔ» ابزارها (آیکونی با نام کامل در title) — هنگام اسکرول هم‌اهنگ
+         زیر TopBar فریز می‌شوند. در حالت خالی فقط هدر + زبانه‌ها. */
       var tabsEl = UI.tabsBar([
         { key: 'OPC', label: 'OPC — عملیات و بازرسی' },
         { key: 'FPC', label: 'FPC — جریان کامل' },
@@ -357,20 +670,26 @@
         delete selectedEdgeByProject[projectId]; /* §۶-۶ — ریست با تعویض زبانه (معادل key={chartType} وب) */
         render();
       });
-      tabsEl.style.marginTop = '12px';
-      root.appendChild(UI.stickyHeading(U.h('div', { style: { paddingBottom: '12px' } },
-        U.h('header', { class: 'flex items-center gap-3' },
-          U.h('span', { class: 'chip-icon' }, U.icon('workflow')),
-          U.h('div', { class: 'flex items-center gap-2 min-w-0' },
-            U.h('h1', { class: 'text-xl font-extrabold', text: 'نمودار فرایند — OPC / FPC' }),
-            UI.helpDot('نمودار فرایند', HELP_CHART))),
-        tabsEl)));
+      tabsEl.classList.add('tabs-inline'); /* ظاهر فشردهٔ درون‌ردیفی در نوار چسبان */
+      var headerEl = U.h('header', { class: 'flex items-center gap-3' },
+        U.h('span', { class: 'chip-icon' }, U.icon('workflow')),
+        U.h('div', { class: 'flex items-center gap-2 min-w-0' },
+          U.h('h1', { class: 'text-xl font-extrabold', text: 'نمودار فرایند — OPC / FPC' }),
+          UI.helpDot('نمودار فرایند', HELP_CHART)));
+      function mountSticky(toolbarRow) {
+        root.appendChild(UI.stickyHeading(U.h('div', { style: { paddingBottom: '12px' } },
+          headerEl,
+          U.h('div', { class: 'flex flex-wrap items-center gap-2', style: { marginTop: '12px' } },
+            tabsEl,
+            toolbarRow || null))));
+      }
       installHistKeys();
       chartsViewActivePid = projectId;
 
       /* حالت‌های خالی — عیناً هم‌ارز ChartCanvas.tsx */
       if (!(chart.counts.activitiesTotal > 0)) {
-        pdfCtx.el = null;
+        pdfData = null;
+        mountSticky(null);
         root.appendChild(U.h('section', { class: 'card p-6' }, UI.emptyState({
           title: 'هنوز فعالیتی تعریف نشده است',
           desc: 'گره‌های نمودار فرایند به‌صورت خودکار از فعالیت‌های تعریف‌شده در «ساختار تولید» ساخته می‌شوند. ابتدا ایستگاه و فعالیت بسازید.',
@@ -379,7 +698,8 @@
         return;
       }
       if (nodes.length === 0) {
-        pdfCtx.el = null;
+        pdfData = null;
+        mountSticky(null);
         root.appendChild(U.h('section', { class: 'card p-6' }, UI.emptyState({
           title: chartType === 'OPC' ? 'فعالیتی برای OPC مشمول نیست' : 'گره‌ای برای نمایش نیست',
           desc: chartType === 'OPC'
@@ -417,19 +737,22 @@
       chart.edges.forEach(function (e) { if (e.id === selectedEdgeId) selectedEdge = e; });
       if (!selectedEdge) { selectedEdgeId = null; delete selectedEdgeByProject[projectId]; }
 
-      /* ── نوار ابزار — v1.5.2 §۱۰.۱: دسته‌بندی کاربردی
-          [ایجاد/ویرایش] │ [بوم] │ [Undo/Redo §۱۰.۸] │ [زوم] │ [ظاهر/حذف یال §۱۰.۵]
-          │ [خروجی PDF تم متمایز] → چیپ‌ها در ms-auto ── */
+      /* ── نوار ابزار — v1.5.2 نهایی §۴: در همان بلوک چسبانِ زبانه‌ها،
+          [ایجاد/ویرایش] │ [بوم] │ [برگشت به عقب/رفتن به جلو §۱۰.۸] │ [زوم]
+          │ [ظاهر/حذف یال §۱۰.۵] │ [خروجی PDF تم متمایز] — دکمه‌ها آیکونی؛
+          نام کامل فقط در title (هاور) نمایش داده می‌شود ── */
       var hist = histOf(projectId);
-      root.appendChild(U.h('div', { class: 'flex flex-wrap items-center gap-2 mb-1' },
+      var toolbarRow = U.h('div', { class: 'flex flex-wrap items-center gap-2' },
         /* ── ایجاد و ویرایش نمودار ── */
         U.h('div', { class: 'tb-group', role: 'group', 'aria-label': 'ایجاد و ویرایش نمودار' },
           U.h('button', {
-            class: 'btn btn-sm btn-brand', type: 'button',
+            class: 'icon-btn sm icon-btn-brand', type: 'button',
+            'aria-label': 'گره دستی', title: 'گره دستی جدید',
             onclick: function () { openManualNodeDialog(null); },
-          }, U.icon('plus'), 'گره دستی'),
+          }, U.icon('plus')),
           U.h('button', {
-            class: 'btn btn-sm btn-ghost', type: 'button',
+            class: 'icon-btn sm', type: 'button',
+            'aria-label': 'چیدمان خودکار', title: 'چیدمان خودکار',
             onclick: function () {
               try {
                 /* §۱۵.۵ — ابتدا چیدمان دستی فعلی به‌عنوان snapshot ذخیره شود */
@@ -452,12 +775,13 @@
                 render();
               } catch (err) { UI.toastError(err); }
             },
-          }, U.icon('layers'), 'چیدمان خودکار'),
+          }, U.icon('layers')),
           U.h('button', {
-            class: 'btn btn-sm btn-ghost', type: 'button', disabled: !hasSnapshot,
-            title: snapshot && snapshot.savedAt
-              ? 'آخرین چیدمان دستی ذخیره‌شده: ' + U.formatDateTime(snapshot.savedAt)
-              : 'هنوز چیدمان دستی ذخیره نشده است',
+            class: 'icon-btn sm', type: 'button', disabled: !hasSnapshot,
+            'aria-label': 'بازگردانی چیدمان دستی',
+            title: 'بازگردانی چیدمان دستی' + (snapshot && snapshot.savedAt
+              ? '\nآخرین چیدمان ذخیره‌شده: ' + U.formatDateTime(snapshot.savedAt)
+              : '\nهنوز چیدمان دستی ذخیره نشده است'),
             onclick: function () {
               try {
                 var snap = DB.getChartLayoutSnapshot(projectId, chartType);
@@ -474,29 +798,33 @@
                 render();
               } catch (err) { UI.toastError(err); }
             },
-          }, U.icon('history'), 'بازگردانی چیدمان دستی')),
+          }, U.icon('history'))),
         /* ── بوم ── */
         U.h('div', { class: 'tb-group', role: 'group', 'aria-label': 'ابزار بوم' },
           U.h('button', {
-            class: 'btn btn-sm btn-ghost', type: 'button',
+            class: 'icon-btn sm', type: 'button',
+            'aria-label': 'ابعاد بوم', title: 'ابعاد بوم',
             onclick: function () { openCanvasSizeDialog(); },
-          }, lucideIcon(SVG_RULER), 'ابعاد بوم'),
+          }, lucideIcon(SVG_RULER)),
           U.h('button', {
-            class: 'btn btn-sm btn-ghost', type: 'button', 'aria-label': 'بازخوانی نمودار از فعالیت‌ها',
+            class: 'icon-btn sm', type: 'button', 'aria-label': 'بازخوانی نمودار از فعالیت‌ها',
+            title: 'بازخوانی نمودار از فعالیت‌ها',
             onclick: function () { render(); },
-          }, U.icon('refresh'), 'بازخوانی')),
-        /* ── §۱۰.۸ — Undo/Redo — نام‌گذاری درخواستی کاربر: «برگشت به عقب» / «رفتن به جلو» ── */
+          }, U.icon('refresh'))),
+        /* ── §۱۰.۸ — برگشت به عقب / رفتن به جلو (نام کامل در title) ── */
         U.h('div', { class: 'tb-group', role: 'group', 'aria-label': 'برگشت به عقب و رفتن به جلو' },
           U.h('button', {
-            class: 'btn btn-ghost btn-sm t2c-undo-btn', type: 'button', disabled: hist.index < 0,
-            'aria-label': 'برگشت به عقب (Ctrl+Z)', title: hist.index >= 0 ? 'برگشت به عقب: ' + hist.entries[hist.index].label : 'برگشت به عقب',
+            class: 'icon-btn sm', type: 'button', disabled: hist.index < 0,
+            'aria-label': 'برگشت به عقب (Ctrl+Z)',
+            title: 'برگشت به عقب — Ctrl+Z' + (hist.index >= 0 ? '\n' + hist.entries[hist.index].label : '\nعملی برای واگردانی نیست'),
             onclick: function () { histUndo(projectId); },
-          }, lucideIcon(SVG_UNDO), U.h('span', { class: 't2c-undo-label', text: 'برگشت به عقب' })),
+          }, lucideIcon(SVG_UNDO)),
           U.h('button', {
-            class: 'btn btn-ghost btn-sm t2c-undo-btn', type: 'button', disabled: hist.index >= hist.entries.length - 1,
-            'aria-label': 'رفتن به جلو (Ctrl+Y)', title: hist.index < hist.entries.length - 1 ? 'رفتن به جلو: ' + hist.entries[hist.index + 1].label : 'رفتن به جلو',
+            class: 'icon-btn sm', type: 'button', disabled: hist.index >= hist.entries.length - 1,
+            'aria-label': 'رفتن به جلو (Ctrl+Y)',
+            title: 'رفتن به جلو — Ctrl+Y' + (hist.index < hist.entries.length - 1 ? '\n' + hist.entries[hist.index + 1].label : '\nعملی برای اجرای مجدد نیست'),
             onclick: function () { histRedo(projectId); },
-          }, lucideIcon(SVG_REDO), U.h('span', { class: 't2c-undo-label', text: 'رفتن به جلو' }))),
+          }, lucideIcon(SVG_REDO))),
         U.h('div', { class: 'zoom-group', role: 'group', 'aria-label': 'کنترل زوم' },
           U.h('button', {
             class: 'icon-btn sm', type: 'button', 'aria-label': 'کوچک‌نمایی', title: 'کوچک‌نمایی',
@@ -529,21 +857,23 @@
         /* §۱۰.۱ — خروجی PDF: تم متمایز قرمز، همیشه در دسترس بالای صفحه */
         U.h('button', {
           class: 'btn btn-sm btn-pdf', type: 'button',
-          title: 'خروجی PDF نمودار — تک‌صفحه‌ای یا تایل‌دار',
+          title: 'خروجی PDF نمودار — تک‌صفحه‌ای یا تایل‌دار (برداری از دادهٔ نمودار)',
           onclick: function () { openPdfDialog(); },
-        }, U.icon('printer'), 'خروجی PDF'),
-        /* چیپ‌های شمارش/راهنما — انتهای نوار (ms-auto)، هم‌ارز وب */
-        U.h('div', { class: 'flex flex-wrap items-center gap-1.5 text-xs text-muted', style: { marginInlineStart: 'auto' } },
-          isExt ? U.h('span', { class: 'chip-ext-opc', role: 'status', text: 'OPC توسعه‌یافته — دارای ورودی مواد/انبار' }) : null,
-          allowedTypes.map(function (t) {
-            var count = byType[t] || 0;
-            return U.h('span', { class: 'legend-chip' + (count ? '' : ' zero') },
-              symbolEl(t, 'sm'),
-              U.h('span', { text: (TYPE_LABEL[t] || t) + ': ' + U.formatInt(count) }));
-          }),
-          chart.counts.manual > 0
-            ? U.h('span', { class: 'legend-chip', style: { borderStyle: 'dashed' }, text: 'دستی: ' + U.formatInt(chart.counts.manual) })
-            : null)));
+        }, U.icon('printer'), 'PDF'));
+      mountSticky(toolbarRow);
+
+      /* چیپ‌های شمارش/راهنما — ردیف مستقل زیر بلوک چسبان (نوار فشرده بماند) */
+      root.appendChild(U.h('div', { class: 'flex flex-wrap items-center gap-1.5 text-xs text-muted' },
+        isExt ? U.h('span', { class: 'chip-ext-opc', role: 'status', text: 'OPC توسعه‌یافته — دارای ورودی مواد/انبار' }) : null,
+        allowedTypes.map(function (t) {
+          var count = byType[t] || 0;
+          return U.h('span', { class: 'legend-chip' + (count ? '' : ' zero') },
+            symbolEl(t, 'sm'),
+            U.h('span', { text: (TYPE_LABEL[t] || t) + ': ' + U.formatInt(count) }));
+        }),
+        chart.counts.manual > 0
+          ? U.h('span', { class: 'legend-chip', style: { borderStyle: 'dashed' }, text: 'دستی: ' + U.formatInt(chart.counts.manual) })
+          : null));
 
       /* ── هشدار گره‌های بی‌اتصال ── */
       var connected = {};
@@ -679,6 +1009,9 @@
       function applyTransform() {
         contentWrap.style.transform = 'translate(' + view.pan.x + 'px, ' + view.pan.y + 'px) scale(' + view.zoom + ')';
         updateZoomLabel();
+        /* §۵ — ارتفاع کادر بوم = کل ارتفاع محتوای بوم در زوم فعلی (حداقل ۷۲vh):
+           دیگر نیازی به اسکرول/پن عمودی داخل کادر نیست؛ صفحه خودش اسکرول می‌شود. */
+        viewport.style.height = 'max(72vh, ' + Math.ceil(CH * view.zoom + 48) + 'px)';
       }
       function updateZoomLabel() {
         var pct = U.formatInt(Math.round(view.zoom * 100)) + '٪';
@@ -724,11 +1057,14 @@
         zoomAt(ev.clientX, ev.clientY, ev.deltaY < 0 ? 1.1 : 1 / 1.1);
       }, { passive: false });
 
-      /* درگ زمینه = پن؛ کلیک زمینه = لغو انتخاب */
+      /* درگ زمینه = پن؛ کلیک زمینه = لغو انتخاب.
+         §۱ — نکتهٔ حیاتی: pointerdown روی «یال» هرگز پن را آغاز نمی‌کند؛
+         setPointerCapture روی viewport رویداد click را می‌ربود و انتخاب یال
+         هرگز اجرا نمی‌شد (علت واقعی «انتخاب‌نشدن یال‌ها» در هر دو نسخه). */
       viewport.addEventListener('pointerdown', function (ev) {
         if (ev.button > 0) return;
         var t = ev.target;
-        if (t && t.closest && (t.closest('.chart-node') || t.closest('.chart-anchor'))) return;
+        if (t && t.closest && (t.closest('.chart-node') || t.closest('.chart-anchor') || t.closest('.chart-edge'))) return;
         var startX = ev.clientX, startY = ev.clientY;
         var origX = view.pan.x, origY = view.pan.y, moved = false;
         try { viewport.setPointerCapture(ev.pointerId); } catch (err) { /* رویداد ترکیبی بدون پوینتر فعال */ }
@@ -762,58 +1098,29 @@
       });
       redrawEdges();
 
-      /* §۶-۵ — محدودهٔ واقعی محتوای نمودار (گره‌ها + یال‌ها + پیکان‌ها):
-         خروجی PDF فقط همین محدوده را شامل می‌شود، نه کل فضای خالی بوم.
-         مختصات ذخیره‌شدهٔ گره‌ها هرگز تغییر نمی‌کند — فقط برش نمایشی.
-         (پورت دقیق contentBBox از ChartCanvas.tsx؛ PAD = فاصلهٔ امن)
-         مختصات منفی/چیدمان نامتعارف نیز درست پشتیبانی می‌شود. */
-      var contentBBox = null;
-      (function () {
-        var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-        function expand(x, y) {
-          if (x < minX) minX = x;
-          if (y < minY) minY = y;
-          if (x > maxX) maxX = x;
-          if (y > maxY) maxY = y;
-        }
-        var PAD = 48;
-        nodes.forEach(function (n) {
-          var h = nodeH[n.id] || NH;
-          expand(n.positionX - PAD, n.positionY - PAD);
-          expand(n.positionX + NW + PAD, n.positionY + h + PAD);
-        });
-        chart.edges.forEach(function (e) {
-          var sn = nodeById[e.sourceNodeId], tn = nodeById[e.targetNodeId];
-          if (!sn || !tn) return;
-          var sp = { x: sn.positionX, y: sn.positionY }, tp = { x: tn.positionX, y: tn.positionY };
-          var auto = autoAnchors(sp, tp, nodeH[sn.id], nodeH[tn.id]);
-          var sa = anchorOf(e, 'sourceAnchor') || auto[0];
-          var ta = anchorOf(e, 'targetAnchor') || auto[1];
-          elbowPoints(sp, sa, tp, ta, nodeH[sn.id], nodeH[tn.id]).forEach(function (pt) {
-            expand(pt.x - PAD, pt.y - PAD);
-            expand(pt.x + PAD, pt.y + PAD);
-          });
-        });
-        if (isFinite(minX) && isFinite(maxX)) {
-          contentBBox = { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
-        }
-      })();
-
-      /* منبع خروجی PDF — بوم رندرشدهٔ فعلی، برش‌خورده به محدودهٔ محتوا (§۶-۵) */
-      pdfCtx.el = canvasWrap;
-      if (contentBBox) {
-        pdfCtx.w = Math.ceil(contentBBox.w);
-        pdfCtx.h = Math.ceil(contentBBox.h);
-        /* محتوا با آفست منفی درون قاب برش‌خورده قرار می‌گیرد */
-        pdfCtx.cropX = -Math.floor(contentBBox.x);
-        pdfCtx.cropY = -Math.floor(contentBBox.y);
-      } else {
-        pdfCtx.w = CW;
-        pdfCtx.h = CH;
-        pdfCtx.cropX = 0;
-        pdfCtx.cropY = 0;
-      }
-      pdfCtx.title = (chartType === 'OPC' ? 'نمودار فرایند عملیات (OPC)' : 'نمودار فرایند جریان (FPC)') + (isExt ? ' — توسعه‌یافته' : '');
+      /* دادهٔ خروجی PDF — snapshot دادهٔ نمودار (نه DOM). سند چاپ در
+         buildPrintLayout/buildPrintDocument از همین داده ساخته می‌شود:
+         بدون شبکهٔ نقطه‌ای/قاب خط‌چین/اسکرول‌بار، برچسب کامل چندخطی. */
+      pdfData = {
+        chartTitle: (chartType === 'OPC' ? 'نمودار فرایند عملیات (OPC)' : 'نمودار فرایند جریان (FPC)') + (isExt ? ' — توسعه‌یافته' : ''),
+        nodes: nodes.map(function (n) {
+          return {
+            id: n.id, label: n.label, nodeType: n.nodeType,
+            x: n.positionX, y: n.positionY, sortOrder: n.sortOrder,
+            isManual: !!n.isManual, stationName: n.stationName || null,
+          };
+        }),
+        edges: chart.edges
+          .filter(function (e) { return nodeById[e.sourceNodeId] && nodeById[e.targetNodeId]; })
+          .map(function (e) {
+            return {
+              sourceId: e.sourceNodeId, targetId: e.targetNodeId,
+              sourceAnchor: anchorOf(e, 'sourceAnchor'), targetAnchor: anchorOf(e, 'targetAnchor'),
+              lineStyle: e.lineStyle || null, lineColor: e.lineColor || null,
+              isChain: !!e.isChain,
+            };
+          }),
+      };
 
       /* ═══ اتصال از لنگر به لنگر (§۱۵.۴) ═══ */
       var connectState = null; /* { sourceId, sourceAnchor, x, y } */
@@ -991,11 +1298,13 @@
       }
 
       function buildNodeEl(n) {
-        /* §۱۰.۶ — اگر بالای کارت در نمای فعلی جا نیست (نزدیک لبهٔ بالای
-           بوم)، نوار ابزار با فاصلهٔ امن زیر کارت قرار می‌گیرد. */
-        var toolbarBelow = n.positionY * view.zoom + view.pan.y < 64;
+        /* §۲ — نوار ابزار هاور در «گوشهٔ موربِ بیرون کارت» قرار می‌گیرد تا
+           هرگز روی هیچ‌کدام از چهار لنگر اصلی کارت ننشیند؛ اگر کارت نزدیک
+           لبهٔ بالا/راست نمای فعلی است، به گوشهٔ مقابل چرخش می‌کند. */
+        var toolbarBelow = n.positionY * view.zoom + view.pan.y < 72;
+        var toolbarLeft = (n.positionX + NW) * view.zoom + view.pan.x > (viewport.clientWidth || 1280) - 220;
         var el = U.h('div', {
-          class: 'chart-node' + (toolbarBelow ? ' ctrl-below' : ''),
+          class: 'chart-node' + (toolbarBelow ? ' ctrl-below' : '') + (toolbarLeft ? ' ctrl-left' : ''),
           dir: 'rtl', role: 'button', tabindex: '0',
           'aria-label': 'گره ' + U.formatInt(n.sortOrder + 1) + ': ' + n.label,
           style: { left: n.positionX + 'px', top: n.positionY + 'px', touchAction: 'none' },
@@ -1029,10 +1338,13 @@
           }));
 
         /* درگ با Pointer Events — دلتا تقسیم بر زوم (§۱۵.۳)؛
-           ذخیرهٔ خودکار مختصات در pointerup؛ یال‌ها زنده دنبال گره می‌آیند */
+           ذخیرهٔ خودکار مختصات در pointerup؛ یال‌ها زنده دنبال گره می‌آیند.
+           §۲ — کلیک روی دکمه‌های نوار ابزار هرگز درگ را آغاز نمی‌کند
+           (setPointerCapture دکمه را می‌رباید و click هرگز نمی‌رسید —
+           علت بی‌اثر بودن ابزارهای ویرایش/حذف/جابه‌جایی در آفلاین). */
         el.addEventListener('pointerdown', function (ev) {
           if (ev.button > 0) return;
-          if (ev.target && ev.target.closest && ev.target.closest('.chart-anchor')) return;
+          if (ev.target && ev.target.closest && (ev.target.closest('.chart-anchor') || ev.target.closest('button'))) return;
           var startX = ev.clientX, startY = ev.clientY;
           var origX = n.positionX, origY = n.positionY;
           var curX = origX, curY = origY, moved = false;
@@ -1073,13 +1385,29 @@
               el.style.left = x + 'px';
               el.style.top = y + 'px';
               redrawEdges();
+              /* دادهٔ PDF نیز با مختصات جدید به‌روز شود (رندری در کار نیست) */
+              if (pdfData) {
+                pdfData.nodes.forEach(function (pn) {
+                  if (pn.id === n.id) { pn.x = x; pn.y = y; }
+                });
+              }
               /* §۱۰.۸ — Undo جابه‌جایی گره = بازگشت به مختصات قبلی */
               if (origX !== x || origY !== y) {
                 var back = {}; back[n.id] = { x: origX, y: origY };
                 histPush(projectId, 'جابه‌جایی گره', function () {
                   DB.saveChartLayout(projectId, chartType, back);
+                  if (pdfData) {
+                    pdfData.nodes.forEach(function (pn) {
+                      if (pn.id === n.id) { pn.x = origX; pn.y = origY; }
+                    });
+                  }
                 }, function () {
                   DB.saveChartLayout(projectId, chartType, pos);
+                  if (pdfData) {
+                    pdfData.nodes.forEach(function (pn) {
+                      if (pn.id === n.id) { pn.x = x; pn.y = y; }
+                    });
+                  }
                 });
               }
             } catch (err) {
@@ -1398,28 +1726,31 @@
       });
     }
 
-    /* ── دیالوگ خروجی PDF (§۱۵.۷) — پورت PdfExportDialog.tsx ── */
+    /* ── دیالوگ خروجی PDF (§۱۵.۷) — پورت PdfExportDialog.tsx؛
+       سند چاپ از «دادهٔ» نمودار ساخته می‌شود (buildPrintDocument) ── */
     function openPdfDialog() {
-      var PAPER_MM = { A4: { w: 210, h: 297 }, A3: { w: 297, h: 420 } };
-      var MM_TO_PX = 96 / 25.4;
       var mode = 'fit', paper = 'A4', orientation = 'landscape', marginMm = 10, tiledScale = 100;
       var showTitle = true, showPageNumbers = true;
 
+      /* چیدمان چاپ یک‌بار در لحظهٔ باز شدن دیالوگ محاسبه می‌شود —
+         برچسب‌ها کامل اندازه‌گیری و مسیر یال‌ها بازمحاسبه می‌شوند */
+      var printLayout = pdfData && pdfData.nodes.length ? buildPrintLayout(pdfData) : null;
+
       function pageMmOf() {
-        var b = PAPER_MM[paper];
+        var b = PRINT_PAPER_MM[paper];
         return orientation === 'landscape' ? { w: b.h, h: b.w } : { w: b.w, h: b.h };
       }
       function frameOf() {
         var p = pageMmOf();
         return {
-          w: Math.max((p.w - marginMm * 2) * MM_TO_PX, 100),
-          h: Math.max((p.h - marginMm * 2) * MM_TO_PX - (showTitle ? 34 : 6), 100),
+          w: Math.max((p.w - marginMm * 2) * PRINT_MM_TO_PX, 100),
+          h: Math.max((p.h - marginMm * 2) * PRINT_MM_TO_PX - (showTitle ? TITLE_BLOCK_PX : 22), 100),
         };
       }
 
       UI.dialog({
         title: 'خروجی PDF نمودار',
-        desc: 'ابعاد بوم طراحی مستقل از اندازهٔ کاغذ است؛ این تنظیمات فقط چاپ را تغییر می‌دهند.',
+        desc: 'سند چاپ به‌صورت برداری از دادهٔ نمودار ساخته می‌شود — بدون اسکرول‌بار و با برچسب‌های کامل. ابعاد بوم طراحی مستقل از اندازهٔ کاغذ است.',
         bodyBuilder: function (body) {
           /* حالت چاپ */
           var fitScaleEl = U.h('span');
@@ -1474,7 +1805,7 @@
           var scaleField = U.h('div', null, UI.field('مقیاس محتوا (٪)', scaleInput));
 
           /* کلیدها */
-          var titleSwitch = UI.switchEl(true, function (v) { showTitle = v; refresh(); }, 'عنوان روی هر صفحه');
+          var titleSwitch = UI.switchEl(true, function (v) { showTitle = v; refresh(); }, 'عنوان و تاریخ چاپ');
           var numSwitch = UI.switchEl(true, function (v) { showPageNumbers = v; refresh(); }, 'شمارهٔ صفحه');
 
           /* پیش‌نمایش شماتیک */
@@ -1489,7 +1820,7 @@
             refresh();
           }
           function refresh() {
-            var src = pdfCtx.el ? { w: pdfCtx.w, h: pdfCtx.h } : null;
+            var src = printLayout ? { w: printLayout.width, h: printLayout.height } : null;
             var pm = pageMmOf();
             var fr = frameOf();
             var fitScale = src ? Math.min(fr.w / src.w, fr.h / src.h) : 1;
@@ -1521,8 +1852,8 @@
               }));
             }
             U.clear(dimsEl);
-            dimsEl.appendChild(document.createTextNode('پیش‌نمایش صفحه‌بندی — ابعاد بوم: '));
-            dimsEl.appendChild(U.h('span', { class: 'num', dir: 'ltr', text: Math.round(pdfCtx.w) + '×' + Math.round(pdfCtx.h) }));
+            dimsEl.appendChild(document.createTextNode('پیش‌نمایش صفحه‌بندی — ابعاد محتوای نمودار: '));
+            dimsEl.appendChild(U.h('span', { class: 'num', dir: 'ltr', text: Math.round(src ? src.w : 0) + '×' + Math.round(src ? src.h : 0) }));
             dimsEl.appendChild(document.createTextNode(' پیکسل'));
           }
 
@@ -1535,7 +1866,7 @@
             UI.field('حاشیه (میلی‌متر)', marginInput),
             scaleField));
           body.appendChild(U.h('div', { class: 'flex flex-wrap items-center gap-4 mt-3' },
-            U.h('label', { class: 'flex items-center gap-2 text-xs' }, titleSwitch, 'عنوان روی هر صفحه'),
+            U.h('label', { class: 'flex items-center gap-2 text-xs' }, titleSwitch, 'عنوان و تاریخ چاپ'),
             U.h('label', { class: 'flex items-center gap-2 text-xs' }, numSwitch, 'شمارهٔ صفحه')));
           body.appendChild(U.h('div', {
             class: 'mt-3', style: {
@@ -1559,106 +1890,24 @@
         },
       });
 
-      /* پیاده‌سازی چاپ — پورت print() از PdfExportDialog.tsx */
+      /* پیاده‌سازی چاپ — سند حرفه‌ای برداری از «دادهٔ» نمودار (پورت print()
+         از PdfExportDialog.tsx وب؛ سازندهٔ مشترک buildPrintDocument) */
       function doPrint() {
-        var srcEl = pdfCtx.el;
-        if (!srcEl || !srcEl.isConnected) return;
-        var src = { contentEl: srcEl, chartWidth: pdfCtx.w, chartHeight: pdfCtx.h, chartTitle: pdfCtx.title };
-        var pm = pageMmOf();
-        var fr = frameOf();
-        var s = mode === 'fit' ? Math.min(fr.w / src.chartWidth, fr.h / src.chartHeight) : tiledScale / 100;
-        var overlap = 24; /* هم‌پوشانی برای چسباندن صفحات */
-        var tiled = { cols: 1, rows: 1, pages: 1 };
-        if (mode === 'tiled') {
-          tiled.cols = Math.max(1, Math.ceil((src.chartWidth * s) / (fr.w - overlap)));
-          tiled.rows = Math.max(1, Math.ceil((src.chartHeight * s) / (fr.h - overlap)));
-          tiled.pages = tiled.cols * tiled.rows;
-        }
-
-        var style = document.createElement('style');
-        style.id = 'chart-pdf-page-style';
-        style.textContent = '@page { size: ' + pm.w + 'mm ' + pm.h + 'mm; margin: 0 }';
-        document.head.appendChild(style);
-
-        var rootEl = document.createElement('div');
-        rootEl.id = 'chart-pdf-root';
-        var pages = [];
-        function mkPage(col, row, idx, total, inner) {
-          return '<div class="chart-pdf-page" style="width:' + pm.w + 'mm;height:' + pm.h + 'mm">'
-            + '<div class="chart-pdf-crop chart-pdf-crop-tl"></div><div class="chart-pdf-crop chart-pdf-crop-tr"></div>'
-            + '<div class="chart-pdf-crop chart-pdf-crop-bl"></div><div class="chart-pdf-crop chart-pdf-crop-br"></div>'
-            + '<div class="chart-pdf-frame" style="position:absolute;inset:' + marginMm + 'mm;overflow:hidden">'
-            + (showTitle
-              ? '<div class="chart-pdf-title">' + U.escapeHtml(src.chartTitle) + (mode === 'tiled' ? ' — بخش (ردیف ' + (row + 1) + '، ستون ' + (col + 1) + ')' : '') + '</div>'
-              : '')
-            + '<div class="chart-pdf-viewport" style="width:' + fr.w + 'px;height:' + fr.h + 'px;overflow:hidden;position:relative">' + inner + '</div>'
-            + (showPageNumbers
-              ? '<div class="chart-pdf-num">صفحهٔ ' + idx + ' از ' + total + (mode === 'tiled' ? ' — ردیف ' + (row + 1) + '، ستون ' + (col + 1) : '') + '</div>'
-              : '')
-            + '</div></div>';
-        }
-
-        var content = src.contentEl.outerHTML;
-        /* §۶-۵ — برش به محدودهٔ واقعی محتوا: محتوا با آفست برش داخل قاب می‌نشیند */
-        var crop = { x: pdfCtx.cropX || 0, y: pdfCtx.cropY || 0 };
-        var cropped = '<div style="position:absolute;left:' + crop.x + 'px;top:' + crop.y + 'px">' + content + '</div>';
-        if (mode === 'fit') {
-          var offX = Math.max(0, (fr.w - src.chartWidth * s) / 2);
-          var offY = Math.max(0, (fr.h - src.chartHeight * s) / 2);
-          pages.push(mkPage(0, 0, 1, 1,
-            '<div style="position:absolute;left:' + offX + 'px;top:' + offY + 'px;width:' + src.chartWidth + 'px;height:' + src.chartHeight + 'px;transform:scale(' + s + ');transform-origin:0 0">' + cropped + '</div>'));
-        } else {
-          var vw = fr.w - overlap, vh = fr.h - overlap;
-          var idx = 1;
-          for (var row = 0; row < tiled.rows; row++) {
-            for (var col = 0; col < tiled.cols; col++) {
-              var tx = -(col * vw) / s, ty = -(row * vh) / s;
-              pages.push(mkPage(col, row, idx, tiled.pages,
-                '<div style="position:absolute;left:0;top:0;width:' + src.chartWidth + 'px;height:' + src.chartHeight + 'px;transform:translate(' + tx + 'px,' + ty + 'px) scale(' + s + ');transform-origin:0 0">' + cropped + '</div>'));
-              idx++;
-            }
-          }
-        }
-        rootEl.innerHTML = pages.join('');
-        fixCloneMarkerIds(rootEl);
-
-        /* استایل چاپ اختصاصی — مستقل از UI برنامه + رنگ‌های روشن چاپ */
-        var css = document.createElement('style');
-        css.id = 'chart-pdf-print-css';
-        css.textContent = ''
-          + '#chart-pdf-root { --card:#ffffff; --foreground:#0c1424; --border:#c9cedb; --line-strong:#b9c1d0; --muted-foreground:#5a6b85; --surface-2:#f4f6fa; --surface-3:#eef2f7; --brand:#7257ff; --brand-2:#9a7cff; --brand-soft:#efeaff; --cyan:#0e93a4; --cyan-soft:#e5fbfd; --green:#18b77b; --green-soft:#dcf8ec; --red:#ef5b6b; --red-soft:#fde5e8; --amber:#b9831b; --amber-soft:#fff4d7; --radius:12px; color-scheme: light; color:#0c1424; }'
-          + '#chart-pdf-root .chart-pdf-page { position: relative; background: #fff; overflow: hidden; box-sizing: border-box; }'
-          + '#chart-pdf-root .chart-pdf-page + .chart-pdf-page { page-break-before: always; }'
-          + '#chart-pdf-root .chart-pdf-title { font: bold 12px Vazirmatn, sans-serif; color: #111; text-align: center; margin-bottom: 6px; direction: rtl; }'
-          + '#chart-pdf-root .chart-pdf-num { font: 10px Vazirmatn, sans-serif; color: #444; text-align: center; margin-top: 4px; direction: rtl; }'
-          + '#chart-pdf-root .chart-pdf-crop { position: absolute; width: 10mm; height: 10mm; border-color: #555; }'
-          + '#chart-pdf-root .chart-pdf-crop-tl { top: 3mm; left: 3mm; border-top: 1px solid #555; border-left: 1px solid #555; }'
-          + '#chart-pdf-root .chart-pdf-crop-tr { top: 3mm; right: 3mm; border-top: 1px solid #555; border-right: 1px solid #555; }'
-          + '#chart-pdf-root .chart-pdf-crop-bl { bottom: 3mm; left: 3mm; border-bottom: 1px solid #555; border-left: 1px solid #555; }'
-          + '#chart-pdf-root .chart-pdf-crop-br { bottom: 3mm; right: 3mm; border-bottom: 1px solid #555; border-right: 1px solid #555; }'
-          + '#chart-pdf-root .chart-anchor { display: none !important; }'
-          + '#chart-pdf-root .chart-node { box-shadow: none; background:#ffffff !important; color:#0c1424 !important; border-color:#c9cedb !important; }'
-          + '@media print {'
-          + ' body > *:not(#chart-pdf-root) { display: none !important; }'
-          + ' #chart-pdf-root { display: block !important; }'
-          /* §۱۰.۷ ریشه‌ای — CSS چاپ گزارش‌ها (app.css) «body *» را
-             visibility:hidden می‌کند؛ بدون بازگرداندن آن برای کلون نمودار،
-             خروجی PDF «کاملاً سفید» می‌شد (علت واقعی باگ گزارش‌شده). */
-          + ' #chart-pdf-root, #chart-pdf-root * { visibility: visible !important; }'
-          + ' #chart-pdf-root .chart-pdf-page { break-inside: avoid; }'
-          + ' #chart-pdf-root * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }'
-          + '}'
-          + '@media screen { #chart-pdf-root { display: none; } }';
-        document.head.appendChild(css);
-        document.body.appendChild(rootEl);
+        if (!pdfData || !pdfData.nodes.length) return;
+        var layout = printLayout && printLayout.cards && printLayout.cards.length
+          ? printLayout
+          : buildPrintLayout(pdfData);
+        var built = buildPrintDocument(pdfData, layout, {
+          mode: mode, paper: paper, orientation: orientation,
+          marginMm: marginMm, tiledScale: tiledScale,
+          showTitle: showTitle, showPageNumbers: showPageNumbers,
+        });
 
         var cleaned = false;
         function cleanup() {
           if (cleaned) return;
           cleaned = true;
-          if (rootEl.parentNode) rootEl.parentNode.removeChild(rootEl);
-          if (css.parentNode) css.parentNode.removeChild(css);
-          if (style.parentNode) style.parentNode.removeChild(style);
+          built.cleanup();
           window.removeEventListener('afterprint', cleanup);
         }
         window.addEventListener('afterprint', cleanup);
@@ -1668,7 +1917,7 @@
 
         UI.toast(mode === 'fit'
           ? 'خروجی تک‌صفحه‌ای آماده شد — در پنجرهٔ چاپ، «Save as PDF» را انتخاب کنید.'
-          : 'خروجی تایل‌دار (' + U.formatInt(tiled.pages) + ' صفحه) آماده شد — صفحات را با نشانه‌های برش به هم بچسبانید.',
+          : 'خروجی تایل‌دار (' + U.formatInt(built.pagesCount) + ' صفحه) آماده شد — صفحات را با نشانه‌های برش به هم بچسبانید.',
           { duration: 8000 });
       }
     }
@@ -1706,26 +1955,4 @@
 
     render();
   };
-
-  /* یکتا کردن id نشانگرهای SVG کلون‌شده (چند صفحه = چند کلون) */
-  function fixCloneMarkerIds(rootEl) {
-    try {
-      var svgs = rootEl.querySelectorAll('svg');
-      Array.prototype.forEach.call(svgs, function (sv) {
-        var markers = sv.querySelectorAll('marker');
-        Array.prototype.forEach.call(markers, function (mk) {
-          var oldId = mk.getAttribute('id');
-          if (!oldId) return;
-          var newId = oldId + '-pdf-' + Math.random().toString(36).slice(2, 8);
-          mk.setAttribute('id', newId);
-          var refs = sv.querySelectorAll('[marker-end]');
-          Array.prototype.forEach.call(refs, function (p) {
-            if (p.getAttribute('marker-end') === 'url(#' + oldId + ')') {
-              p.setAttribute('marker-end', 'url(#' + newId + ')');
-            }
-          });
-        });
-      });
-    } catch (err) { /* در صورت خطا، نشانگرها معمولاً با id تکراری هم رندر می‌شوند */ }
-  }
 })(typeof window !== 'undefined' ? window : globalThis);

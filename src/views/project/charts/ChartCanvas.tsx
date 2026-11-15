@@ -1,15 +1,19 @@
 'use client'
 
 // ═══════════════════════════════════════════════════════════
-// بوم نمودار فرایند OPC/FPC — بازطراحی جلسه ۲ §۱۵
+// بوم نمودار فرایند OPC/FPC — بازطراحی جلسه ۲ §۱۵ + v1.5.2 نهایی
 // ▸ Zoom In/Out/Fit/Reset + درصد زوم + wheel — مختصات واقعی گره‌ها جدا از زوم
 // ▸ Pan با درگ زمینه + کنترل‌های لمسی/ترک‌پد قابل پیش‌بینی
 // ▸ چهار anchor (بالا/پایین/چپ/راست) — اتصال با drag از anchor به anchor
 // ▸ مسیر یال orthogonal/elbow — بازمحاسبه با جابه‌جایی گره
 // ▸ snapshot چیدمان دستی قبل از Auto Layout + «بازگردانی آخرین چیدمان دستی»
 // ▸ ابعاد بوم دلخواه با preset — مستقل از زوم و PDF
-// ▸ خروجی PDF تک‌صفحه‌ای/تایل‌دار
-// ▸ گره ورودی مواد (MATERIAL_INPUT) + انبار اختیاری در OPC → «OPC توسعه‌یافته»
+// ▸ خروجی PDF برداری از دادهٔ نمودار (chart-print.ts) — نه کلون DOM
+// ▸ v1.5.2 نهایی §۴ — هدر + زبانه‌های OPC/FPC + «همهٔ» ابزارها در یک
+//   نوار چسبان واحد زیر TopBar فریز می‌شوند؛ دکمه‌ها آیکونی با نام کامل
+//   در tooltip — نام‌ها فضا نمی‌گیرند.
+// ▸ v1.5.2 نهایی §۵ — ارتفاع بوم = کل ارتفاع محتوای بوم در زوم فعلی
+//   (حداقل ۷۲vh) — دیگر نیازی به اسکرول داخل کادر نیست.
 // ═══════════════════════════════════════════════════════════
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -21,6 +25,7 @@ import {
   History,
   Loader2,
   Maximize2,
+  Network,
   Pencil,
   Plus,
   RefreshCw,
@@ -39,7 +44,11 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { ConfirmDeleteDialog, EmptyState } from '@/components/common/Feedback'
+import { HelpDot } from '@/components/common/HelpDot'
+import { useStuck } from '@/components/common/SectionHeading'
 import { ProcessSymbol, PROCESS_TYPE_LABELS_WITH_INPUT } from '@/components/common/ProcessSymbol'
 import { chartsApi, type ChartEdgeDto, type ChartNodeDto, type ChartTypeValue } from '@/lib/api/endpoints'
 import { qk } from '@/lib/api/keys'
@@ -49,130 +58,8 @@ import { formatInt } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import PdfExportDialog from './PdfExportDialog'
 import { useChartHistory, type HistoryEntry } from './useChartHistory'
-
-// ابعاد مرجع گره — باید با ثابت‌های چیدمان بک‌اند هماهنگ بماند
-const NODE_W = 200
-const NODE_H = 96
-const MARGIN = 48
-
-type AnchorSide = 'top' | 'bottom' | 'left' | 'right'
-const ANCHOR_POS: Record<AnchorSide, { x: number; y: number }> = {
-  top: { x: NODE_W / 2, y: 0 },
-  bottom: { x: NODE_W / 2, y: NODE_H },
-  left: { x: 0, y: NODE_H / 2 },
-  right: { x: NODE_W, y: NODE_H / 2 },
-}
-const ANCHOR_NORMAL: Record<AnchorSide, { x: number; y: number }> = {
-  top: { x: 0, y: -1 },
-  bottom: { x: 0, y: 1 },
-  left: { x: -1, y: 0 },
-  right: { x: 1, y: 0 },
-}
-
-interface Position { x: number; y: number }
-
-function anchorPoint(p: Position, a: AnchorSide): Position {
-  return { x: p.x + ANCHOR_POS[a].x, y: p.y + ANCHOR_POS[a].y }
-}
-
-/** v1.5.2 §۶-۱ — انتخاب خودکار جفت anchor از میان «همهٔ ترکیب‌ها» (۴×۴).
- *  بر خلاف نسخهٔ قبل که فقط زوج‌های هم‌جهت (top-bottom / left-right) را
- *  می‌ساخت، اکنون نزدیک‌ترین زوج نقطهٔ مناسب از هر دو مستطیل انتخاب
- *  می‌شود — حتی ترکیب‌های متقاطع مثل left-top یا right-bottom.
- *  معیار: طول مسیر elbow + جریمهٔ سنگین برای عبور از داخل گره‌ها. */
-const ALL_SIDES: AnchorSide[] = ['top', 'bottom', 'left', 'right']
-
-/** تقاطع پاره‌خط با مستطیل (برای جریمهٔ عبور از داخل گره) */
-function segmentHitsRect(a: Position, b: Position, r: { x: number; y: number; w: number; h: number }): boolean {
-  // نمونه‌گیری چندنقطه‌ای روی پاره‌خط — کافی و ارزان
-  const steps = 12
-  for (let i = 0; i <= steps; i++) {
-    const k = i / steps
-    const x = a.x + (b.x - a.x) * k
-    const y = a.y + (b.y - a.y) * k
-    if (x > r.x + 1 && x < r.x + r.w - 1 && y > r.y + 1 && y < r.y + r.h - 1) return true
-  }
-  return false
-}
-
-/** نقاط مسیر elbow از anchor مبدأ به anchor مقصد — v1.5.2 §۶-۱/§۶-۲ */
-function elbowPoints(s: Position, sa: AnchorSide, t: Position, ta: AnchorSide): Position[] {
-  const sA = anchorPoint(s, sa)
-  const tA = anchorPoint(t, ta)
-  const stub = 22
-  const sOut = { x: sA.x + ANCHOR_NORMAL[sa].x * stub, y: sA.y + ANCHOR_NORMAL[sa].y * stub }
-  /** §۶-۳ — نقطهٔ ورود به مقصد باید «بیرون» گره باشد (tA + نرمال×stub)،
-   *  تا آخرین قطعهٔ مسیر (tIn→tA) به سمت داخل گره و پیکانِ marker-end
-   *  رو به مقصد باشد. فرمول قبلی (tA − نرمال×stub) نقطه را داخل گره
-   *  می‌گذاشت؛ قطعهٔ آخر معکوس می‌شد و پیکان رو به مبدأ/زیر خط پنهان
-   *  می‌ماند — یعنی marker-end هرگز دیده نمی‌شد. */
-  const tIn = { x: tA.x + ANCHOR_NORMAL[ta].x * stub, y: tA.y + ANCHOR_NORMAL[ta].y * stub }
-  const pts: Position[] = [sA, sOut]
-  const vSrc = sa === 'bottom' || sa === 'top'
-  const vDst = ta === 'bottom' || ta === 'top'
-  if (Math.abs(sOut.x - tIn.x) > 1 && Math.abs(sOut.y - tIn.y) > 1) {
-    if (vSrc && vDst) {
-      const midY = (sOut.y + tIn.y) / 2
-      pts.push({ x: sOut.x, y: midY }, { x: tIn.x, y: midY })
-    } else if (!vSrc && !vDst) {
-      const midX = (sOut.x + tIn.x) / 2
-      pts.push({ x: midX, y: sOut.y }, { x: midX, y: tIn.y })
-    } else if (vSrc && !vDst) {
-      // مبدأ عمودی → مقصد افقی: خم در سطح ورودی افقی مقصد
-      pts.push({ x: sOut.x, y: tIn.y })
-    } else {
-      // مبدأ افقی → مقصد عمودی: خم در سطح خروجی افقی مبدأ
-      pts.push({ x: tIn.x, y: sOut.y })
-    }
-  }
-  pts.push(tIn, tA)
-  return pts
-}
-
-/** امتیاز یک زوج anchor: طول مسیر + جریمهٔ عبور از داخل گره‌ها (§۶-۱) */
-function anchorPairScore(
-  s: Position, sa: AnchorSide, t: Position, ta: AnchorSide,
-  srcRect: { x: number; y: number; w: number; h: number },
-  dstRect: { x: number; y: number; w: number; h: number },
-): number {
-  const pts = elbowPoints(s, sa, t, ta)
-  let len = 0
-  for (let i = 1; i < pts.length; i++) {
-    len += Math.abs(pts[i].x - pts[i - 1].x) + Math.abs(pts[i].y - pts[i - 1].y)
-  }
-  let penalty = 0
-  for (let i = 1; i < pts.length; i++) {
-    if (segmentHitsRect(pts[i - 1], pts[i], srcRect)) penalty += 400
-    if (segmentHitsRect(pts[i - 1], pts[i], dstRect)) penalty += 400
-  }
-  return len + penalty
-}
-
-/** بهترین جفت anchor از میان همهٔ ۱۶ ترکیب (§۶-۱) */
-function autoAnchors(s: Position, t: Position): [AnchorSide, AnchorSide] {
-  const srcRect = { x: s.x, y: s.y, w: NODE_W, h: NODE_H }
-  const dstRect = { x: t.x, y: t.y, w: NODE_W, h: NODE_H }
-  let best: [AnchorSide, AnchorSide] = ['bottom', 'top']
-  let bestScore = Infinity
-  for (const sa of ALL_SIDES) {
-    for (const ta of ALL_SIDES) {
-      if (sa === ta) continue
-      const score = anchorPairScore(s, sa, t, ta, srcRect, dstRect)
-      if (score < bestScore) {
-        bestScore = score
-        best = [sa, ta]
-      }
-    }
-  }
-  return best
-}
-
-/** مسیر orthogonal/elbow از anchor مبدأ به anchor مقصد — بدون عبور از داخل گره */
-function orthogonalPath(s: Position, sa: AnchorSide, t: Position, ta: AnchorSide): string {
-  return elbowPoints(s, sa, t, ta)
-    .map((p, i) => `${i === 0 ? 'M' : 'L'} ${Math.round(p.x)} ${Math.round(p.y)}`)
-    .join(' ')
-}
+import { NODE_W, NODE_H, MARGIN, anchorPoint, autoAnchors, orthogonalPath, type AnchorSide, type Position } from './chart-geometry'
+import type { ChartPrintSource } from './chart-print'
 
 const OPC_ALLOWED: string[] = ['OPERATION', 'INSPECTION', MATERIAL_INPUT_NODE_TYPE, 'STORAGE']
 const FPC_ALLOWED: string[] = ['OPERATION', 'INSPECTION', 'TRANSPORT', 'DELAY', 'STORAGE', MATERIAL_INPUT_NODE_TYPE]
@@ -184,9 +71,19 @@ const CANVAS_PRESETS = [
   { label: 'خیلی بزرگ (۴۰۰۰×۲۴۰۰)', w: 4000, h: 2400 },
 ]
 
-export default function ChartCanvas({ projectId, chartType }: { projectId: string; chartType: ChartTypeValue }) {
+export default function ChartCanvas({
+  projectId,
+  chartType,
+  onChartTypeChange,
+}: {
+  projectId: string
+  chartType: ChartTypeValue
+  onChartTypeChange?: (t: ChartTypeValue) => void
+}) {
   const prefs = useDisplayPrefs()
   const qc = useQueryClient()
+  const headRef = useRef<HTMLDivElement>(null)
+  const headStuck = useStuck(headRef)
 
   const chartQuery = useQuery({
     queryKey: qk.chart(projectId, chartType),
@@ -229,11 +126,40 @@ export default function ChartCanvas({ projectId, chartType }: { projectId: strin
   /** §۶-۶ — یال انتخاب‌شدهٔ فعلی (اگر هنوز موجود باشد) */
   const selectedEdge = useMemo(() => edges.find((e) => e.id === selectedEdgeId) ?? null, [edges, selectedEdgeId])
 
+  /** ابعاد مؤثر بوم: تنظیم صریح کاربر یا گسترهٔ محتوا — قبل از جهش‌ها
+   *  محاسبه می‌شود (mutationFn چیدمان خودکار به آن نیاز دارد). */
+  const effCanvas = useMemo(() => {
+    let w = canvasQ.data?.width ?? 0
+    let h = canvasQ.data?.height ?? 0
+    for (const n of nodes) {
+      const p = positions[n.id] ?? { x: n.positionX, y: n.positionY }
+      w = Math.max(w, p.x + NODE_W + MARGIN)
+      h = Math.max(h, p.y + NODE_H + MARGIN)
+    }
+    return { w, h }
+  }, [canvasQ.data, nodes, positions])
+
   /** §۱۰.۸ — تاریخچهٔ Undo/Redo بوم؛ busy = جهش در حال اجرا.
    *  ارجاع از طریق ref — جهش‌ها بعد از این نقطه تعریف می‌شوند. */
   const busySnapshot = useRef<Record<string, boolean>>({})
   const historyBusy = useCallback(() => Object.values(busySnapshot.current).some(Boolean), [])
   const { push: pushHistory, undo, redo, canUndo, canRedo, undoLabel, redoLabel } = useChartHistory(historyBusy)
+
+  const hasChart = !!data && (data.counts?.activitiesTotal ?? 0) > 0 && (data.nodes?.length ?? 0) > 0
+
+  /** §۲ — عرض لحظه‌ای بوم برای چرخش گوشهٔ نوار ابزار هاور (به‌جای خواندن
+   *  ref در رندر که مجاز نیست) — با ResizeObserver همگام می‌ماند. */
+  const [viewportW, setViewportW] = useState(1280)
+  useEffect(() => {
+    if (!hasChart) return
+    const vp = viewportRef.current
+    if (!vp || typeof ResizeObserver === 'undefined') return
+    const sync = () => setViewportW(vp.clientWidth)
+    sync()
+    const ro = new ResizeObserver(sync)
+    ro.observe(vp)
+    return () => ro.disconnect()
+  }, [hasChart])
 
   useEffect(() => {
     if (data) {
@@ -632,8 +558,12 @@ export default function ChartCanvas({ projectId, chartType }: { projectId: strin
   }
 
   // ── pan با درگ زمینه ──
+  /* §۱ — نکتهٔ حیاتی: pointerdown روی «یال» هرگز پن را آغاز نمی‌کند.
+   *  setPointerCapture در هندلر پن، رویداد click را به viewport بازهدف‌گذاری
+   *  می‌کند و onClick یال هرگز اجرا نمی‌شد — علت واقعی «انتخاب‌نشدن یال‌ها». */
   const onBackgroundPointerDown = (e: React.PointerEvent) => {
-    if ((e.target as HTMLElement).closest('.chart-node') || (e.target as HTMLElement).closest('.chart-anchor')) return
+    const t = e.target as HTMLElement
+    if (t.closest('.chart-node') || t.closest('.chart-anchor') || t.closest('.chart-edge')) return
     ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
     setPanning({ startX: e.clientX, startY: e.clientY, origX: pan.x, origY: pan.y })
   }
@@ -716,21 +646,215 @@ export default function ChartCanvas({ projectId, chartType }: { projectId: strin
   }, [connecting, hoverTarget])
 
   // ── رندر ──
+  /** v1.5.2 نهایی §۴ — بلوک چسبان واحد: هدر صفحه + زبانه‌های OPC/FPC +
+   *  «همهٔ» ابزارها (آیکونی با نام کامل در tooltip) — هنگام اسکرول
+   *  هم‌اهنگ زیر TopBar فریز می‌شوند؛ محتوا از زیر آن عبور می‌کند. */
+  const stickyBlock = (
+    <div
+      ref={headRef}
+      data-stuck={headStuck ? 'true' : 'false'}
+      className="sticky-heading -mx-1 px-1 pb-3 pt-1"
+    >
+      <header className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div className="chip-icon bg-brand-soft text-brand">
+            <Waypoints className="size-6" aria-hidden />
+          </div>
+          <div>
+            <h1 className="text-xl font-extrabold">نمودار فرایند — OPC / FPC</h1>
+            <p className="text-xs text-muted-foreground">
+              گره‌ها به‌صورت خودکار از فعالیت‌ها ساخته می‌شوند؛ همهٔ ابزارها در همین نوارِ بالای صفحه در دسترس‌اند.
+            </p>
+          </div>
+          <HelpDot
+            label="نمودار فرایند"
+            content={{
+              what: 'نمودار فرایند، توالی رویدادهای تولید را نشان می‌دهد. OPC (نمودار فرایند عملیات) در تعریف کلاسیک فقط عملیات ○ و بازرسی □ را نمایش می‌دهد؛ FPC (نمودار فرایند جریان) هر پنج نوع رویداد استاندارد: عملیات ○، بازرسی □، حمل‌ونقل ⇨، تأخیر D و انبارش ▽.',
+              input: 'گره‌های اصلی به‌صورت خودکار از فعالیت‌های تعریف‌شده در «ساختار تولید» ساخته می‌شوند و با تغییر آن‌ها به‌روز می‌مانند. برای رویدادهای فاقد فعالیت زمان‌سنجی، «گره دستی» بسازید. ورودی مواد اولیه، قطعات و نیم‌ساخته‌ها به‌صورت گره مستقل «ورودی مواد ⬡» تعریف می‌شوند و با خط تغذیه به مرحلهٔ موردنظر وصل می‌شوند. در OPC می‌توانید «انبار ▽» را نیز به‌صورت اختیاری بیفزایید — در این حالت حالت نمودار به «OPC توسعه‌یافته» تغییر می‌کند تا با تعریف کلاسیک اشتباه نشود.',
+              example: 'مسیر یک قطعه: ورودی مواد ⬡ ← حمل به ایستگاه مونتاژ ⇨ ← عملیات مونتاژ ○ ← بازرسی کیفیت □ ← تأخیر در انتظار تأیید D.',
+              note: 'زوم و جابه‌جایی بوم، مختصات ذخیره‌شدهٔ گره‌ها را تغییر نمی‌دهد. چیدمان دستی قبل از «چیدمان خودکار» ذخیره می‌شود و با «بازگردانی چیدمان دستی» قابل بازیابی است. حذف یا تغییر نمودار هیچ دادهٔ زمان‌سنجی را حذف نمی‌کند.',
+            }}
+          />
+        </div>
+      </header>
+
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <Tabs value={chartType} onValueChange={(v) => onChartTypeChange?.(v as ChartTypeValue)} dir="rtl">
+          <TabsList className="h-9 w-auto gap-1 px-1">
+            <TabsTrigger value="OPC" className="px-3 text-xs">OPC — عملیات و بازرسی</TabsTrigger>
+            <TabsTrigger value="FPC" className="px-3 text-xs">FPC — جریان کامل</TabsTrigger>
+          </TabsList>
+        </Tabs>
+
+        {hasChart && (
+          <>
+            {/* ── ایجاد و ویرایش نمودار ── */}
+            <div className="flex items-center gap-1 rounded-xl border bg-card p-1" role="group" aria-label="ایجاد و ویرایش نمودار">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button size="icon" variant="ghost" className="btn-brand size-8 border-0" aria-label="گره دستی" onClick={() => setCreateOpen(true)}>
+                    <Plus className="size-4" aria-hidden />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">گره دستی جدید</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button size="icon" variant="ghost" className="size-8" aria-label="چیدمان خودکار" onClick={() => layoutMutation.mutate()} disabled={layoutMutation.isPending}>
+                    {layoutMutation.isPending ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <Network className="size-4" aria-hidden />}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">چیدمان خودکار</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button size="icon" variant="ghost" className="size-8" aria-label="بازگردانی چیدمان دستی" onClick={() => restoreSnapshotMutation.mutate()} disabled={restoreSnapshotMutation.isPending || !snapshotQ.data}>
+                    <History className="size-4" aria-hidden />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">
+                  بازگردانی چیدمان دستی
+                  {snapshotQ.data?.savedAt ? (
+                    <span className="block text-[10px] text-muted-foreground">ذخیره‌شده: {new Date(snapshotQ.data.savedAt).toLocaleString('fa-IR')}</span>
+                  ) : (
+                    <span className="block text-[10px] text-muted-foreground">هنوز چیدمان دستی ذخیره نشده است</span>
+                  )}
+                </TooltipContent>
+              </Tooltip>
+            </div>
+
+            {/* ── بوم ── */}
+            <div className="flex items-center gap-1 rounded-xl border bg-card p-1" role="group" aria-label="ابزار بوم">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button size="icon" variant="ghost" className="size-8" aria-label="ابعاد بوم" onClick={() => setCanvasOpen(true)}>
+                    <Ruler className="size-4" aria-hidden />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">ابعاد بوم</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button size="icon" variant="ghost" className="size-8" aria-label="بازخوانی نمودار از فعالیت‌ها" onClick={() => void qc.invalidateQueries({ queryKey: qk.chart(projectId, chartType) })}>
+                    <RefreshCw className="size-4" aria-hidden />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">بازخوانی نمودار از فعالیت‌ها</TooltipContent>
+              </Tooltip>
+            </div>
+
+            {/* ── §۱۰.۸ — Undo/Redo: «برگشت به عقب» / «رفتن به جلو» (نام کامل در tooltip) ── */}
+            <div className="flex items-center gap-1 rounded-xl border bg-card p-1" role="group" aria-label="برگشت به عقب و رفتن به جلو">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button size="icon" variant="ghost" className="size-8" aria-label="برگشت به عقب (Ctrl+Z)" onClick={() => void undo()} disabled={!canUndo}>
+                    <Undo2 className="size-4" aria-hidden />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">
+                  برگشت به عقب — Ctrl+Z
+                  <span className="block text-[10px] text-muted-foreground">{canUndo ? undoLabel : 'عملی برای واگردانی نیست'}</span>
+                </TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button size="icon" variant="ghost" className="size-8" aria-label="رفتن به جلو (Ctrl+Y)" onClick={() => void redo()} disabled={!canRedo}>
+                    <Redo2 className="size-4" aria-hidden />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">
+                  رفتن به جلو — Ctrl+Y
+                  <span className="block text-[10px] text-muted-foreground">{canRedo ? redoLabel : 'عملی برای اجرای مجدد نیست'}</span>
+                </TooltipContent>
+              </Tooltip>
+            </div>
+
+            {/* کنترل‌های زوم (§۱۵.۳) */}
+            <div className="flex items-center gap-1 rounded-xl border bg-card p-1" role="group" aria-label="کنترل زوم">
+              <Button size="icon" variant="ghost" className="size-8" aria-label="کوچک‌نمایی" title="کوچک‌نمایی" onClick={() => zoomAt((viewportRef.current?.getBoundingClientRect().left ?? 0) + 100, (viewportRef.current?.getBoundingClientRect().top ?? 0) + 100, 1 / 1.25)}>
+                <ZoomOut className="size-4" aria-hidden />
+              </Button>
+              <span className="num min-w-12 text-center text-xs font-bold" dir="ltr" aria-live="polite">
+                {formatInt(Math.round(zoom * 100), prefs)}٪
+              </span>
+              <Button size="icon" variant="ghost" className="size-8" aria-label="بزرگ‌نمایی" title="بزرگ‌نمایی" onClick={() => zoomAt((viewportRef.current?.getBoundingClientRect().left ?? 0) + 100, (viewportRef.current?.getBoundingClientRect().top ?? 0) + 100, 1.25)}>
+                <ZoomIn className="size-4" aria-hidden />
+              </Button>
+              <Button size="icon" variant="ghost" className="size-8" aria-label="جا دادن در نما" title="جا دادن در نما" onClick={fitToView}>
+                <Maximize2 className="size-4" aria-hidden />
+              </Button>
+              <Button size="sm" variant="ghost" className="h-8 px-2 text-[11px]" aria-label="بازنشانی زوم به ۱۰۰٪" title="بازنشانی زوم به ۱۰۰٪" onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }) }}>
+                ۱۰۰٪
+              </Button>
+            </div>
+
+            {/* §۶-۶ — حذف یال انتخاب‌شده + §۱۰.۵ ظاهر آن */}
+            {selectedEdge && !selectedEdge.isChain && (
+              <EdgeAppearanceBar
+                edge={selectedEdge}
+                onApply={(body) => edgeAppearanceMutation.mutate({ edgeId: selectedEdge.id, body })}
+                pending={edgeAppearanceMutation.isPending}
+                onDelete={() => setEdgeTarget(selectedEdge)}
+              />
+            )}
+            {selectedEdge && selectedEdge.isChain && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    className="gap-1.5"
+                    onClick={() => setEdgeTarget(selectedEdge)}
+                  >
+                    <Trash2 className="size-4" aria-hidden />
+                    حذف اتصال انتخاب‌شده
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">حذف اتصال انتخاب‌شده (یا کلید Delete)</TooltipContent>
+              </Tooltip>
+            )}
+
+            {/* §۱۰.۱ — خروجی PDF: تم متمایز قرمز، همیشه در دسترس بالای صفحه */}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  size="sm"
+                  className="gap-1.5 border border-red/40 bg-red-soft font-bold text-red hover:border-red/60 hover:bg-red-soft/80 hover:text-red focus-visible:ring-red/30"
+                  onClick={() => setPdfOpen(true)}
+                >
+                  <FileDown className="size-4" aria-hidden />
+                  PDF
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">خروجی PDF نمودار — تک‌صفحه‌ای یا تایل‌دار</TooltipContent>
+            </Tooltip>
+          </>
+        )}
+      </div>
+    </div>
+  )
+
   if (chartQuery.isLoading) {
     return (
-      <div className="space-y-3">
-        <Skeleton className="h-10 w-72" />
-        <Skeleton className="h-[480px] w-full rounded-2xl" />
+      <div className="space-y-4">
+        {stickyBlock}
+        <div className="space-y-3">
+          <Skeleton className="h-9 w-72" />
+          <Skeleton className="h-[560px] w-full rounded-2xl" />
+        </div>
       </div>
     )
   }
   if (chartQuery.isError) {
     return (
-      <EmptyState
-        title="بارگذاری نمودار ناموفق بود"
-        description={chartQuery.error instanceof Error ? chartQuery.error.message : 'خطای نامشخص'}
-        action={<Button variant="outline" onClick={() => void chartQuery.refetch()}>تلاش دوباره</Button>}
-      />
+      <div className="space-y-4">
+        {stickyBlock}
+        <EmptyState
+          title="بارگذاری نمودار ناموفق بود"
+          description={chartQuery.error instanceof Error ? chartQuery.error.message : 'خطای نامشخص'}
+          action={<Button variant="outline" onClick={() => void chartQuery.refetch()}>تلاش دوباره</Button>}
+        />
+      </div>
     )
   }
   if (!data) return null
@@ -741,73 +865,33 @@ export default function ChartCanvas({ projectId, chartType }: { projectId: strin
 
   if (counts.activitiesTotal === 0) {
     return (
-      <EmptyState
-        icon={<Waypoints className="size-7" aria-hidden />}
-        title="هنوز فعالیتی تعریف نشده است"
-        description="گره‌های نمودار فرایند به‌صورت خودکار از فعالیت‌های تعریف‌شده در «ساختار تولید» ساخته می‌شوند. ابتدا ایستگاه و فعالیت بسازید."
-      />
+      <div className="space-y-4">
+        {stickyBlock}
+        <EmptyState
+          icon={<Waypoints className="size-7" aria-hidden />}
+          title="هنوز فعالیتی تعریف نشده است"
+          description="گره‌های نمودار فرایند به‌صورت خودکار از فعالیت‌های تعریف‌شده در «ساختار تولید» ساخته می‌شوند. ابتدا ایستگاه و فعالیت بسازید."
+        />
+      </div>
     )
   }
 
   if (nodes.length === 0) {
     return (
-      <EmptyState
-        icon={<Waypoints className="size-7" aria-hidden />}
-        title={chartType === 'OPC' ? 'فعالیتی برای OPC مشمول نیست' : 'گره‌ای برای نمایش نیست'}
-        description={
-          chartType === 'OPC'
-            ? 'در نمودار OPC فقط فعالیت‌های از نوع «عملیات» و «بازرسی» نمایش داده می‌شوند. فعالیت‌های حمل‌ونقل، تأخیر و انبارش را در نمای FPC ببینید.'
-            : 'گره‌ای برای نمایش وجود ندارد.'
-        }
-      />
+      <div className="space-y-4">
+        {stickyBlock}
+        <EmptyState
+          icon={<Waypoints className="size-7" aria-hidden />}
+          title={chartType === 'OPC' ? 'فعالیتی برای OPC مشمول نیست' : 'گره‌ای برای نمایش نیست'}
+          description={
+            chartType === 'OPC'
+              ? 'در نمودار OPC فقط فعالیت‌های از نوع «عملیات» و «بازرسی» نمایش داده می‌شوند. فعالیت‌های حمل‌ونقل، تأخیر و انبارش را در نمای FPC ببینید.'
+              : 'گره‌ای برای نمایش وجود ندارد.'
+          }
+        />
+      </div>
     )
   }
-
-  // ابعاد مؤثر بوم: تنظیم صریح کاربر یا گسترهٔ محتوا
-  let canvasW = canvasQ.data?.width ?? 0
-  let canvasH = canvasQ.data?.height ?? 0
-  for (const n of nodes) {
-    const p = pos(n)
-    canvasW = Math.max(canvasW, p.x + NODE_W + MARGIN)
-    canvasH = Math.max(canvasH, p.y + NODE_H + MARGIN)
-  }
-  const effCanvas = { w: canvasW, h: canvasH }
-
-  /** §۶-۵ — محدودهٔ واقعی محتوای نمودار (گره‌ها + یال‌ها + پیکان‌ها):
-   *  خروجی PDF فقط همین محدوده را شامل می‌شود، نه کل فضای خالی بوم.
-   *  مختصات ذخیره‌شده گره‌ها هرگز تغییر نمی‌کند — فقط برش نمایشی. */
-  const contentBBox = (() => {
-    if (nodes.length === 0) return null
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
-    const expand = (x: number, y: number) => {
-      if (x < minX) minX = x
-      if (y < minY) minY = y
-      if (x > maxX) maxX = x
-      if (y > maxY) maxY = y
-    }
-    const PAD = 48 // فاصلهٔ امن اطراف محتوا (شامل پیکان‌ها و سایهٔ گره‌ها)
-    for (const n of nodes) {
-      const p = pos(n)
-      expand(p.x - PAD, p.y - PAD)
-      expand(p.x + NODE_W + PAD, p.y + NODE_H + PAD)
-    }
-    for (const e of edges) {
-      const sn = nodeById.get(e.sourceNodeId)
-      const tn = nodeById.get(e.targetNodeId)
-      if (!sn || !tn) continue
-      const sp = pos(sn)
-      const tp = pos(tn)
-      const sa = (e.sourceAnchor as AnchorSide | null) ?? autoAnchors(sp, tp)[0]
-      const ta = (e.targetAnchor as AnchorSide | null) ?? autoAnchors(sp, tp)[1]
-      for (const pt of elbowPoints(sp, sa, tp, ta)) {
-        expand(pt.x - PAD, pt.y - PAD)
-        expand(pt.x + PAD, pt.y + PAD)
-      }
-    }
-    if (!Number.isFinite(minX)) return null
-    // مختصات منفی/چیدمان نامتعارف نیز درست پشتیبانی می‌شود
-    return { x: Math.min(minX, 0) === 0 ? Math.max(0, minX) : minX, y: Math.min(minY, 0) === 0 ? Math.max(0, minY) : minY, w: maxX - minX, h: maxY - minY, maxX, maxY }
-  })()
 
   const unconnected = nodes.filter(
     (n) => !edges.some((e) => e.sourceNodeId === n.id || e.targetNodeId === n.id)
@@ -817,152 +901,26 @@ export default function ChartCanvas({ projectId, chartType }: { projectId: strin
 
   return (
     <div className="space-y-4">
-      {/* نوار ابزار — v1.5.2 §۱۰.۱: دسته‌بندی بر اساس کاربرد
-          [ایجاد/ویرایش نمودار] │ [بوم] │ [Undo/Redo §۱۰.۸] │ [نمایش: زوم]
-          │ [خروجی PDF با تم متمایز] — چیپ‌های شمارش در انتهای نوار */}
-      <div className="flex flex-wrap items-center gap-2">
-        {/* ── ایجاد و ویرایش نمودار — نزدیک خود نمودار ── */}
-        <div className="flex items-center gap-1.5 rounded-xl border bg-card p-1" role="group" aria-label="ایجاد و ویرایش نمودار">
-          <Button size="sm" className="btn-brand gap-1.5 border-0" onClick={() => setCreateOpen(true)}>
-            <Plus className="size-4" aria-hidden />
-            گره دستی
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => layoutMutation.mutate()}
-            disabled={layoutMutation.isPending}
-          >
-            {layoutMutation.isPending ? <Loader2 className="size-4 animate-spin" aria-hidden /> : null}
-            چیدمان خودکار
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => restoreSnapshotMutation.mutate()}
-            disabled={restoreSnapshotMutation.isPending || !snapshotQ.data}
-            title={snapshotQ.data?.savedAt ? `آخرین چیدمان دستی ذخیره‌شده: ${new Date(snapshotQ.data.savedAt).toLocaleString('fa-IR')}` : 'هنوز چیدمان دستی ذخیره نشده است'}
-          >
-            <History className="size-4" aria-hidden />
-            بازگردانی چیدمان دستی
-          </Button>
-        </div>
+      {stickyBlock}
 
-        {/* ── بوم ── */}
-        <div className="flex items-center gap-1.5 rounded-xl border bg-card p-1" role="group" aria-label="ابزار بوم">
-          <Button size="sm" variant="ghost" onClick={() => setCanvasOpen(true)}>
-            <Ruler className="size-4" aria-hidden />
-            ابعاد بوم
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => void qc.invalidateQueries({ queryKey: qk.chart(projectId, chartType) })}
-            aria-label="بازخوانی نمودار از فعالیت‌ها"
-          >
-            <RefreshCw className="size-4" aria-hidden />
-            بازخوانی
-          </Button>
-        </div>
-
-        {/* ── §۱۰.۸ — Undo/Redo — نام‌گذاری درخواستی کاربر: «برگشت به عقب» / «رفتن به جلو» ── */}
-        <div className="flex items-center gap-1 rounded-xl border bg-card p-1" role="group" aria-label="برگشت به عقب و رفتن به جلو">
-          <Button
-            size="sm"
-            variant="ghost"
-            className="h-8 gap-1.5 px-2.5"
-            onClick={() => void undo()}
-            disabled={!canUndo}
-            aria-label="برگشت به عقب (Ctrl+Z)"
-            title={undoLabel ?? 'برگشت به عقب'}
-          >
-            <Undo2 className="size-4" aria-hidden />
-            <span className="text-[11px] font-bold">برگشت به عقب</span>
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            className="h-8 gap-1.5 px-2.5"
-            onClick={() => void redo()}
-            disabled={!canRedo}
-            aria-label="رفتن به جلو (Ctrl+Y)"
-            title={redoLabel ?? 'رفتن به جلو'}
-          >
-            <Redo2 className="size-4" aria-hidden />
-            <span className="text-[11px] font-bold">رفتن به جلو</span>
-          </Button>
-        </div>
-
-        {/* کنترل‌های زوم (§۱۵.۳) */}
-        <div className="flex items-center gap-1 rounded-xl border bg-card p-1" role="group" aria-label="کنترل زوم">
-          <Button size="icon" variant="ghost" className="size-7" aria-label="کوچک‌نمایی" onClick={() => zoomAt((viewportRef.current?.getBoundingClientRect().left ?? 0) + 100, (viewportRef.current?.getBoundingClientRect().top ?? 0) + 100, 1 / 1.25)}>
-            <ZoomOut className="size-4" aria-hidden />
-          </Button>
-          <span className="num min-w-12 text-center text-xs font-bold" dir="ltr" aria-live="polite">
-            {formatInt(Math.round(zoom * 100), prefs)}٪
+      {/* چیپ‌های شمارش/راهنما — خارج از نوار چسبان تا نوار فشرده بماند */}
+      <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+        {isExtendedOpc && (
+          <span className="inline-flex items-center gap-1 rounded-full border border-cyan/50 bg-cyan-soft px-2 py-0.5 font-bold text-cyan">
+            OPC توسعه‌یافته — دارای ورودی مواد/انبار
           </span>
-          <Button size="icon" variant="ghost" className="size-7" aria-label="بزرگ‌نمایی" onClick={() => zoomAt((viewportRef.current?.getBoundingClientRect().left ?? 0) + 100, (viewportRef.current?.getBoundingClientRect().top ?? 0) + 100, 1.25)}>
-            <ZoomIn className="size-4" aria-hidden />
-          </Button>
-          <Button size="icon" variant="ghost" className="size-7" aria-label="جا دادن در نما" onClick={fitToView}>
-            <Maximize2 className="size-4" aria-hidden />
-          </Button>
-          <Button size="sm" variant="ghost" className="h-7 px-2 text-[11px]" aria-label="بازنشانی زوم به ۱۰۰٪" onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }) }}>
-            ۱۰۰٪
-          </Button>
-        </div>
-
-        {/* §۶-۶ — حذف یال انتخاب‌شده + §۱۰.۵ ظاهر آن */}
-        {selectedEdge && !selectedEdge.isChain && (
-          <EdgeAppearanceBar
-            edge={selectedEdge}
-            onApply={(body) => edgeAppearanceMutation.mutate({ edgeId: selectedEdge.id, body })}
-            pending={edgeAppearanceMutation.isPending}
-            onDelete={() => setEdgeTarget(selectedEdge)}
-          />
         )}
-        {selectedEdge && selectedEdge.isChain && (
-          <Button
-            size="sm"
-            variant="destructive"
-            className="gap-1.5"
-            onClick={() => setEdgeTarget(selectedEdge)}
-            title="حذف اتصال انتخاب‌شده (یا کلید Delete)"
-          >
-            <Trash2 className="size-4" aria-hidden />
-            حذف اتصال انتخاب‌شده
-          </Button>
+        {allowedTypes.map((t) => (
+          <span key={t} className={cn('inline-flex items-center gap-1 rounded-full border px-2 py-0.5', counts.byType[t] ? 'border-border' : 'opacity-40')}>
+            <ProcessSymbol type={t} size="sm" />
+            {PROCESS_TYPE_LABELS_WITH_INPUT[t]}: {formatInt(counts.byType[t] ?? 0, prefs)}
+          </span>
+        ))}
+        {counts.manual > 0 && (
+          <span className="inline-flex items-center gap-1 rounded-full border border-dashed border-border px-2 py-0.5">
+            دستی: {formatInt(counts.manual, prefs)}
+          </span>
         )}
-
-        {/* §۱۰.۱ — خروجی PDF: تم متمایز قرمز PDF، همیشه در دسترس بالای صفحه */}
-        <Button
-          size="sm"
-          className="gap-1.5 border border-red/40 bg-red-soft font-bold text-red hover:border-red/60 hover:bg-red-soft/80 hover:text-red focus-visible:ring-red/30"
-          onClick={() => setPdfOpen(true)}
-          title="خروجی PDF نمودار — تک‌صفحه‌ای یا تایل‌دار"
-        >
-          <FileDown className="size-4" aria-hidden />
-          خروجی PDF
-        </Button>
-
-        <div className="ms-auto flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-          {isExtendedOpc && (
-            <span className="inline-flex items-center gap-1 rounded-full border border-cyan/50 bg-cyan-soft px-2 py-0.5 font-bold text-cyan">
-              OPC توسعه‌یافته — دارای ورودی مواد/انبار
-            </span>
-          )}
-          {allowedTypes.map((t) => (
-            <span key={t} className={cn('inline-flex items-center gap-1 rounded-full border px-2 py-0.5', counts.byType[t] ? 'border-border' : 'opacity-40')}>
-              <ProcessSymbol type={t} size="sm" />
-              {PROCESS_TYPE_LABELS_WITH_INPUT[t]}: {formatInt(counts.byType[t] ?? 0, prefs)}
-            </span>
-          ))}
-          {counts.manual > 0 && (
-            <span className="inline-flex items-center gap-1 rounded-full border border-dashed border-border px-2 py-0.5">
-              دستی: {formatInt(counts.manual, prefs)}
-            </span>
-          )}
-        </div>
       </div>
 
       {unconnected > 0 && (
@@ -971,11 +929,14 @@ export default function ChartCanvas({ projectId, chartType }: { projectId: strin
         </div>
       )}
 
-      {/* بوم — زوم/پن جدا از مختصات واقعی گره‌ها */}
+      {/* بوم — زوم/پن جدا از مختصات واقعی گره‌ها.
+          §۵ — ارتفاع کادر = کل ارتفاع محتوای بوم در زوم فعلی (حداقل ۷۲vh):
+          دیگر نیازی به اسکرول/پن عمودی داخل کادر نیست؛ صفحه خودش اسکرول می‌شود. */}
       <div
         ref={viewportRef}
+        style={{ height: `max(72vh, ${Math.ceil(effCanvas.h * zoom + 48)}px)` }}
         className={cn(
-          'relative h-[68vh] overflow-hidden rounded-2xl border bg-gradient-subtle',
+          'relative overflow-hidden rounded-2xl border bg-gradient-subtle',
           panning ? 'cursor-grabbing' : 'cursor-grab',
           connecting && 'cursor-crosshair'
         )}
@@ -1044,7 +1005,7 @@ export default function ChartCanvas({ projectId, chartType }: { projectId: strin
                 return (
                   <g
                     key={e.id}
-                    className="pointer-events-auto cursor-pointer"
+                    className="chart-edge pointer-events-auto cursor-pointer"
                     onClick={() => setSelectedEdgeId((prev) => (prev === e.id ? null : e.id))}
                     aria-label={`اتصال ${s!.label} به ${t!.label}${isSelected ? ' — انتخاب‌شده' : ''}`}
                   >
@@ -1092,10 +1053,11 @@ export default function ChartCanvas({ projectId, chartType }: { projectId: strin
             {nodes.map((n) => {
               const p = pos(n)
               const isDragging = dragging?.id === n.id
-              /* §۱۰.۶ — اگر بالای کارت در نمای فعلی جا نیست (نزدیک لبهٔ بالای
-               * بوم)، نوار ابزار با فاصلهٔ امن زیر کارت قرار می‌گیرد —
-               * هرگز روی لنگرهای اتصال نمی‌نشیند. */
-              const toolbarBelow = p.y * zoom + pan.y < 64
+              /* §۲ — نوار ابزار هاور در «گوشهٔ موربِ بیرون کارت» قرار می‌گیرد تا
+               * هرگز روی هیچ‌کدام از چهار لنگر اصلی کارت ننشیند؛ اگر کارت
+               * نزدیک لبهٔ بالا/راست نمای فعلی است، به گوشهٔ مقابل چرخش می‌کند. */
+              const toolbarBelow = p.y * zoom + pan.y < 72
+              const toolbarLeft = (p.x + NODE_W) * zoom + pan.x > viewportW - 220
               return (
                 <div
                   key={n.id}
@@ -1165,14 +1127,21 @@ export default function ChartCanvas({ projectId, chartType }: { projectId: strin
                     </div>
                   </div>
 
-                  {/* کنترل‌ها — با هاور یا فوکوس نمایان؛ §۱۰.۶ بالای کارت
-                      (۸px فاصله از لبه) تا لنگر پایین اتصال آزاد بماند */}
+                  {/* کنترل‌ها — §۲: گوشهٔ مورب بیرون کارت (فاصلهٔ ۱۰px)؛
+                      روی هیچ‌کدام از چهار لنگر اتصال نمی‌نشیند. پل نامرئی
+                      (::بُل) مسیر ماوس از کارت به نوار را می‌پوشاند و
+                      hover:opacity-100 نوار را روی هاورِ خودش زنده نگه می‌دارد. */}
                   <div
                     className={cn(
-                      'absolute left-1/2 z-20 flex -translate-x-1/2 items-center gap-0.5 rounded-full border bg-background p-0.5 opacity-0 shadow-sm transition-opacity group-hover:opacity-100 group-focus-within:opacity-100',
-                      toolbarBelow ? '-bottom-3 translate-y-full' : '-top-3 -translate-y-full'
+                      'absolute z-20 flex items-center gap-0.5 rounded-full border bg-background p-0.5 opacity-0 shadow-sm transition-opacity duration-300 group-hover:opacity-100 group-focus-within:opacity-100 hover:opacity-100',
+                      toolbarLeft ? 'right-[calc(100%+10px)]' : 'left-[calc(100%+10px)]',
+                      toolbarBelow ? 'top-[calc(100%+10px)]' : '-top-10'
                     )}
                   >
+                    <span
+                      aria-hidden
+                      className={cn('size-7', toolbarLeft ? '-right-3' : '-left-3', toolbarBelow ? '-top-3' : '-bottom-3')}
+                    />
                     <button
                       type="button"
                       className="inline-flex size-6 items-center justify-center rounded-full text-muted-foreground hover:bg-brand-soft hover:text-brand disabled:opacity-30"
@@ -1322,19 +1291,33 @@ export default function ChartCanvas({ projectId, chartType }: { projectId: strin
         />
       )}
 
-      {/* خروجی PDF (§۱۵.۷) */}
+      {/* خروجی PDF (§۱۵.۷) — سند چاپ از «دادهٔ» نمودار ساخته می‌شود (chart-print.ts):
+          بدون شبکهٔ نقطه‌ای/قاب خط‌چین/اسکرول‌بار، برچسب‌های کامل، خروجی برداری. */}
       <PdfExportDialog
         open={pdfOpen}
         onOpenChange={setPdfOpen}
-        sourceFactory={() =>
-          contentRef.current
+        sourceFactory={(): ChartPrintSource | null =>
+          nodes.length > 0
             ? {
-                contentEl: contentRef.current,
-                chartWidth: contentBBox ? Math.ceil(contentBBox.w) : effCanvas.w,
-                chartHeight: contentBBox ? Math.ceil(contentBBox.h) : effCanvas.h,
-                /** §۶-۵ — برش به محدودهٔ واقعی محتوا: محتوا با آفست منفی
-                 *  درون قاب برش‌خورده قرار می‌گیرد (بدون تغییر مختصات پروژه) */
-                cropOffset: contentBBox ? { x: -Math.floor(contentBBox.x), y: -Math.floor(contentBBox.y) } : null,
+                nodes: nodes.map((n) => ({
+                  id: n.id,
+                  label: n.label,
+                  nodeType: n.nodeType,
+                  x: pos(n).x,
+                  y: pos(n).y,
+                  sortOrder: n.sortOrder,
+                  isManual: n.isManual,
+                  stationName: n.stationName ?? null,
+                })),
+                edges: edges.map((e) => ({
+                  sourceId: e.sourceNodeId,
+                  targetId: e.targetNodeId,
+                  sourceAnchor: (e.sourceAnchor as AnchorSide | null) ?? null,
+                  targetAnchor: (e.targetAnchor as AnchorSide | null) ?? null,
+                  lineStyle: (e.lineStyle as 'SOLID' | 'DASHED' | 'DOTTED' | null) ?? null,
+                  lineColor: e.lineColor ?? null,
+                  isChain: e.isChain,
+                })),
                 chartTitle: `${data.chartType === 'OPC' ? 'نمودار فرایند عملیات (OPC)' : 'نمودار فرایند جریان (FPC)'}${isExtendedOpc ? ' — توسعه‌یافته' : ''}`,
               }
             : null

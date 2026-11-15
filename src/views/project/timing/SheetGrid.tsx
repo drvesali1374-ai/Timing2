@@ -447,7 +447,11 @@ export function SheetGrid({
       tabIndex={-1}
       onKeyDown={onKeyDown}
       onPaste={onPasteEvent}
-      className="card-premium timing-grid max-h-[68vh] overflow-auto"
+      /* v1.5.2 نهایی §۵ — سقف ارتفاع ۶۸vh حذف شد: جدول به اندازهٔ واقعی
+       * محتوایش بلند می‌شود و دیگر نیازی به اسکرول داخل کادر نیست؛
+       * خود صفحه اسکرول می‌کند (overflow:auto بدون max-height هرگز
+       * اسکرول‌بار نمی‌گیرد). */
+      className="card-premium timing-grid overflow-auto"
       dir="rtl"
     >
       <table className="w-full border-collapse text-sm">

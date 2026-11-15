@@ -1,13 +1,14 @@
 'use client'
 
 // ═══════════════════════════════════════════════════════════
-// خروجی PDF نمودار — جلسه ۲ §۱۵.۷
+// خروجی PDF نمودار — جلسه ۲ §۱۵.۷ + بازطراحی حرفه‌ای
 // دو حالت الزامی با انتخاب کاربر:
 //   • Fit to One Page — کل نمودار در یک صفحه با حفظ aspect ratio + هشدار ناخوانا
 //   • Tiled Multi-page — تقسیم به چند صفحه با ترتیب ردیف/ستون، نشانه‌های برش،
 //     هم‌پوشانی چسباندن، شمارهٔ صفحه و عنوان بخش
+// ▸ سند چاپ از «دادهٔ» نمودار ساخته می‌شود (chart-print.ts) — نه کلون DOM:
+//   بدون شبکهٔ نقطه‌ای/قاب خط‌چین/اسکرول‌بار، برچسب کامل چندخطی، خروجی برداری.
 // ابعاد بوم طراحی و اندازهٔ کاغذ PDF دو تنظیم مستقل‌اند.
-// پیاده‌سازی: کلون DOM نمودار داخل صفحات با اندازهٔ فیزیکی mm + @page تزریقی.
 // ═══════════════════════════════════════════════════════════
 import { useMemo, useState } from 'react'
 import { toast } from 'sonner'
@@ -19,30 +20,17 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { FileText } from 'lucide-react'
+import {
+  buildChartPrintDocument,
+  layoutChartPrint,
+  type ChartPrintSource,
+} from './chart-print'
 
 type PaperSize = 'A4' | 'A3'
 type Orientation = 'portrait' | 'landscape'
 type Mode = 'fit' | 'tiled'
 
-/** ابعاد کاغذ برحسب میلی‌متر */
-const PAPER_MM: Record<PaperSize, { w: number; h: number }> = {
-  A4: { w: 210, h: 297 },
-  A3: { w: 297, h: 420 },
-}
-
-const MM_TO_PX = 96 / 25.4
-
-export interface ChartPdfSource {
-  /** عنصر DOM محتوای نمودار (گره‌ها + یال‌ها) برای کلون */
-  contentEl: HTMLElement
-  /** ابعاد محتوای نمودار برحسب پیکسل */
-  chartWidth: number
-  chartHeight: number
-  chartTitle: string
-  /** v1.5.2 §۶-۵ — برش به محدودهٔ واقعی محتوا: آفست جابه‌جایی محتوا
-   *  درون قاب برش (null = بدون برش، کل بوم). مختصات پروژه تغییر نمی‌کند. */
-  cropOffset?: { x: number; y: number } | null
-}
+export type { ChartPrintSource }
 
 export default function PdfExportDialog({
   open,
@@ -51,8 +39,8 @@ export default function PdfExportDialog({
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
-  /** منبع DOM هنگام چاپ خوانده می‌شود (نه در رندر — دسترسی به ref در رندر ممنوع) */
-  sourceFactory: () => ChartPdfSource | null
+  /** دادهٔ نمودار هنگام باز بودن دیالوگ خوانده می‌شود (نه در رندر زودهنگام) */
+  sourceFactory: () => ChartPrintSource | null
 }) {
   const [mode, setMode] = useState<Mode>('fit')
   const [paper, setPaper] = useState<PaperSize>('A4')
@@ -62,175 +50,59 @@ export default function PdfExportDialog({
   const [showTitle, setShowTitle] = useState(true)
   const [showPageNumbers, setShowPageNumbers] = useState(true)
 
+  const sourcePreview = useMemo(() => (open ? sourceFactory() : null), [open, sourceFactory])
+  /** چیدمان چاپ: برچسب‌ها کامل اندازه‌گیری می‌شوند و مسیر یال‌ها بازمحاسبه */
+  const layout = useMemo(
+    () => (sourcePreview && sourcePreview.nodes.length > 0 ? layoutChartPrint(sourcePreview) : null),
+    [sourcePreview]
+  )
+
+  const chartW = layout?.width ?? 0
+  const chartH = layout?.height ?? 0
+
   const pageMm = useMemo(() => {
-    const base = PAPER_MM[paper]
+    const base = paper === 'A4' ? { w: 210, h: 297 } : { w: 297, h: 420 }
     return orientation === 'landscape' ? { w: base.h, h: base.w } : { w: base.w, h: base.h }
   }, [paper, orientation])
 
-  // قاب محتوا (کاغذ منهای حاشیه) برحسب پیکسل
+  // قاب محتوا (کاغذ منهای حاشیه) برحسب پیکسل — عنوان + تاریخ چاپ
   const frame = useMemo(
     () => ({
-      w: Math.max((pageMm.w - marginMm * 2) * MM_TO_PX, 100),
-      h: Math.max((pageMm.h - marginMm * 2) * MM_TO_PX - (showTitle ? 34 : 6), 100),
+      w: Math.max((pageMm.w - marginMm * 2) * (96 / 25.4), 100),
+      h: Math.max((pageMm.h - marginMm * 2) * (96 / 25.4) - (showTitle ? 68 : 22), 100),
     }),
     [pageMm, marginMm, showTitle]
   )
 
-  const sourcePreview = open ? sourceFactory() : null
-  const fitScale = sourcePreview ? Math.min(frame.w / sourcePreview.chartWidth, frame.h / sourcePreview.chartHeight) : 1
+  const fitScale = layout ? Math.min(frame.w / chartW, frame.h / chartH) : 1
   const fitScalePct = Math.round(fitScale * 100)
   const unreadable = fitScale < 0.4
 
   const tiled = useMemo(() => {
-    if (!sourcePreview) return { cols: 1, rows: 1, pages: 1, overlapPx: 24 }
+    if (!layout) return { cols: 1, rows: 1, pages: 1, overlapPx: 24 }
     const s = tiledScale / 100
-    const scaledW = sourcePreview.chartWidth * s
-    const scaledH = sourcePreview.chartHeight * s
     const overlap = 24 // هم‌پوشانی برای چسباندن صفحات — پیوستن فیزیکی روشن
-    const cols = Math.max(1, Math.ceil(scaledW / (frame.w - overlap)))
-    const rows = Math.max(1, Math.ceil(scaledH / (frame.h - overlap)))
+    const cols = Math.max(1, Math.ceil((chartW * s) / (frame.w - overlap)))
+    const rows = Math.max(1, Math.ceil((chartH * s) / (frame.h - overlap)))
     return { cols, rows, pages: cols * rows, overlapPx: overlap }
-  }, [sourcePreview, tiledScale, frame])
+  }, [layout, tiledScale, frame, chartW, chartH])
 
   const print = () => {
     const source = sourceFactory()
-    if (!source) return
-    const s = mode === 'fit' ? fitScale : tiledScale / 100
-    const style = document.createElement('style')
-    style.id = 'chart-pdf-page-style'
-    style.textContent = `@page { size: ${pageMm.w}mm ${pageMm.h}mm; margin: 0 }`
-    document.head.appendChild(style)
-
-    const root = document.createElement('div')
-    root.id = 'chart-pdf-root'
-    const pages: string[] = []
-    const mkPage = (col: number, row: number, idx: number, total: number, inner: string) => `
-      <div class="chart-pdf-page" style="width:${pageMm.w}mm;height:${pageMm.h}mm">
-        <div class="chart-pdf-crop chart-pdf-crop-tl"></div><div class="chart-pdf-crop chart-pdf-crop-tr"></div>
-        <div class="chart-pdf-crop chart-pdf-crop-bl"></div><div class="chart-pdf-crop chart-pdf-crop-br"></div>
-        <div class="chart-pdf-frame" style="position:absolute;inset:${marginMm}mm;overflow:hidden">
-          ${
-            showTitle
-              ? `<div class="chart-pdf-title">${source.chartTitle}${mode === 'tiled' ? ` — بخش (ردیف ${row + 1}، ستون ${col + 1})` : ''}</div>`
-              : ''
-          }
-          <div class="chart-pdf-viewport" style="width:${frame.w}px;height:${frame.h}px;overflow:hidden;position:relative">
-            ${inner}
-          </div>
-          ${
-            showPageNumbers
-              ? `<div class="chart-pdf-num">صفحهٔ ${idx} از ${total}${mode === 'tiled' ? ' — ردیف ' + (row + 1) + '، ستون ' + (col + 1) : ''}</div>`
-              : ''
-          }
-        </div>
-      </div>`
-
-    // §۱۰.۷ ریشه‌ای — کلون محتوا: شناسهٔ پیکان‌های SVG یکتا می‌شود تا با
-    // نمونهٔ اصلی (که در چاپ پنهان است) تعارض نکند؛ در غیر این صورت
-    // مرورگر پیکان نسخهٔ پنهان را مرجع می‌گیرد و پیکان‌ها ناپدید می‌شوند.
-    let content = source.contentEl.outerHTML
-    content = content
-      .replace(/id="(arrow[^"]*)"/g, 'id="pdfx-$1"')
-      .replace(/url\(#(arrow[^)\s]*)\)/g, 'url(#pdfx-$1)')
-    // §۶-۵ — برش به محدودهٔ واقعی محتوا: محتوا با آفست برش داخل قاب می‌نشیند
-    const crop = source.cropOffset ?? { x: 0, y: 0 }
-    const cropped = `<div style="position:absolute;left:${crop.x}px;top:${crop.y}px">${content}</div>`
-    if (mode === 'fit') {
-      const offX = Math.max(0, (frame.w - source.chartWidth * s) / 2)
-      const offY = Math.max(0, (frame.h - source.chartHeight * s) / 2)
-      const inner = `<div style="position:absolute;left:${offX}px;top:${offY}px;width:${source.chartWidth}px;height:${source.chartHeight}px;transform:scale(${s});transform-origin:0 0">${cropped}</div>`
-      pages.push(mkPage(0, 0, 1, 1, inner))
-    } else {
-      const vw = frame.w - tiled.overlapPx
-      const vh = frame.h - tiled.overlapPx
-      let idx = 1
-      for (let row = 0; row < tiled.rows; row++) {
-        for (let col = 0; col < tiled.cols; col++) {
-          const tx = -(col * vw) / s
-          const ty = -(row * vh) / s
-          const inner = `<div style="position:absolute;left:0;top:0;width:${source.chartWidth}px;height:${source.chartHeight}px;transform:translate(${tx}px,${ty}px) scale(${s});transform-origin:0 0">${cropped}</div>`
-          pages.push(mkPage(col, row, idx, tiled.pages, inner))
-          idx++
-        }
-      }
-    }
-    root.innerHTML = pages.join('')
-
-    // استایل چاپ اختصاصی — مستقل از UI برنامه
-    const css = document.createElement('style')
-    css.id = 'chart-pdf-print-css'
-    // §۱۰.۷ ریشه‌ای — رفع «PDF سفید»:
-    // ① متغیرهای تم روی #chart-pdf-root به مقادیر تم روشن قفل می‌شوند؛ در حالت
-    //    تیره، متن روشن + حذف پس‌زمینه در چاپ = «سفید روی سفید» می‌شد.
-    // ② print-color-adjust: exact پس‌زمینه/حاشیه/رنگ‌ها را در چاپ نگه می‌دارد.
-    // ③ شناسهٔ پیکان‌ها در کلون یکتا شده (بالاتر) تا تعارض id رخ ندهد.
-    css.textContent = `
-      #chart-pdf-root {
-        --background:#f5f7fb; --foreground:#0c1424;
-        --card:#ffffff; --card-foreground:#0c1424;
-        --popover:#ffffff; --popover-foreground:#0c1424;
-        --primary:#7257ff; --primary-foreground:#ffffff;
-        --secondary:#eef2f7; --secondary-foreground:#0c1424;
-        --muted:#f8fafc; --muted-foreground:#69778e;
-        --accent:#efeaff; --accent-foreground:#5b45e0;
-        --destructive:#ef5b6b; --destructive-foreground:#ffffff;
-        --border:#e4e9f1; --input:#e4e9f1; --ring:#7257ff;
-        --chart-1:#7257ff; --chart-2:#21c7d9; --chart-3:#18b77b; --chart-4:#eaa928; --chart-5:#ef5b6b;
-        --brand:#7257ff; --brand-2:#9a7cff; --brand-soft:#efeaff;
-        --cyan:#21c7d9; --cyan-soft:#e5fbfd;
-        --green:#18b77b; --green-soft:#dcf8ec;
-        --red:#ef5b6b; --red-soft:#fde5e8;
-        --amber:#eaa928; --amber-soft:#fff4d7;
-        --faint:#98a4b7; --surface-2:#f8fafc; --surface-3:#eef2f7;
-        --glass:rgba(255,255,255,.76); --line-strong:#d7dee9;
-        color-scheme: light;
-        /* رنگ متن صریح — رنگ به‌ارث‌رسیده از body در حالت تیره «روشن» محاسبه
-           شده و قفل متغیرها آن را بازنمی‌گرداند؛ رنگ مستقیم متن را تیره می‌کنیم */
-        color: #0c1424;
-        font-family: Vazirmatn, 'Segoe UI', Tahoma, sans-serif;
-      }
-      #chart-pdf-root, #chart-pdf-root * {
-        -webkit-print-color-adjust: exact;
-        print-color-adjust: exact;
-      }
-      #chart-pdf-root .chart-pdf-page { position: relative; background: #fff; overflow: hidden; box-sizing: border-box; }
-      #chart-pdf-root .chart-pdf-page + .chart-pdf-page { page-break-before: always; }
-      #chart-pdf-root .chart-pdf-title { font: bold 12px Vazirmatn, sans-serif; color: #111; text-align: center; margin-bottom: 6px; direction: rtl; }
-      #chart-pdf-root .chart-pdf-num { font: 10px Vazirmatn, sans-serif; color: #444; text-align: center; margin-top: 4px; direction: rtl; }
-      #chart-pdf-root .chart-pdf-crop { position: absolute; width: 10mm; height: 10mm; border-color: #555; }
-      #chart-pdf-root .chart-pdf-crop-tl { top: 3mm; left: 3mm; border-top: 1px solid #555; border-left: 1px solid #555; }
-      #chart-pdf-root .chart-pdf-crop-tr { top: 3mm; right: 3mm; border-top: 1px solid #555; border-right: 1px solid #555; }
-      #chart-pdf-root .chart-pdf-crop-bl { bottom: 3mm; left: 3mm; border-bottom: 1px solid #555; border-left: 1px solid #555; }
-      #chart-pdf-root .chart-pdf-crop-br { bottom: 3mm; right: 3mm; border-bottom: 1px solid #555; border-right: 1px solid #555; }
-      /* کارت‌های گره در چاپ: پس‌زمینه روشن صریح + متن تیره صریح (متن عنوان
-         کارت رنگ به‌ارثی ندارد و در حالت تیرهِ برنامه روشن می‌ماند) + حاشیهٔ کمی تیره‌تر */
-      #chart-pdf-root .chart-node {
-        background: #fff !important;
-        color: #0c1424 !important;
-        border-color: #c9cedb !important;
-        box-shadow: 0 1px 2px rgba(20, 35, 60, 0.08);
-      }
-      @media print {
-        body > *:not(#chart-pdf-root) { display: none !important; }
-        #chart-pdf-root { display: block !important; }
-        /* §۱۰.۷ ریشه‌ای — CSS چاپ گزارش‌ها (globals.css) «body *» را
-           visibility:hidden می‌کند؛ بدون بازگرداندن آن برای کلون نمودار،
-           خروجی PDF «کاملاً سفید» می‌شد (علت واقعی باگ گزارش‌شده). */
-        #chart-pdf-root,
-        #chart-pdf-root * {
-          visibility: visible !important;
-        }
-        #chart-pdf-root .chart-pdf-page { break-inside: avoid; }
-      }
-      @media screen { #chart-pdf-root { display: none; } }
-    `
-    document.head.appendChild(css)
-    document.body.appendChild(root)
+    if (!source || source.nodes.length === 0) return
+    const printLayout = layoutChartPrint(source)
+    const built = buildChartPrintDocument(source, printLayout, {
+      mode,
+      paper,
+      orientation,
+      marginMm,
+      tiledScale,
+      showTitle,
+      showPageNumbers,
+    })
 
     const cleanup = () => {
-      root.remove()
-      css.remove()
-      style.remove()
+      built.cleanup()
       window.removeEventListener('afterprint', cleanup)
     }
     window.addEventListener('afterprint', cleanup)
@@ -241,7 +113,7 @@ export default function PdfExportDialog({
     toast.success(
       mode === 'fit'
         ? 'خروجی تک‌صفحه‌ای آماده شد — در پنجرهٔ چاپ، «Save as PDF» را انتخاب کنید.'
-        : `خروجی تایل‌دار (${tiled.pages} صفحه) آماده شد — صفحات را با نشانه‌های برش به هم بچسبانید.`,
+        : `خروجی تایل‌دار (${built.pagesCount.toLocaleString('fa-IR')} صفحه) آماده شد — صفحات را با نشانه‌های برش به هم بچسبانید.`,
       { duration: 8000 }
     )
   }
@@ -255,7 +127,8 @@ export default function PdfExportDialog({
             خروجی PDF نمودار
           </DialogTitle>
           <DialogDescription>
-            ابعاد بوم طراحی مستقل از اندازهٔ کاغذ است؛ این تنظیمات فقط چاپ را تغییر می‌دهند.
+            سند چاپ به‌صورت برداری از دادهٔ نمودار ساخته می‌شود — بدون اسکرول‌بار و با برچسب‌های کامل.
+            ابعاد بوم طراحی مستقل از اندازهٔ کاغذ است.
           </DialogDescription>
         </DialogHeader>
 
@@ -267,7 +140,7 @@ export default function PdfExportDialog({
                 <span className="block font-bold">جا دادن در یک صفحه (Fit to One Page)</span>
                 <span className="block text-xs text-muted-foreground">
                   کل نمودار با حفظ تناسب در یک صفحه کوچک می‌شود؛ بدون برش یا سرریز.
-                  {sourcePreview && (
+                  {layout && (
                     <span className={unreadable ? 'font-bold text-red' : ''}>
                       {' '}مقیاس نهایی ≈ {fitScalePct.toLocaleString('fa-IR')}٪
                       {unreadable ? ' — هشدار: کوچک‌تر از حد خوانا!' : ''}
@@ -283,7 +156,7 @@ export default function PdfExportDialog({
                 <span className="block text-xs text-muted-foreground">
                   نمودار بزرگ به چند صفحه با ترتیب ردیف/ستون تقسیم می‌شود؛ هر صفحه نشانهٔ برش و
                   هم‌پوشانی چسباندن دارد
-                  {sourcePreview && ` — ${tiled.rows.toLocaleString('fa-IR')}×${tiled.cols.toLocaleString('fa-IR')} = ${tiled.pages.toLocaleString('fa-IR')} صفحه`}.
+                  {layout && ` — ${tiled.rows.toLocaleString('fa-IR')}×${tiled.cols.toLocaleString('fa-IR')} = ${tiled.pages.toLocaleString('fa-IR')} صفحه`}.
                 </span>
               </span>
             </Label>
@@ -351,7 +224,7 @@ export default function PdfExportDialog({
           <div className="flex flex-wrap gap-4">
             <Label className="flex items-center gap-2 text-xs font-normal">
               <Switch checked={showTitle} onCheckedChange={setShowTitle} />
-              عنوان روی هر صفحه
+              عنوان و تاریخ چاپ
             </Label>
             <Label className="flex items-center gap-2 text-xs font-normal">
               <Switch checked={showPageNumbers} onCheckedChange={setShowPageNumbers} />
@@ -360,10 +233,10 @@ export default function PdfExportDialog({
           </div>
 
           {/* پیش‌نمایش شماتیک صفحه‌بندی */}
-          {sourcePreview && (
+          {layout && (
             <div className="rounded-xl border bg-surface-2 p-3">
               <p className="mb-2 text-xs font-bold">
-                پیش‌نمایش صفحه‌بندی — ابعاد بوم: {Math.round(sourcePreview.chartWidth)}×{Math.round(sourcePreview.chartHeight)} پیکسل
+                پیش‌نمایش صفحه‌بندی — ابعاد محتوای نمودار: {chartW.toLocaleString('fa-IR')}×{chartH.toLocaleString('fa-IR')} پیکسل
               </p>
               <div
                 className="grid gap-1"
@@ -395,7 +268,7 @@ export default function PdfExportDialog({
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>انصراف</Button>
-          <Button onClick={print} disabled={!sourcePreview}>
+          <Button onClick={print} disabled={!layout}>
             چاپ / ذخیرهٔ PDF
           </Button>
         </DialogFooter>

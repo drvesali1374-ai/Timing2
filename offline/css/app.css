@@ -442,6 +442,9 @@ svg.icon { width: 16px; height: 16px; flex-shrink: 0; }
 .icon-btn.lg .icon { width: 18px; height: 18px; }
 .icon-btn.on { background: var(--brand-soft); color: var(--brand); }
 .icon-btn.on:hover { background: var(--brand-soft); color: var(--brand); }
+/* دکمهٔ آیکونی برند — «گره دستی» در نوار چسبان نمودار (v1.5.2 نهایی §۴) */
+.icon-btn.icon-btn-brand { background: var(--brand); color: #fff; }
+.icon-btn.icon-btn-brand:hover { background: color-mix(in srgb, var(--brand) 88%, #000); color: #fff; }
 
 /* ── اندازه/جهت آیکون — معادل کلاس‌های lucide ── */
 .i16 { width: 16px !important; height: 16px !important; }
@@ -511,6 +514,11 @@ table.table tbody tr:hover { background: color-mix(in srgb, var(--surface-2) 60%
 /* ── تب ── */
 .tabs-bar { display: flex; gap: 4px; border-bottom: 1px solid var(--border); overflow-x: auto; scrollbar-width: none; }
 .tabs-bar::-webkit-scrollbar { display: none; }
+/* v1.5.2 نهایی §۴ — زبانه‌های OPC/FPC به‌صورت «درون‌ردیفی» در نوار چسبان:
+   قاب کارت‌مانند فشرده، هم‌قد گروه‌های ابزار کنار خود. */
+.tabs-bar.tabs-inline { border: 1px solid var(--border); border-radius: var(--radius); background: var(--card); padding: 3px; gap: 2px; overflow: visible; flex-shrink: 0; }
+.tabs-bar.tabs-inline .tab { padding: 6px 12px; border-bottom: none; margin-bottom: 0; border-radius: calc(var(--radius) - 4px); font-size: 12.5px; }
+.tabs-bar.tabs-inline .tab.active { background: var(--brand-soft); }
 .tab {
   border: none; background: transparent; padding: 9px 14px; font-size: 13px; font-weight: 500;
   color: var(--muted-foreground); cursor: pointer; border-bottom: 2px solid transparent; white-space: nowrap;
@@ -641,7 +649,10 @@ table.table tbody tr:hover { background: color-mix(in srgb, var(--surface-2) 60%
 @keyframes pulse { 50% { opacity: .35; } }
 
 /* ── برگه زمان‌سنجی ── */
-.sheet-grid { border-radius: calc(var(--radius) + 5px); border: 1px solid var(--border); background: var(--card); overflow: auto; max-height: 68vh; position: relative; }
+.sheet-grid { border-radius: calc(var(--radius) + 5px); border: 1px solid var(--border); background: var(--card); overflow: auto; position: relative; }
+/* v1.5.2 نهایی §۵ — سقف ارتفاع ۶۸vh حذف شد: جدول به اندازهٔ واقعی محتوایش
+   بلند می‌شود و دیگر نیازی به اسکرول داخل کادر نیست؛ خود صفحه اسکرول می‌کند
+   (overflow:auto بدون max-height هرگز اسکرول‌بار نمی‌گیرد). */
 .sheet-grid table { border-collapse: separate; border-spacing: 0; width: 100%; font-size: 12.5px; }
 .sheet-grid th {
   position: sticky; top: 0; z-index: 3; background: color-mix(in srgb, var(--surface-2) 95%, transparent);
@@ -729,16 +740,21 @@ tr.row-excluded > td { background: color-mix(in srgb, var(--red-soft) 35%, trans
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .node-ctrls {
-  /* v1.5.2 §۱۰.۶ — نوار ابزار هاور بالای کارت (۱۲px فاصله) تا لنگر
-     پایین اتصال آزاد بماند؛ گره‌های نزدیک لبهٔ بالای بوم (.ctrl-below)
-     آن را با فاصلهٔ امن زیر کارت می‌گیرند. */
-  position: absolute; bottom: auto; top: -12px; left: 50%; transform: translateX(-50%); z-index: 8;
+  /* v1.5.2 نهایی §۲ — نوار ابزار هاور در «گوشهٔ موربِ بیرون کارت» می‌نشیند
+     (فاصلهٔ ۱۰px) تا روی هیچ‌کدام از چهار لنگر اصلی کارت قرار نگیرد.
+     پل نامرئی ::before مسیر ماوس از کارت به نوار را می‌پوشاند و
+     :hover خود نوار آن را زنده نگه می‌دارد (fade آرام‌تر). */
+  position: absolute; left: calc(100% + 10px); top: -40px; z-index: 8;
   display: flex; align-items: center; gap: 2px; padding: 2px;
   background: var(--background); border: 1px solid var(--border); border-radius: 99px;
-  box-shadow: var(--shadow-1); opacity: 0; transition: opacity .15s var(--ease);
+  box-shadow: var(--shadow-1); opacity: 0; transition: opacity .3s var(--ease);
 }
-.chart-node.ctrl-below .node-ctrls { top: auto; bottom: -12px; }
-.chart-node:hover .node-ctrls, .chart-node:focus-within .node-ctrls { opacity: 1; }
+.node-ctrls::before { content: ''; position: absolute; left: -14px; bottom: -14px; width: 28px; height: 28px; }
+.chart-node.ctrl-left .node-ctrls { left: auto; right: calc(100% + 10px); }
+.chart-node.ctrl-left .node-ctrls::before { left: auto; right: -14px; }
+.chart-node.ctrl-below .node-ctrls { top: calc(100% + 10px); }
+.chart-node.ctrl-below .node-ctrls::before { bottom: auto; top: -14px; }
+.node-ctrls:hover, .chart-node:hover .node-ctrls, .chart-node:focus-within .node-ctrls { opacity: 1; }
 .node-ctrl-btn {
   display: inline-flex; width: 24px; height: 24px; align-items: center; justify-content: center;
   border-radius: 50%; border: none; background: transparent; color: var(--muted-foreground);
@@ -989,7 +1005,11 @@ code.inline { background: var(--muted); padding: 3px 9px; border-radius: 6px; fo
 
 /* ── قاب بوم (viewport) و لایهٔ transform ── */
 .chart-viewport {
-  position: relative; height: 68vh; overflow: hidden;
+  position: relative; overflow: hidden;
+  /* v1.5.2 نهایی §۵ — ارتفاع ثابت ۶۸vh حذف شد؛ JS در applyTransform ارتفاع =
+     «کل ارتفاع محتوای بوم در زوم فعلی» (حداقل ۷۲vh) تنظیم می‌کند — دیگر
+     نیازی به اسکرول داخل کادر نیست و صفحه خودش اسکرول می‌شود. */
+  min-height: 72vh;
   border: 1.5px solid var(--border); border-radius: calc(var(--radius) + 5px);
   background: var(--surface-2); cursor: grab; touch-action: none;
   user-select: none; -webkit-user-select: none;
@@ -1046,11 +1066,6 @@ code.inline { background: var(--muted); padding: 3px 9px; border-radius: 6px; fo
   background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
 }
 .tb-group .btn-ghost:disabled { opacity: 0.5; cursor: not-allowed; }
-/* §۱۰.۸ — دکمه‌های «برگشت به عقب / رفتن به جلو» با برچسب متنی کنار آیکون */
-.t2c-undo-btn { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 700; }
-.t2c-undo-btn svg { width: 15px; height: 15px; flex-shrink: 0; }
-.t2c-undo-label { white-space: nowrap; }
-@media (max-width: 640px) { .t2c-undo-label { display: none; } }
 .btn-pdf {
   background: var(--red-soft); color: var(--red); border: 1px solid color-mix(in srgb, var(--red) 40%, transparent);
   font-weight: 700;
