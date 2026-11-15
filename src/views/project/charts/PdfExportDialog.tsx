@@ -125,7 +125,13 @@ export default function PdfExportDialog({
         </div>
       </div>`
 
-    const content = source.contentEl.outerHTML
+    // §۱۰.۷ ریشه‌ای — کلون محتوا: شناسهٔ پیکان‌های SVG یکتا می‌شود تا با
+    // نمونهٔ اصلی (که در چاپ پنهان است) تعارض نکند؛ در غیر این صورت
+    // مرورگر پیکان نسخهٔ پنهان را مرجع می‌گیرد و پیکان‌ها ناپدید می‌شوند.
+    let content = source.contentEl.outerHTML
+    content = content
+      .replace(/id="(arrow[^"]*)"/g, 'id="pdfx-$1"')
+      .replace(/url\(#(arrow[^)\s]*)\)/g, 'url(#pdfx-$1)')
     // §۶-۵ — برش به محدودهٔ واقعی محتوا: محتوا با آفست برش داخل قاب می‌نشیند
     const crop = source.cropOffset ?? { x: 0, y: 0 }
     const cropped = `<div style="position:absolute;left:${crop.x}px;top:${crop.y}px">${content}</div>`
@@ -153,7 +159,40 @@ export default function PdfExportDialog({
     // استایل چاپ اختصاصی — مستقل از UI برنامه
     const css = document.createElement('style')
     css.id = 'chart-pdf-print-css'
+    // §۱۰.۷ ریشه‌ای — رفع «PDF سفید»:
+    // ① متغیرهای تم روی #chart-pdf-root به مقادیر تم روشن قفل می‌شوند؛ در حالت
+    //    تیره، متن روشن + حذف پس‌زمینه در چاپ = «سفید روی سفید» می‌شد.
+    // ② print-color-adjust: exact پس‌زمینه/حاشیه/رنگ‌ها را در چاپ نگه می‌دارد.
+    // ③ شناسهٔ پیکان‌ها در کلون یکتا شده (بالاتر) تا تعارض id رخ ندهد.
     css.textContent = `
+      #chart-pdf-root {
+        --background:#f5f7fb; --foreground:#0c1424;
+        --card:#ffffff; --card-foreground:#0c1424;
+        --popover:#ffffff; --popover-foreground:#0c1424;
+        --primary:#7257ff; --primary-foreground:#ffffff;
+        --secondary:#eef2f7; --secondary-foreground:#0c1424;
+        --muted:#f8fafc; --muted-foreground:#69778e;
+        --accent:#efeaff; --accent-foreground:#5b45e0;
+        --destructive:#ef5b6b; --destructive-foreground:#ffffff;
+        --border:#e4e9f1; --input:#e4e9f1; --ring:#7257ff;
+        --chart-1:#7257ff; --chart-2:#21c7d9; --chart-3:#18b77b; --chart-4:#eaa928; --chart-5:#ef5b6b;
+        --brand:#7257ff; --brand-2:#9a7cff; --brand-soft:#efeaff;
+        --cyan:#21c7d9; --cyan-soft:#e5fbfd;
+        --green:#18b77b; --green-soft:#dcf8ec;
+        --red:#ef5b6b; --red-soft:#fde5e8;
+        --amber:#eaa928; --amber-soft:#fff4d7;
+        --faint:#98a4b7; --surface-2:#f8fafc; --surface-3:#eef2f7;
+        --glass:rgba(255,255,255,.76); --line-strong:#d7dee9;
+        color-scheme: light;
+        /* رنگ متن صریح — رنگ به‌ارث‌رسیده از body در حالت تیره «روشن» محاسبه
+           شده و قفل متغیرها آن را بازنمی‌گرداند؛ رنگ مستقیم متن را تیره می‌کنیم */
+        color: #0c1424;
+        font-family: Vazirmatn, 'Segoe UI', Tahoma, sans-serif;
+      }
+      #chart-pdf-root, #chart-pdf-root * {
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
       #chart-pdf-root .chart-pdf-page { position: relative; background: #fff; overflow: hidden; box-sizing: border-box; }
       #chart-pdf-root .chart-pdf-page + .chart-pdf-page { page-break-before: always; }
       #chart-pdf-root .chart-pdf-title { font: bold 12px Vazirmatn, sans-serif; color: #111; text-align: center; margin-bottom: 6px; direction: rtl; }
@@ -163,9 +202,24 @@ export default function PdfExportDialog({
       #chart-pdf-root .chart-pdf-crop-tr { top: 3mm; right: 3mm; border-top: 1px solid #555; border-right: 1px solid #555; }
       #chart-pdf-root .chart-pdf-crop-bl { bottom: 3mm; left: 3mm; border-bottom: 1px solid #555; border-left: 1px solid #555; }
       #chart-pdf-root .chart-pdf-crop-br { bottom: 3mm; right: 3mm; border-bottom: 1px solid #555; border-right: 1px solid #555; }
+      /* کارت‌های گره در چاپ: پس‌زمینه روشن صریح + متن تیره صریح (متن عنوان
+         کارت رنگ به‌ارثی ندارد و در حالت تیرهِ برنامه روشن می‌ماند) + حاشیهٔ کمی تیره‌تر */
+      #chart-pdf-root .chart-node {
+        background: #fff !important;
+        color: #0c1424 !important;
+        border-color: #c9cedb !important;
+        box-shadow: 0 1px 2px rgba(20, 35, 60, 0.08);
+      }
       @media print {
         body > *:not(#chart-pdf-root) { display: none !important; }
         #chart-pdf-root { display: block !important; }
+        /* §۱۰.۷ ریشه‌ای — CSS چاپ گزارش‌ها (globals.css) «body *» را
+           visibility:hidden می‌کند؛ بدون بازگرداندن آن برای کلون نمودار،
+           خروجی PDF «کاملاً سفید» می‌شد (علت واقعی باگ گزارش‌شده). */
+        #chart-pdf-root,
+        #chart-pdf-root * {
+          visibility: visible !important;
+        }
         #chart-pdf-root .chart-pdf-page { break-inside: avoid; }
       }
       @media screen { #chart-pdf-root { display: none; } }

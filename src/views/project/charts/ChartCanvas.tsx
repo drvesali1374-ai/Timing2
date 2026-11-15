@@ -865,29 +865,31 @@ export default function ChartCanvas({ projectId, chartType }: { projectId: strin
           </Button>
         </div>
 
-        {/* ── §۱۰.۸ — Undo/Redo ── */}
-        <div className="flex items-center gap-1 rounded-xl border bg-card p-1" role="group" aria-label="واگردانی و ازنو">
+        {/* ── §۱۰.۸ — Undo/Redo — نام‌گذاری درخواستی کاربر: «برگشت به عقب» / «رفتن به جلو» ── */}
+        <div className="flex items-center gap-1 rounded-xl border bg-card p-1" role="group" aria-label="برگشت به عقب و رفتن به جلو">
           <Button
-            size="icon"
+            size="sm"
             variant="ghost"
-            className="size-8"
+            className="h-8 gap-1.5 px-2.5"
             onClick={() => void undo()}
             disabled={!canUndo}
-            aria-label="واگردانی (Ctrl+Z)"
-            title={undoLabel ?? 'واگردانی'}
+            aria-label="برگشت به عقب (Ctrl+Z)"
+            title={undoLabel ?? 'برگشت به عقب'}
           >
             <Undo2 className="size-4" aria-hidden />
+            <span className="text-[11px] font-bold">برگشت به عقب</span>
           </Button>
           <Button
-            size="icon"
+            size="sm"
             variant="ghost"
-            className="size-8"
+            className="h-8 gap-1.5 px-2.5"
             onClick={() => void redo()}
             disabled={!canRedo}
-            aria-label="ازنو (Ctrl+Y)"
-            title={redoLabel ?? 'ازنو'}
+            aria-label="رفتن به جلو (Ctrl+Y)"
+            title={redoLabel ?? 'رفتن به جلو'}
           >
             <Redo2 className="size-4" aria-hidden />
+            <span className="text-[11px] font-bold">رفتن به جلو</span>
           </Button>
         </div>
 

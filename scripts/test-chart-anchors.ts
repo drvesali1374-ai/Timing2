@@ -79,7 +79,7 @@ function autoAnchors(s: Position, t: Position): [AnchorSide, AnchorSide] {
   for (const sa of ALL_SIDES) {
     for (const ta of ALL_SIDES) {
       if (sa === ta) continue
-      const score = anchorPairScore(s, sa, t, ta, srcRect, dstRect)
+      const score = anchorPairScore(s, sa, t, ta)
       if (score < bestScore) { bestScore = score; best = [sa, ta] }
     }
   }

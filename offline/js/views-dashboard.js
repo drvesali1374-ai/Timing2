@@ -167,9 +167,10 @@
   }
 
   /* ── نمودار ستونی سفارشی «مقایسهٔ فعالیت‌ها» — §۱۴ ──
-     ارتفاع کاهش‌یافته (۲۴۰ ← ۱۵۰)، بدون هیچ چرخش برچسب، نام کامل
-     فعالیت در حداکثر ۳ خط ~۱۲ نویسه‌ای با ellipsis + tooltip بومی SVG،
-     واحد «(ثانیه)» بالای محور عمودی، میله‌های --brand با سر گرد. */
+     ارتفاع افزایش‌یافته (۱۵۰ ← ۲۴۰؛ بازبینی نهایی §۷)، بدون هیچ چرخش برچسب،
+     نام کامل فعالیت در حداکثر ۳ خط ~۱۲ نویسه‌ای با ellipsis + tooltip بومی SVG،
+     واحد «(ثانیه)» روی خط مستقل بالای محور (فاصله از مقادیر تیک)،
+     میله‌های --brand با سر گرد. */
   function activitiesChartSvg(acts) {
     var NS = 'http://www.w3.org/2000/svg';
     function sv(tag, attrs) {
@@ -177,8 +178,8 @@
       for (var k in attrs) el.setAttribute(k, attrs[k]);
       return el;
     }
-    var W = 560, H = 150;
-    var padT = 16, padB = 52, padL = 44, padR = 10;
+    var W = 560, H = 240;
+    var padT = 26, padB = 52, padL = 44, padR = 10;
     var svg = sv('svg', { class: 'stat-chart', viewBox: '0 0 ' + W + ' ' + H, role: 'img', 'aria-label': 'مقایسهٔ زمان استاندارد فعالیت‌ها' });
     svg.setAttribute('style', 'direction:ltr');
     if (acts.length === 0) return svg;
@@ -199,8 +200,9 @@
       yt.textContent = U.toPersianDigits(U.formatTimeValue(v, 1));
       svg.appendChild(yt);
     }
-    /* واحد محور عمودی — بالای محور (RLM برای جهت درست پرانتز) */
-    var unit = sv('text', { x: padL - 2, y: padT - 5, 'text-anchor': 'end', 'font-size': 9, fill: 'var(--muted-foreground)' });
+    /* واحد محور عمودی — خط مستقل بالای نمودار با فاصله واضح از اولین تیک
+       (بازبینی نهایی §۷ — رفع چسبیدگی به مقادیر محور؛ RLM جهت پرانتز) */
+    var unit = sv('text', { x: 4, y: 13, 'text-anchor': 'start', 'font-size': 9, 'font-weight': 600, fill: 'var(--muted-foreground)' });
     unit.textContent = '\u200F(ثانیه)\u200F';
     svg.appendChild(unit);
 

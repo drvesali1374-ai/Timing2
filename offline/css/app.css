@@ -1046,6 +1046,11 @@ code.inline { background: var(--muted); padding: 3px 9px; border-radius: 6px; fo
   background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
 }
 .tb-group .btn-ghost:disabled { opacity: 0.5; cursor: not-allowed; }
+/* §۱۰.۸ — دکمه‌های «برگشت به عقب / رفتن به جلو» با برچسب متنی کنار آیکون */
+.t2c-undo-btn { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 700; }
+.t2c-undo-btn svg { width: 15px; height: 15px; flex-shrink: 0; }
+.t2c-undo-label { white-space: nowrap; }
+@media (max-width: 640px) { .t2c-undo-label { display: none; } }
 .btn-pdf {
   background: var(--red-soft); color: var(--red); border: 1px solid color-mix(in srgb, var(--red) 40%, transparent);
   font-weight: 700;

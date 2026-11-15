@@ -215,13 +215,15 @@ function ActivityNameTick({ x, y, payload }: { x?: number; y?: number; payload?:
   )
 }
 
-/** واحد محور عمودی — بالای محور؛ RLM برای جهت درست پرانتز در متن RTL §۱۴ */
-function SecondsUnitLabel({ viewBox }: { viewBox?: { x: number; y: number; width: number; height: number } }) {
-  if (!viewBox) return null
+/** متن واحد «(ثانیه)» — خط مستقل بالای نمودار (HTML)؛ دیگر داخل SVG نیست تا
+ *  هرگز به مقادیر تیک محور عمودی نچسبد (بازبینی نهایی §۷). */
+function SecondsUnitCaption() {
   return (
-    <text x={viewBox.x + 2} y={viewBox.y + 4} fontSize={9} fill="var(--muted-foreground)" dominantBaseline="hanging">
-      {'\u200F(ثانیه)\u200F'}
-    </text>
+    <div className="flex w-full justify-start px-1 pb-1" dir="ltr">
+      <span className="text-[10px] font-medium leading-none text-muted-foreground">
+        {'\u200F(\u062B\u0627\u0646\u06CC\u0647)\u200F'}
+      </span>
+    </div>
   )
 }
 
@@ -293,7 +295,10 @@ function ActivitiesWidget({ data }: { data: ProjectDashboardDto }) {
   return (
     <div className="space-y-4">
       {chartData.length > 0 ? (
-        <div className="h-44 w-full" dir="ltr">
+        <div className="w-full">
+          {/* بازبینی نهایی §۷ — واحد روی خط مستقل بالای نمودار + ارتفاع بیشتر (h-64/sm:h-72) */}
+          <SecondsUnitCaption />
+          <div className="h-64 w-full sm:h-72" dir="ltr">
           <ChartContainer config={stChartConfig} className="h-full w-full">
             <BarChart data={chartData} margin={{ top: 8, right: 8, left: 8, bottom: 8 }}>
               <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="var(--border)" />
@@ -304,7 +309,7 @@ function ActivitiesWidget({ data }: { data: ProjectDashboardDto }) {
                 height={64}
                 tick={<ActivityNameTick />}
               />
-              <YAxis tick={{ fontSize: 10 }} width={48} label={<SecondsUnitLabel />} />
+              <YAxis tick={{ fontSize: 10 }} width={48} />
               <ChartTooltip content={<ChartTooltipContent />} />
               {/* v1.5.2 §۱۱ — ضخامت میله‌ها مقیاس ثابت و کنترل‌شده (سقف ۳۲px)؛
                   با کم شدن تعداد فعالیت‌ها میله‌ها بزرگ نمی‌شوند و فاصله‌ها
@@ -323,6 +328,7 @@ function ActivitiesWidget({ data }: { data: ProjectDashboardDto }) {
               </Bar>
             </BarChart>
           </ChartContainer>
+          </div>
         </div>
       ) : (
         <p className="rounded-lg border border-dashed p-3 text-sm text-muted-foreground">

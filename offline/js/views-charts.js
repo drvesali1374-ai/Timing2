@@ -238,7 +238,7 @@
     if (h.index < 0 || histBusy) return;
     var e = h.entries[h.index];
     histBusy = true;
-    try { e.undo(); h.index--; UI.toast('واگردانی شد: ' + e.label); }
+    try { e.undo(); h.index--; UI.toast('برگشت به عقب: ' + e.label); }
     catch (err) { UI.toastError(err); }
     histBusy = false;
     if (histRender) histRender();
@@ -248,7 +248,7 @@
     if (h.index >= h.entries.length - 1 || histBusy) return;
     var e = h.entries[h.index + 1];
     histBusy = true;
-    try { e.redo(); h.index++; UI.toast('ازنو اعمال شد: ' + e.label); }
+    try { e.redo(); h.index++; UI.toast('رفتن به جلو: ' + e.label); }
     catch (err) { UI.toastError(err); }
     histBusy = false;
     if (histRender) histRender();
@@ -485,18 +485,18 @@
             class: 'btn btn-sm btn-ghost', type: 'button', 'aria-label': 'بازخوانی نمودار از فعالیت‌ها',
             onclick: function () { render(); },
           }, U.icon('refresh'), 'بازخوانی')),
-        /* ── §۱۰.۸ — Undo/Redo ── */
-        U.h('div', { class: 'tb-group', role: 'group', 'aria-label': 'واگردانی و ازنو' },
+        /* ── §۱۰.۸ — Undo/Redo — نام‌گذاری درخواستی کاربر: «برگشت به عقب» / «رفتن به جلو» ── */
+        U.h('div', { class: 'tb-group', role: 'group', 'aria-label': 'برگشت به عقب و رفتن به جلو' },
           U.h('button', {
-            class: 'icon-btn sm', type: 'button', disabled: hist.index < 0,
-            'aria-label': 'واگردانی (Ctrl+Z)', title: hist.index >= 0 ? 'واگردانی: ' + hist.entries[hist.index].label : 'واگردانی',
+            class: 'btn btn-ghost btn-sm t2c-undo-btn', type: 'button', disabled: hist.index < 0,
+            'aria-label': 'برگشت به عقب (Ctrl+Z)', title: hist.index >= 0 ? 'برگشت به عقب: ' + hist.entries[hist.index].label : 'برگشت به عقب',
             onclick: function () { histUndo(projectId); },
-          }, lucideIcon(SVG_UNDO)),
+          }, lucideIcon(SVG_UNDO), U.h('span', { class: 't2c-undo-label', text: 'برگشت به عقب' })),
           U.h('button', {
-            class: 'icon-btn sm', type: 'button', disabled: hist.index >= hist.entries.length - 1,
-            'aria-label': 'ازنو (Ctrl+Y)', title: hist.index < hist.entries.length - 1 ? 'ازنو: ' + hist.entries[hist.index + 1].label : 'ازنو',
+            class: 'btn btn-ghost btn-sm t2c-undo-btn', type: 'button', disabled: hist.index >= hist.entries.length - 1,
+            'aria-label': 'رفتن به جلو (Ctrl+Y)', title: hist.index < hist.entries.length - 1 ? 'رفتن به جلو: ' + hist.entries[hist.index + 1].label : 'رفتن به جلو',
             onclick: function () { histRedo(projectId); },
-          }, lucideIcon(SVG_REDO))),
+          }, lucideIcon(SVG_REDO), U.h('span', { class: 't2c-undo-label', text: 'رفتن به جلو' }))),
         U.h('div', { class: 'zoom-group', role: 'group', 'aria-label': 'کنترل زوم' },
           U.h('button', {
             class: 'icon-btn sm', type: 'button', 'aria-label': 'کوچک‌نمایی', title: 'کوچک‌نمایی',
@@ -1626,7 +1626,7 @@
         var css = document.createElement('style');
         css.id = 'chart-pdf-print-css';
         css.textContent = ''
-          + '#chart-pdf-root { --card:#ffffff; --foreground:#0c1424; --border:#c9cedb; --line-strong:#b9c1d0; --muted-foreground:#5a6b85; --surface-2:#f4f6fa; --surface-3:#eef2f7; --brand:#7257ff; --brand-2:#9a7cff; --brand-soft:#efeaff; --cyan:#0e93a4; --cyan-soft:#e5fbfd; --green:#18b77b; --green-soft:#dcf8ec; --red:#ef5b6b; --red-soft:#fde5e8; --amber:#b9831b; --amber-soft:#fff4d7; --radius:12px; color-scheme: light; }'
+          + '#chart-pdf-root { --card:#ffffff; --foreground:#0c1424; --border:#c9cedb; --line-strong:#b9c1d0; --muted-foreground:#5a6b85; --surface-2:#f4f6fa; --surface-3:#eef2f7; --brand:#7257ff; --brand-2:#9a7cff; --brand-soft:#efeaff; --cyan:#0e93a4; --cyan-soft:#e5fbfd; --green:#18b77b; --green-soft:#dcf8ec; --red:#ef5b6b; --red-soft:#fde5e8; --amber:#b9831b; --amber-soft:#fff4d7; --radius:12px; color-scheme: light; color:#0c1424; }'
           + '#chart-pdf-root .chart-pdf-page { position: relative; background: #fff; overflow: hidden; box-sizing: border-box; }'
           + '#chart-pdf-root .chart-pdf-page + .chart-pdf-page { page-break-before: always; }'
           + '#chart-pdf-root .chart-pdf-title { font: bold 12px Vazirmatn, sans-serif; color: #111; text-align: center; margin-bottom: 6px; direction: rtl; }'
@@ -1637,10 +1637,14 @@
           + '#chart-pdf-root .chart-pdf-crop-bl { bottom: 3mm; left: 3mm; border-bottom: 1px solid #555; border-left: 1px solid #555; }'
           + '#chart-pdf-root .chart-pdf-crop-br { bottom: 3mm; right: 3mm; border-bottom: 1px solid #555; border-right: 1px solid #555; }'
           + '#chart-pdf-root .chart-anchor { display: none !important; }'
-          + '#chart-pdf-root .chart-node { box-shadow: none; }'
+          + '#chart-pdf-root .chart-node { box-shadow: none; background:#ffffff !important; color:#0c1424 !important; border-color:#c9cedb !important; }'
           + '@media print {'
           + ' body > *:not(#chart-pdf-root) { display: none !important; }'
           + ' #chart-pdf-root { display: block !important; }'
+          /* §۱۰.۷ ریشه‌ای — CSS چاپ گزارش‌ها (app.css) «body *» را
+             visibility:hidden می‌کند؛ بدون بازگرداندن آن برای کلون نمودار،
+             خروجی PDF «کاملاً سفید» می‌شد (علت واقعی باگ گزارش‌شده). */
+          + ' #chart-pdf-root, #chart-pdf-root * { visibility: visible !important; }'
           + ' #chart-pdf-root .chart-pdf-page { break-inside: avoid; }'
           + ' #chart-pdf-root * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }'
           + '}'

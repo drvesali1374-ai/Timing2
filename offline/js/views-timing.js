@@ -1169,8 +1169,8 @@
               U.h('span', { class: 'text-faint', style: { fontWeight: 400 } }, ' — ' + g.activityName)));
             g.list.forEach(function (cand) {
               var cross = ownActivityId != null && cand.activityId !== ownActivityId;
-              var card = U.h('label', { class: 'radio-card' + (selectedId === cand.id ? ' selected' : '') },
-                U.h('input', { type: 'radio', name: 't2t-add-rel', checked: selectedId === cand.id, style: { accentColor: 'var(--brand)', marginTop: '3px' } }),
+              var card = U.h('label', { class: 'radio-card' + (selectedId === cand.elementId ? ' selected' : '') },
+                U.h('input', { type: 'radio', name: 't2t-add-rel', checked: selectedId === cand.elementId, style: { accentColor: 'var(--brand)', marginTop: '3px' } }),
                 U.h('span', { class: 'flex min-w-0 flex-1 items-center gap-1.5' },
                   U.h('span', { class: 'text-sm font-medium truncate', text: cand.name }),
                   cross
@@ -1181,7 +1181,9 @@
                       })
                     : null));
               card.addEventListener('change', function () {
-                selectedId = cand.id;
+                /* رفع باگ بازبینی نهایی §۶ — کاتالوگ عنصرها کلید «elementId» دارد نه «id»؛
+                   پیش از این selectedId همیشه undefined می‌شد و دکمهٔ افزودن بی‌اثر بود */
+                selectedId = cand.elementId;
                 list.querySelectorAll('.radio-card').forEach(function (rc) { rc.classList.remove('selected'); });
                 card.classList.add('selected');
               });
