@@ -113,6 +113,9 @@ export const elementCreateSchema = z.object({
 
 export const elementUpdateSchema = elementCreateSchema.partial().extend({
   expectedUpdatedAt: z.string().datetime().optional(),
+  // v1.5.2 §۷.۲ — حالت ورود پیش‌فرض عنصر (SEQ/INT): تغییر فرمت ردیف اصلی از
+  // برگهٔ زمان‌سنجی ذخیره می‌شود تا پس از Refresh همان فرمت نمایش داده شود.
+  defaultEntryMode: z.enum(['SEQ', 'INT']).optional(),
 })
 
 export const reorderSchema = z.object({

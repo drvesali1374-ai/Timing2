@@ -173,12 +173,15 @@ export function SheetGrid({
   useEffect(() => cancelDiag, [cancelDiag])
 
   // ستون مؤثر یک ردیف شبکه: ردیف اصلی → ستون خود عنصر؛
-  // زیرردیف موازی → ستون ترکیبی INT عنصر مقابل (v1.5.2 §۲-۸)
+  // زیرردیف موازی → ستون عنصر مقابل با «فرمت ردیف والد» —
+  // v1.5.2 §۷.۲: تغییر فرمت عنصر اصلی به تمام زیرردیف‌های موازی وابسته
+  // منتقل می‌شود (هم‌زمان، هم‌ State هم نمایش؛ عناصر نامرتبط دست‌نخورده)
   const columnOfRow = useCallback(
     (row: GridRow | undefined): ElementColumn | undefined => {
       if (!row) return undefined
       if (row.kind === 'ELEMENT') return columns[row.elementIndex]
-      return { index: -1, id: row.otherElementId, name: row.otherName, entryMode: 'INT' }
+      const parentCol = columns[row.parentElementIndex]
+      return { index: -1, id: row.otherElementId, name: row.otherName, entryMode: parentCol ? parentCol.entryMode : 'INT' }
     },
     [columns]
   )
@@ -214,7 +217,7 @@ export function SheetGrid({
       const cycle = cycles[colIdx]
       const column = columnOfRow(row)
       if (!row || !cycle || !column) return
-      // زیرردیف موازی همیشه بازه‌ای است؛ ردیف اصلی از حالت ورود ستون پیروی می‌کند
+      // v1.5.2 §۷.۲ — زیرردیف موازی از فرمت ردیف والد پیروی می‌کند (SEQ/INT)
       const obs = findObservation(cycle, column.id)
       const v = cellEditValue(obs, method)
       setEditing({
@@ -787,6 +790,7 @@ export function SheetGrid({
                 {cycles.map((cycle, colIdx) => {
                   // v1.5.2 §۲-۸ — زیرردیف موازی: زمان عادی «عنصر مقابل» در همین چرخه؛
                   // همان ElementObservation ردیف اصلی آن عنصر (در برگهٔ فعالیت مقابل نیز دیده می‌شود)
+                  const column = columnOfRow(row)
                   const otherObs = findObservation(cycle, row.otherElementId)
                   const isActive = active.rowIdx === rowIdx && active.colIdx === colIdx
                   const isEditing = editing != null && editing.rowIdx === rowIdx && editing.colIdx === colIdx
@@ -815,7 +819,9 @@ export function SheetGrid({
                         } ${excluded ? 'text-faint line-through' : ''} ${suspect ? 'bg-amber-soft/50' : ''} ${invalid || err ? 'bg-red-soft/60' : ''} ${partialInterval ? 'ring-1 ring-inset ring-amber/60' : ''}`}
                       >
                         {isEditing ? (
-                          // گروه بصری «از/تا» — همان ردیف‌های اصلی؛ v1.5.2 §۵ جهت RTL
+                          // v1.5.2 §۷.۲ — زیرردیف موازی از فرمت والد پیروی می‌کند:
+                          // INT = گروه بصری «از/تا» (§۵ جهت RTL)؛ SEQ = ورودی تکی
+                          column?.entryMode === 'INT' ? (
                           <span
                             dir="rtl"
                             className="inline-flex items-end justify-center gap-0.5 rounded-md border bg-background px-1 py-0.5 focus-within:border-brand focus-within:ring-1 focus-within:ring-brand"
@@ -874,6 +880,25 @@ export function SheetGrid({
                               />
                             </label>
                           </span>
+                          ) : (
+                            <input
+                              ref={seqInputRef}
+                              value={editing.seq}
+                              onChange={(e) => setEditing({ ...editing, seq: e.target.value })}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Escape') setEditing(null)
+                                if (e.key === 'Enter') {
+                                  e.preventDefault()
+                                  finishEdit('down')
+                                }
+                              }}
+                              onBlur={() => finishEdit('none')}
+                              aria-label={`زمان عنصر موازی ${row.otherName} چرخهٔ ${cycle.cycleNo}`}
+                              className="num w-20 rounded-md border bg-background px-1 py-0.5 text-center text-xs focus-visible:outline-2 focus-visible:outline-ring"
+                              inputMode="decimal"
+                              dir="ltr"
+                            />
+                          )
                         ) : (
                           <>
                             <span className="flex min-w-0 flex-wrap items-center justify-center gap-1">

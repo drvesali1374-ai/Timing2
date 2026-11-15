@@ -319,6 +319,8 @@ export async function updateElement(elementId: string, input: ElementUpdateInput
   const data: Record<string, unknown> = {}
   if (input.name !== undefined) data.name = input.name
   if (input.description !== undefined) data.description = input.description
+  // v1.5.2 §۷.۲ — فرمت ورود پیش‌فرض عنصر از برگهٔ زمان‌سنجی قابل ذخیره است
+  if (input.defaultEntryMode !== undefined) data.defaultEntryMode = input.defaultEntryMode
   // v1.5.0 §۳ — elementType دیگر پارامتر ویرایش نیست (ستون legacy دست‌نخورده می‌ماند)
   const updated = await db.workElement.update({ where: { id: elementId }, data })
   await recordAudit({

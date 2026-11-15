@@ -1049,8 +1049,13 @@
           class: 't2t-entry-chip', type: 'button',
           title: mode === 'SEQ' ? 'ورودی ترتیبی — برای بازه‌ای تغییر دهید' : 'ورودی بازه‌ای — برای ترتیبی تغییر دهید',
           onclick: function () {
+            var next = mode === 'SEQ' ? 'INT' : 'SEQ';
             var m = entryModeMap[sessionId] || (entryModeMap[sessionId] = {});
-            m[el.id] = mode === 'SEQ' ? 'INT' : 'SEQ';
+            m[el.id] = next;
+            /* v1.5.2 §۷.۲ — ماندگاری فرمت پس از Refresh؛ زیرردیف‌های موازی
+               وابسته از همان entryModeOf والد پیروی می‌کنند */
+            try { DB.updateElement(el.id, { defaultEntryMode: next }); }
+            catch (err) { UI.toastError(err); }
             ctx.render();
           },
         }, mode === 'SEQ' ? (method === 'CONTINUOUS' ? 'قرائت' : 'مدت') : 'شروع/پایان'));
@@ -1451,6 +1456,8 @@
        اصلی آن عنصر (بازهٔ از/تا؛ سلول وضعیت/مقدار هم‌پوشانی حذف شد) ── */
     function buildParallelTd(cycle, colIdx, grow, rowIdx) {
       var otherEl = { id: grow.otherId, name: grow.otherName };
+      /* v1.5.2 §۷.۲ — فرمت زیرردیف موازی از ردیف والد پیروی می‌کند (SEQ/INT) */
+      var mode = entryModeOf(sessionId, grow.parent);
       var obs = null;
       for (var i = 0; i < (cycle.observations || []).length; i++) {
         if (cycle.observations[i].workElementId === grow.otherId) { obs = cycle.observations[i]; break; }
@@ -1500,37 +1507,59 @@
           value: value,
           'aria-label': part === 'start'
             ? 'شروع بازهٔ عنصر موازی ' + otherEl.name
-            : 'پایان بازهٔ عنصر موازی ' + otherEl.name + ' چرخهٔ ' + U.formatInt(cycle.cycleNo),
+            : part === 'end'
+              ? 'پایان بازهٔ عنصر موازی ' + otherEl.name + ' چرخهٔ ' + U.formatInt(cycle.cycleNo)
+              : 'زمان عنصر موازی ' + otherEl.name + ' چرخهٔ ' + U.formatInt(cycle.cycleNo),
           disabled: excluded,
           dataset: { row: String(rowIdx), col: String(colIdx), part: part },
-          style: { width: '44px' },
+          style: part === 'seq' ? { width: '100%' } : { width: '44px' },
         });
       }
-      var startIn = null, endIn = null;
+      var startIn = null, endIn = null, seqIn = null;
 
       function liveValidate() {
         clearError();
-        var a = readNum(startIn.value);
-        var b = readNum(endIn.value);
-        if (a.bad || b.bad) showError('مقدار عددی معتبر نیست (ارقام فارسی یا لاتین)');
-        else if ((!a.empty && a.n < 0) || (!b.empty && b.n < 0)) showError('زمان منفی مجاز نیست');
-        else if (!a.empty && !b.empty && b.n <= a.n) showError('پایان بازه باید بزرگ‌تر از شروع آن باشد');
+        if (mode === 'INT') {
+          var a = readNum(startIn.value);
+          var b = readNum(endIn.value);
+          if (a.bad || b.bad) showError('مقدار عددی معتبر نیست (ارقام فارسی یا لاتین)');
+          else if ((!a.empty && a.n < 0) || (!b.empty && b.n < 0)) showError('زمان منفی مجاز نیست');
+          else if (!a.empty && !b.empty && b.n <= a.n) showError('پایان بازه باید بزرگ‌تر از شروع آن باشد');
+        } else {
+          var q = readNum(seqIn.value);
+          if (q.bad) showError('مقدار عددی معتبر نیست (ارقام فارسی یا لاتین)');
+          else if (!q.empty && q.n < 0) showError('زمان منفی مجاز نیست');
+        }
       }
 
       function commitCell() {
         liveValidate();
         if (errEl) { scheduleRender(); return; }
-        var a = readNum(startIn.value);
-        var b = readNum(endIn.value);
         var cell;
-        if (a.empty && b.empty) {
-          if (!obs || (obs.rawDuration === null && obs.cumulativeReading === null && obs.startOffset === null && obs.endOffset === null)) { scheduleRender(); return; }
-          cell = { cycleNo: cycle.cycleNo, workElementId: grow.otherId, rawDuration: null, cumulativeReading: null, startOffset: null, endOffset: null };
+        if (mode === 'INT') {
+          var a = readNum(startIn.value);
+          var b = readNum(endIn.value);
+          if (a.empty && b.empty) {
+            if (!obs || (obs.rawDuration === null && obs.cumulativeReading === null && obs.startOffset === null && obs.endOffset === null)) { scheduleRender(); return; }
+            cell = { cycleNo: cycle.cycleNo, workElementId: grow.otherId, rawDuration: null, cumulativeReading: null, startOffset: null, endOffset: null };
+          } else {
+            var sv = a.empty ? null : a.n;
+            var ev = b.empty ? null : b.n;
+            if (obs && obs.startOffset === sv && obs.endOffset === ev) { scheduleRender(); return; }
+            cell = { cycleNo: cycle.cycleNo, workElementId: grow.otherId, rawDuration: null, cumulativeReading: null, startOffset: sv, endOffset: ev };
+          }
         } else {
-          var sv = a.empty ? null : a.n;
-          var ev = b.empty ? null : b.n;
-          if (obs && obs.startOffset === sv && obs.endOffset === ev) { scheduleRender(); return; }
-          cell = { cycleNo: cycle.cycleNo, workElementId: grow.otherId, rawDuration: null, cumulativeReading: null, startOffset: sv, endOffset: ev };
+          var q2 = readNum(seqIn.value);
+          if (q2.empty) {
+            if (!obs || (obs.rawDuration === null && obs.cumulativeReading === null)) { scheduleRender(); return; }
+            cell = { cycleNo: cycle.cycleNo, workElementId: grow.otherId, rawDuration: null, cumulativeReading: null, startOffset: null, endOffset: null };
+          } else {
+            var cur = method === 'SNAPBACK' ? (obs ? obs.rawDuration : null) : (obs ? obs.cumulativeReading : null);
+            if (cur === q2.n && obs && obs.startOffset === null && obs.endOffset === null) { scheduleRender(); return; }
+            cell = method === 'SNAPBACK'
+              ? { cycleNo: cycle.cycleNo, workElementId: grow.otherId, rawDuration: q2.n, cumulativeReading: null, startOffset: null, endOffset: null }
+              : { cycleNo: cycle.cycleNo, workElementId: grow.otherId, rawDuration: null, cumulativeReading: q2.n, startOffset: null, endOffset: null };
+          }
         }
         if (withUndo(sessionId, 'ثبت زمان عنصر موازی', function () { DB.putCells(sessionId, [cell]); })) {
           invalidateSheetCache(sessionId);
@@ -1540,19 +1569,25 @@
 
       if (!editable || excluded) {
         var txt = '';
-        if (obs && obs.startOffset !== null && obs.endOffset !== null) {
-          txt = U.formatTimeValue(obs.startOffset) + ' – ' + U.formatTimeValue(obs.endOffset);
-        } else if (obs && obs.startOffset !== null) {
-          txt = U.formatTimeValue(obs.startOffset) + ' – ؟';
-        } else if (obs && obs.endOffset !== null) {
-          txt = '؟ – ' + U.formatTimeValue(obs.endOffset);
+        if (mode === 'INT') {
+          if (obs && obs.startOffset !== null && obs.endOffset !== null) {
+            txt = U.formatTimeValue(obs.startOffset) + ' – ' + U.formatTimeValue(obs.endOffset);
+          } else if (obs && obs.startOffset !== null) {
+            txt = U.formatTimeValue(obs.startOffset) + ' – ؟';
+          } else if (obs && obs.endOffset !== null) {
+            txt = '؟ – ' + U.formatTimeValue(obs.endOffset);
+          } else if (obs) {
+            txt = obs.rawDuration !== null ? U.formatTimeValue(obs.rawDuration) : (obs.cumulativeReading !== null ? U.formatTimeValue(obs.cumulativeReading) : '');
+          }
+        } else if (obs) {
+          txt = obs.rawDuration !== null ? U.formatTimeValue(obs.rawDuration) : (obs.cumulativeReading !== null ? U.formatTimeValue(obs.cumulativeReading) : '');
         }
         row.appendChild(U.h('span', { class: 'num text-xs font-medium', text: txt || '—', style: excluded ? { textDecoration: 'line-through', color: 'var(--faint)' } : null }));
         if (suspect && obs) {
           td.style.cursor = 'pointer';
           td.addEventListener('click', function () { openSuspectDialog(cycle, obs, otherEl.name); });
         }
-      } else {
+      } else if (mode === 'INT') {
         startIn = makeInput('start', roundEdit(obs ? obs.startOffset : null));
         endIn = makeInput('end', roundEdit(obs ? obs.endOffset : null));
         [startIn, endIn].forEach(function (inp) {
@@ -1568,6 +1603,13 @@
           U.h('label', { class: 't2t-int-part' },
             U.h('span', { class: 't2t-int-label', 'aria-hidden': 'true', text: 'تا' }),
             endIn)));
+      } else {
+        /* v1.5.2 §۷.۲ — SEQ: ورودی تکی (مدت/قرائت) هم‌ارز ردیف‌های اصلی */
+        var pval = obs ? (obs.rawDuration !== null ? obs.rawDuration : obs.cumulativeReading) : null;
+        seqIn = makeInput('seq', roundEdit(pval));
+        seqIn.addEventListener('input', liveValidate);
+        seqIn.addEventListener('change', commitCell);
+        row.appendChild(seqIn);
       }
 
       if (suspect && obs && editable) {

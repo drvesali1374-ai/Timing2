@@ -56,7 +56,7 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Input } from '@/components/ui/input'
 import { HelpDot } from '@/components/common/HelpDot'
 import { SaveIndicator } from '@/components/common/SaveIndicator'
-import { timingApi, parallelApi, type CycleRowDto, type ObservationCellDto, type RemovedCycleDataDto, type SessionSheetDto } from '@/lib/api/endpoints'
+import { structureApi, timingApi, parallelApi, type CycleRowDto, type ObservationCellDto, type RemovedCycleDataDto, type SessionSheetDto } from '@/lib/api/endpoints'
 import { qk } from '@/lib/api/keys'
 import type { DisplayPrefs as Prefs } from '@/lib/format'
 import { formatInt, formatTimeValue } from '@/lib/format'
@@ -678,12 +678,17 @@ export function SheetPanel({
           prefs={prefs}
           editable={editable}
           projectCatalog={projectCatalog}
-          onToggleEntryMode={(elementId) =>
-            setEntryOverrides((s) => ({
-              ...s,
-              [elementId]: (s[elementId] ?? (columns.find((c) => c.id === elementId)?.entryMode ?? 'SEQ')) === 'SEQ' ? 'INT' : 'SEQ',
-            }))
-          }
+          onToggleEntryMode={(elementId) => {
+            /* v1.5.2 §۷.۲ — تغییر فرمت ردیف اصلی: فرمت تمام زیرردیف‌های موازی
+               وابسته از همان ستون پیروی می‌کنند (columnOfRow) و فرمت در عنصر
+               ذخیره می‌شود تا پس از Refresh همان فرمت نمایش داده شود. */
+            const current = entryOverrides[elementId] ?? (columns.find((c) => c.id === elementId)?.entryMode ?? 'SEQ')
+            const next = current === 'SEQ' ? 'INT' : 'SEQ'
+            setEntryOverrides((s) => ({ ...s, [elementId]: next }))
+            structureApi.updateElement(elementId, { defaultEntryMode: next }).catch((err) => {
+              toast.error(err instanceof Error ? err.message : 'ذخیرهٔ فرمت ورود عنصر ناموفق بود')
+            })
+          }}
           commitCell={commitCell}
           onCellError={onCellError}
           onDeleteCycle={(c) => void deleteCycle(c)}

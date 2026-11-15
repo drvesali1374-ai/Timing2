@@ -559,6 +559,8 @@
     if (!e) throw new Error('عنصر کاری یافت نشد.');
     if (patch.name !== undefined) e.name = patch.name;
     if (patch.description !== undefined) e.description = patch.description;
+    // v1.5.2 §۷.۲ — فرمت ورود پیش‌فرض عنصر از برگهٔ زمان‌سنجی قابل ذخیره است
+    if (patch.defaultEntryMode !== undefined && (patch.defaultEntryMode === 'SEQ' || patch.defaultEntryMode === 'INT')) e.defaultEntryMode = patch.defaultEntryMode;
     // v1.5.0 §۳ — elementType دیگر پارامتر ویرایش نیست (ستون legacy دست‌نخورده می‌ماند)
     touch(e);
     recordAudit({ entityType: 'WorkElement', entityId: id, action: 'UPDATE', entityName: e.name, projectId: projectIdOfActivity(e.activityId) });

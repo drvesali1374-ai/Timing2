@@ -147,6 +147,8 @@ export function MobileSheet({
                   <MobileParallelRow
                     key={row.displayKey}
                     row={row}
+                    /* v1.5.2 §۷.۲ — زیرردیف موازی از فرمت ردیف والد پیروی می‌کند */
+                    parentEntryMode={columns[row.parentElementIndex]?.entryMode ?? 'INT'}
                     sheet={sheet}
                     cycles={cycles}
                     prefs={prefs}
@@ -478,6 +480,7 @@ function MobileElementCell({
 
 function MobileParallelRow({
   row,
+  parentEntryMode,
   sheet,
   cycles,
   prefs,
@@ -487,6 +490,8 @@ function MobileParallelRow({
   onCellError,
 }: {
   row: Extract<GridRow, { kind: 'PARALLEL' }>
+  /** v1.5.2 §۷.۲ — فرمت ردیف والد (SEQ/INT)؛ زیرردیف موازی همان فرمت را می‌گیرد */
+  parentEntryMode: 'SEQ' | 'INT'
   sheet: SessionSheetDto
   cycles: CycleRowDto[]
   prefs: Prefs
@@ -495,8 +500,8 @@ function MobileParallelRow({
   commitCell: (cycle: CycleRowDto, column: ElementColumn, payload: CellPayload) => void
   onCellError: (key: string, message: string) => void
 }) {
-  // ستون ترکیبی INT برای عنصر مقابل — همان مسیر ذخیرهٔ ردیف‌های اصلی
-  const column: ElementColumn = { index: -1, id: row.otherElementId, name: row.otherName, entryMode: 'INT' }
+  // ستون عنصر مقابل با فرمت والد — همان مسیر ذخیرهٔ ردیف‌های اصلی
+  const column: ElementColumn = { index: -1, id: row.otherElementId, name: row.otherName, entryMode: parentEntryMode }
   return (
     <tr className="t2-subrow">
       <th scope="row" className="sticky right-0 z-10 border-b border-l bg-surface-2/50 px-2 py-1 text-right backdrop-blur">
@@ -506,7 +511,7 @@ function MobileParallelRow({
             <span className="h-4 w-2 shrink-0 rounded-es border-b-2 border-r-2 border-brand/30" aria-hidden />
             <p
               className="flex min-w-0 items-center gap-1 truncate text-[10px] font-bold text-muted-foreground"
-              title={`عنصر موازی: ${row.otherName} — زمان آن به‌صورت بازهٔ از/تا در همین چرخه ثبت می‌شود${row.crossActivity ? ` (فعالیت ${row.otherActivityName ?? '؟'} / ایستگاه ${row.otherStationName ?? '؟'})` : ''}`}
+              title={`عنصر موازی: ${row.otherName} — زمان آن در همین چرخه ثبت می‌شود (فرمت ورود از ردیف والد پیروی می‌کند)${row.crossActivity ? ` (فعالیت ${row.otherActivityName ?? '؟'} / ایستگاه ${row.otherStationName ?? '؟'})` : ''}`}
             >
               <span className="truncate">↲ موازی: {row.otherName}</span>
               {row.crossActivity && (
@@ -577,20 +582,28 @@ function MobileParallelCell({
   const v = cellEditValue(obs, method)
   const [start, setStart] = useState(v.start)
   const [end, setEnd] = useState(v.end)
+  const [seq, setSeq] = useState(v.seq)
   // همگام‌سازی با تغییر سرور (Undo/Redo) — کلید محتوایی پایدار
-  const [prevKey, setPrevKey] = useState(`${obs?.startOffset ?? 'n'}:${obs?.endOffset ?? 'n'}`)
-  const key = `${obs?.startOffset ?? 'n'}:${obs?.endOffset ?? 'n'}`
+  const [prevKey, setPrevKey] = useState(`${obs?.startOffset ?? 'n'}:${obs?.endOffset ?? 'n'}:${obs?.rawDuration ?? 'n'}:${obs?.cumulativeReading ?? 'n'}`)
+  const key = `${obs?.startOffset ?? 'n'}:${obs?.endOffset ?? 'n'}:${obs?.rawDuration ?? 'n'}:${obs?.cumulativeReading ?? 'n'}`
   if (key !== prevKey) {
     setPrevKey(key)
     const nv = cellEditValue(obs, method)
     setStart(nv.start)
     setEnd(nv.end)
+    setSeq(nv.seq)
   }
 
   const commit = () => {
-    const sText = start.trim()
-    const eText = end.trim()
-    const parsed = sText === '' && eText === '' ? ({ kind: 'EMPTY' } as const) : parseCellInput(sText === '' || eText === '' ? (sText || eText) : `${sText}-${eText}`)
+    // v1.5.2 §۷.۲ — مسیر ثبت از فرمت والد پیروی می‌کند
+    let parsed
+    if (column.entryMode === 'INT') {
+      const sText = start.trim()
+      const eText = end.trim()
+      parsed = sText === '' && eText === '' ? ({ kind: 'EMPTY' } as const) : parseCellInput(sText === '' || eText === '' ? (sText || eText) : `${sText}-${eText}`)
+    } else {
+      parsed = parseCellInput(seq)
+    }
     const result = payloadFromParsed(parsed, column, method)
     if ('error' in result) {
       onCellError(`${column.id}:${cycle.id}`, result.error)
@@ -612,7 +625,8 @@ function MobileParallelCell({
       } ${invalid ? 'bg-red-soft/60' : ''} ${excluded ? 'bg-muted/60' : ''} ${partialInterval ? 'ring-1 ring-inset ring-amber/60' : ''}`}
     >
       {editable ? (
-        // v1.5.2 §۵ — جهت گروه RTL: «از» در راست، «تا» در چپ؛ ورودی‌ها LTR
+        // v1.5.2 §۷.۲ — فرمت از ردیف والد: INT = «از/تا» (§۵ RTL)؛ SEQ = ورودی تکی
+        column.entryMode === 'INT' ? (
         <span dir="rtl" className="inline-flex items-end justify-center gap-0.5 rounded-md border bg-background px-0.5 py-0.5">
           <label className="flex min-w-0 flex-col items-center">
             <span className="text-[8px] font-bold leading-none text-muted-foreground" aria-hidden>
@@ -644,6 +658,17 @@ function MobileParallelCell({
             />
           </label>
         </span>
+        ) : (
+          <input
+            value={seq}
+            onChange={(e) => setSeq(e.target.value)}
+            onBlur={commit}
+            aria-label={`زمان عنصر موازی ${row.otherName} چرخهٔ ${cycle.cycleNo}`}
+            className="num w-16 rounded-md border bg-background px-1 py-1 text-center text-xs focus-visible:outline-2 focus-visible:outline-ring"
+            inputMode="decimal"
+            dir="ltr"
+          />
+        )
       ) : (
         <span className="num block px-1 py-2 text-xs">{cellDisplayValue(obs, method, prefs)}</span>
       )}
