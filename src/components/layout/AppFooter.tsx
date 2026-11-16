@@ -18,6 +18,11 @@ export function AppFooter({ compact = false }: { compact?: boolean }) {
           <span className="font-bold text-muted-foreground">زمان‌سنجی صنعتی</span>
           <span aria-hidden>·</span>
           <span>نسخه اول — کامل (۷ فاز)</span>
+          <span aria-hidden>·</span>
+          {/* شناسهٔ نسخه — برای اطمینان کاربر از به‌روز بودن (راند ۲ اصلاحات بازبینی) */}
+          <span className="font-mono" title="شناسهٔ ساخت — برای اطمینان از به‌روز بودن نسخه">
+            v1.5.2-r2
+          </span>
         </p>
         <p className="flex items-center gap-3">
           <span className="flex items-center gap-1" title="بدون هیچ درخواست خارجی در زمان اجرا">

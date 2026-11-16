@@ -23,12 +23,12 @@
   var activeTab = 'assess';
   var selectedTableId = null;
 
-  // ── محتوای راهنمای آیکونی (عیناً از مشخصات) ──
+  // ── محتوای راهنمای آیکونی (عیناً از مشخصات) — v1.5.3 §۱: مدل اپراتور × عنصر ──
   var MAIN_HELP = {
-    what: 'ضریب عملکرد R = 1 + مهارت + تلاش + شرایط + یکنواختی؛ برای هر عنصر یک‌بار ثبت و به تمام مشاهدات همان عنصر از همه اپراتورها اعمال می‌شود (تصمیم مالک محصول).',
-    input: 'برای هر عنصر، جدول مرجع و درجه هر عامل را انتخاب کنید؛ امکان کپی از عنصر مشابه نیز وجود دارد.',
+    what: 'ضریب عملکرد R = 1 + مهارت + تلاش + شرایط + یکنواختی؛ ارزیابی برای هر «عنصر کاری × اپراتور» ثبت می‌شود، چون یک اپراتور ممکن است در عنصری ماهر و در عنصر دیگر (مثلاً بسته‌بندی) متوسط باشد.',
+    input: 'ثبت ارزیابی از دکمهٔ کوچک کنار نام هر عنصر در جدول ثبت زمان (صفحهٔ زمان‌سنجی) انجام می‌شود؛ در این صفحه ارزیابی‌های ثبت‌شده را فقط مشاهده و اصلاح کنید.',
     example: 'مهارت +۰٫۰۶، تلاش +۰٫۰۲، شرایط ۰ و یکنواختی +۰٫۰۱ ⇒ R = ۱٫۰۹',
-    note: 'جدول Seed صرفاً نقطه شروع نرم‌افزار است و باید توسط کارشناس/رویه شرکت تأیید شود.',
+    note: 'عناصری که ثبت زمان دارند ولی ارزیابی کامل ندارند، در این صفحه هشدار می‌گیرند. جدول Seed صرفاً نقطه شروع است و باید توسط کارشناس/رویه شرکت تأیید شود.',
   };
   var COPY_HELP = {
     what: 'درجه‌های چهار عامل یک عنصر دیگرِ همین پروژه را عیناً به این عنصر کپی می‌کند؛ برای عناصر تکراری مشابه.',
@@ -82,6 +82,332 @@
     if (F && F.computeRatingFactor) return F.computeRatingFactor(vals);
     return 1 + vals.skill + vals.effort + vals.conditions + vals.consistency;
   }
+
+  // ═══════════ دیالوگ ارزیابی عنصر — هسته FR-13 ═══════════
+  // v1.5.3 §۱ — سطح ماژول تا از صفحهٔ زمان‌سنجی هم (بدون جابه‌جایی) قابل
+  // فراخوانی باشد. operatorOpt = {id, displayName} یا null (ارزیابی عمومی).
+  function openElementRatingDialog(projectId, row, operatorOpt, onSaved) {
+    var el = row.element;
+    var activity = row.activity;
+    var station = DB.getStation(activity.stationId);
+    var stationName = station ? station.name : '';
+    var factors = DB.CONST.RATING_FACTORS;
+    var current = operatorOpt
+      ? DB.getOperatorElementRating(operatorOpt.id, el.id)
+      : DB.getElementRating(el.id);
+    /* شناسهٔ ترکیبی هدف — برای حذف از فهرست منابع کپی */
+    var selfRef = el.id + (operatorOpt ? '|' + operatorOpt.id : '');
+
+    var form = {
+      tableId: '',
+      grades: { SKILL: null, EFFORT: null, CONDITIONS: null, CONSISTENCY: null },
+      copyFrom: null,
+      notes: current && current.assessment.notes ? current.assessment.notes : '',
+    };
+    // جدول پیش‌فرض: جدول ارزیابی فعلی، یا جدول پیش‌فرض پروژه، یا نخستین جدول
+    if (current && current.table) form.tableId = current.table.id;
+    if (!form.tableId) DB.listRatingTables(projectId).forEach(function (t) {
+      if (t.table.isDefault && !form.tableId) form.tableId = t.table.id;
+    });
+    if (!form.tableId) {
+      var ts0 = DB.listRatingTables(projectId);
+      if (ts0.length) form.tableId = ts0[0].table.id;
+    }
+    if (current) {
+      form.grades.SKILL = current.assessment.skillGrade;
+      form.grades.EFFORT = current.assessment.effortGrade;
+      form.grades.CONDITIONS = current.assessment.conditionsGrade;
+      form.grades.CONSISTENCY = current.assessment.consistencyGrade;
+    }
+
+    var saveBtn = null;
+    var tableHost = null, copyHost = null, copyBannerHost = null, factorsHost = null, warnHost = null, previewHost = null;
+
+    function currentTableData() {
+      var found = null;
+      DB.listRatingTables(projectId).forEach(function (t) { if (t.table.id === form.tableId) found = t; });
+      return found;
+    }
+    // درجه‌های مؤثر: در حالت کپی، درجه‌های منبع انتخابی
+    function effectiveGrades() {
+      if (!form.copyFrom) return form.grades;
+      var src = DB.getRatingByRef(form.copyFrom);
+      if (!src) return { SKILL: null, EFFORT: null, CONDITIONS: null, CONSISTENCY: null };
+      return {
+        SKILL: src.assessment.skillGrade,
+        EFFORT: src.assessment.effortGrade,
+        CONDITIONS: src.assessment.conditionsGrade,
+        CONSISTENCY: src.assessment.consistencyGrade,
+      };
+    }
+    function findGrade(td, factor, code) {
+      if (!td) return null;
+      var out = null;
+      td.grades.forEach(function (gr) { if (gr.factor === factor && gr.gradeCode === code) out = gr; });
+      return out;
+    }
+    // عامل‌هایی که درجه انتخاب‌شده‌شان در جدول فعلی وجود ندارد — ثبت قطعاً خطا می‌خورد
+    function missingFactors() {
+      var td = currentTableData();
+      if (!td) return [];
+      var eg = effectiveGrades();
+      return factors.filter(function (f) {
+        var code = eg[f];
+        return !!code && !findGrade(td, f, code);
+      });
+    }
+    // مقدار هر عامل از جدول انتخابی؛ null = نامعلوم/ناموجود
+    function factorValues() {
+      var td = currentTableData();
+      var eg = effectiveGrades();
+      var out = { SKILL: null, EFFORT: null, CONDITIONS: null, CONSISTENCY: null };
+      factors.forEach(function (f) {
+        var code = eg[f];
+        if (!code) { out[f] = 0; return; }
+        var gr = findGrade(td, f, code);
+        out[f] = gr ? gr.value : null;
+      });
+      return out;
+    }
+    /* v1.5.3 §۱ — منابع کپی: همهٔ ارزیابی‌های پروژه (عمومی + اختصاصی اپراتور) */
+    function ratedSources() {
+      var out = [];
+      DB.getRatingMatrix(projectId).forEach(function (r) {
+        if (r.legacyRating && r.element.id !== el.id) {
+          out.push({ value: r.element.id, label: r.activity.name + ' ← ' + r.element.name + ' (عمومی)' });
+        }
+        (r.operatorRatings || []).forEach(function (orr) {
+          var ref = r.element.id + '|' + orr.operatorId;
+          if (ref === selfRef) return;
+          out.push({ value: ref, label: r.activity.name + ' ← ' + r.element.name + ' — ' + orr.operatorName });
+        });
+      });
+      return out;
+    }
+
+    function renderTableSelect() {
+      U.clear(tableHost);
+      var tables = DB.listRatingTables(projectId);
+      if (tables.length === 0) {
+        tableHost.appendChild(U.h('div', { class: 'banner error' }, U.icon('xCircle'),
+          U.h('div', { class: 'flex flex-col items-start gap-2' },
+            U.h('span', { text: 'جدول ارزیابی‌ای وجود ندارد؛ ابتدا وضعیت زبانه «جدول‌های مرجع» را بررسی کنید.' }),
+            U.h('button', {
+              class: 'btn btn-outline btn-sm', type: 'button',
+              onclick: function () {
+                var t = DB.getOrCreateSeedTable(projectId);
+                if (t && t.id) {
+                  // نکته: getOrCreateSeedTable رکورد تازه را commit نمی‌کند؛
+                  // با یک به‌روزرسانی خنثیِ فراداده، ماندگاری تضمین می‌شود.
+                  try { DB.updateRatingTableMeta(t.id, { name: t.name }); } catch (e) { UI.toastError(e); }
+                  form.tableId = t.id;
+                }
+                renderTableSelect(); renderFactors(); renderWarning(); renderPreview(); renderSaveState();
+              },
+            }, 'ساخت جدول Seed'))));
+        return;
+      }
+      var options = tables.map(function (t) {
+        return {
+          value: t.table.id,
+          label: t.table.name + ' (نسخه ' + U.formatInt(t.table.version) + ')' + (t.table.isDefault ? ' — پیش‌فرض' : ''),
+        };
+      });
+      tableHost.appendChild(UI.field('جدول ارزیابی', UI.selectEl(options, form.tableId, function (v) {
+        form.tableId = v;
+        renderFactors(); renderWarning(); renderPreview(); renderSaveState();
+      }, 'جدول ارزیابی')));
+    }
+
+    function renderCopy() {
+      U.clear(copyHost);
+      copyHost.appendChild(U.h('div', { class: 'field-label-row' },
+        U.h('label', { class: 'field-label', text: 'کپی از ارزیابی مشابه' }),
+        UI.helpDot('کپی از عنصر مشابه', COPY_HELP)));
+      var sources = ratedSources();
+      if (sources.length === 0) {
+        copyHost.appendChild(U.h('p', {
+          class: 'text-xs text-faint',
+          text: 'هنوز ارزیابی ثبت‌شده‌ای در این پروژه وجود ندارد؛ اولین ارزیابی را دستی ثبت کنید.',
+        }));
+        return;
+      }
+      var options = [{ value: '', label: '— انتخاب دستی درجه‌ها —' }];
+      sources.forEach(function (s) { options.push({ value: s.value, label: s.label }); });
+      copyHost.appendChild(UI.selectEl(options, form.copyFrom || '', function (v) {
+        form.copyFrom = v === '' ? null : v;
+        renderCopyBanner(); renderFactors(); renderWarning(); renderPreview(); renderSaveState();
+      }, 'کپی ارزیابی از مورد مشابه'));
+    }
+
+    function renderCopyBanner() {
+      U.clear(copyBannerHost);
+      if (!form.copyFrom) return;
+      copyBannerHost.appendChild(U.h('div', { class: 'banner info' }, U.icon('info'),
+        U.h('div', { text: 'هنگام ذخیره، درجه‌ها از مورد انتخاب‌شده کپی می‌شوند و انتخاب‌های دستی بالا نادیده گرفته می‌شوند؛ برای ویرایش دستی، گزینه «انتخاب دستی درجه‌ها» را برگزینید.' })));
+    }
+
+    function renderFactors() {
+      U.clear(factorsHost);
+      var td = currentTableData();
+      var eg = effectiveGrades();
+      factors.forEach(function (factor) {
+        var label = DB.CONST.RATING_FACTOR_LABELS[factor] || factor;
+        var options = [{ value: '', label: '— انتخاب نشده (صفر)' }];
+        if (td) {
+          td.grades.forEach(function (gr) {
+            if (gr.factor !== factor) return;
+            options.push({
+              value: gr.gradeCode,
+              label: gr.gradeCode + ' — ' + gr.label + ' (' +
+                (gr.value >= 0 ? '+' : '') + U.formatTimeValue(gr.value, 2) + ')',
+            });
+          });
+        }
+        var sel = UI.selectEl(options, eg[factor] || '', function (v) {
+          form.grades[factor] = v === '' ? null : v;
+          renderWarning(); renderPreview(); renderSaveState();
+        }, 'درجه ' + label);
+        if (form.copyFrom) sel.disabled = true; // در حالت کپی، انتخاب‌های دستی نادیده گرفته می‌شوند
+        factorsHost.appendChild(UI.field(label, sel, FACTOR_HELP[factor]));
+      });
+    }
+
+    function renderWarning() {
+      U.clear(warnHost);
+      var missing = missingFactors();
+      if (missing.length === 0) return;
+      warnHost.appendChild(U.h('div', { class: 'banner warning', role: 'alert' }, U.icon('alertTriangle'),
+        U.h('div', {
+          text: 'درجه انتخاب‌شده برای ' +
+            missing.map(function (f) { return DB.CONST.RATING_FACTOR_LABELS[f] || f; }).join('، ') +
+            ' در جدول فعلی وجود ندارد؛ درجه را مجدداً انتخاب کنید یا جدول را عوض کنید.',
+        })));
+    }
+
+    function renderPreview() {
+      U.clear(previewHost);
+      var vals = factorValues();
+      var hasMissing = factors.some(function (f) { return vals[f] === null; });
+      var R = null;
+      if (!hasMissing) {
+        R = computeR({
+          skill: vals.SKILL, effort: vals.EFFORT,
+          conditions: vals.CONDITIONS, consistency: vals.CONSISTENCY,
+        });
+      }
+      function fs(v) { return v === null || v === undefined || !isFinite(v) ? '—' : signed2(v); }
+      previewHost.appendChild(U.h('div', { class: 'bg-brand-soft rounded-lg p-3' },
+        U.h('p', { class: 'text-sm leading-relaxed' },
+          U.h('b', { class: 'text-brand', text: 'پیش‌نمایش زنده: ' }),
+          U.h('span', { dir: 'ltr' },
+            'R = ۱ + (مهارت ' + fs(vals.SKILL) + ') + (تلاش ' + fs(vals.EFFORT) + ') + (شرایط ' +
+            fs(vals.CONDITIONS) + ') + (یکنواختی ' + fs(vals.CONSISTENCY) + ') = ',
+            U.h('b', { class: 'text-brand', text: R === null ? '—' : U.formatTimeValue(R, 2) }))),
+        U.h('p', {
+          class: 'text-xs text-muted mt-1',
+          text: 'مقادیر از درجه‌های انتخابی جدول خوانده می‌شوند؛ «انتخاب نشده» یعنی سهم صفر. مقدار نهایی پس از ذخیره توسط موتور محاسبات ثبت و ملاک است.',
+        })));
+    }
+
+    function renderSaveState() {
+      if (!saveBtn) return;
+      saveBtn.disabled = !form.tableId || missingFactors().length > 0;
+    }
+
+    function doSave(close) {
+      if (!form.tableId) return;
+      var grades;
+      if (form.copyFrom) {
+        var src = DB.getRatingByRef(form.copyFrom);
+        if (!src) { UI.toast('مورد مبدأ یافت نشد؛ دوباره تلاش کنید.', { type: 'error' }); return; }
+        grades = {
+          skillGrade: src.assessment.skillGrade,
+          effortGrade: src.assessment.effortGrade,
+          conditionsGrade: src.assessment.conditionsGrade,
+          consistencyGrade: src.assessment.consistencyGrade,
+        };
+      } else {
+        grades = {
+          skillGrade: form.grades.SKILL,
+          effortGrade: form.grades.EFFORT,
+          conditionsGrade: form.grades.CONDITIONS,
+          consistencyGrade: form.grades.CONSISTENCY,
+        };
+      }
+      try {
+        var payload = {
+          ratingTableId: form.tableId,
+          skillGrade: grades.skillGrade,
+          effortGrade: grades.effortGrade,
+          conditionsGrade: grades.conditionsGrade,
+          consistencyGrade: grades.consistencyGrade,
+          notes: form.notes.trim() || null,
+        };
+        var R = operatorOpt
+          ? DB.saveOperatorElementRating(operatorOpt.id, el.id, payload)
+          : DB.saveElementRating(el.id, payload);
+        close();
+        UI.toast('ارزیابی ثبت شد — R = ' + U.formatTimeValue(R, 2) +
+          (operatorOpt ? ' (اپراتور «' + operatorOpt.displayName + '»)' : ''));
+        if (typeof onSaved === 'function') onSaved(R);
+        else appRefresh();
+      } catch (err) { UI.toastError(err); }
+    }
+
+    UI.dialog({
+      title: 'ارزیابی عنصر «' + el.name + '»' + (operatorOpt ? ' — اپراتور «' + operatorOpt.displayName + '»' : ''),
+      desc: stationName + ' › ' + activity.name +
+        (operatorOpt
+          ? ' — درجه هر عامل را برای همین اپراتور و همین عنصر انتخاب کنید؛ ضریب R به‌صورت زنده پیش‌نمایش می‌شود.'
+          : ' — ارزیابی عمومی عنصر (بدون اپراتور مشخص)؛ درجه هر عامل را از جدول مرجع انتخاب کنید.'),
+      size: 'lg',
+      bodyBuilder: function (body) {
+        tableHost = U.h('div');
+        copyHost = U.h('div');
+        copyBannerHost = U.h('div');
+        factorsHost = U.h('div', { class: 'grid gap-3 sm:grid-cols-2' });
+        warnHost = U.h('div');
+        previewHost = U.h('div');
+        var notesTa = U.h('textarea', {
+          class: 'textarea',
+          placeholder: 'مثلاً: مبنا مشاهده سه چرخه در شیفت صبح',
+          'aria-label': 'یادداشت ارزیابی',
+        });
+        notesTa.value = form.notes;
+        notesTa.addEventListener('input', function () { form.notes = notesTa.value; });
+
+        body.appendChild(tableHost);
+        body.appendChild(copyHost);
+        body.appendChild(copyBannerHost);
+        body.appendChild(factorsHost);
+        body.appendChild(warnHost);
+        body.appendChild(previewHost);
+        body.appendChild(UI.field('یادداشت (اختیاری)', notesTa));
+
+        renderTableSelect();
+        renderCopy();
+        renderCopyBanner();
+        renderFactors();
+        renderWarning();
+        renderPreview();
+        renderSaveState();
+      },
+      footerBuilder: function (close) {
+        saveBtn = U.h('button', {
+          class: 'btn btn-brand', type: 'button',
+          onclick: function () { doSave(close); },
+        }, U.icon('gauge'), 'ثبت ارزیابی');
+        return U.h('div', { class: 'dialog-footer' },
+          U.h('button', { class: 'btn', type: 'button', text: 'انصراف', onclick: close }),
+          U.h('div', { class: 'spacer' }),
+          saveBtn);
+      },
+    });
+  }
+
+  /* اشتراک با صفحهٔ زمان‌سنجی — v1.5.3 §۱ */
+  g.T2WEST = { openElementRatingDialog: openElementRatingDialog };
 
   g.T2VIEWS.westinghouse = function (container, projectId) {
 
@@ -164,342 +490,96 @@
       });
     }
 
-    // بخش فعالیت در ماتریس — جدول عناصر با دکمه ارزیابی
-    // v1.5.2 §۷.۱: فاصله عمودی عنوان فعالیت از خط جداکننده هدر ایستگاه افزایش یافت
+    // بخش فعالیت در ماتریس — جدول عناصر با ارزیابی‌های ثبت‌شدهٔ اپراتورها
+    // v1.5.3 §۱ — بازطراحی: هر عنصر، فهرست ارزیابی‌های «اپراتور × عنصر» را
+    // با دکمهٔ ویرایش اختصاصی نشان می‌دهد + هشدار موارد ناقص
     function activitySection(x) {
       var a = x.a;
       var sym = DB.CONST.PROCESS_TYPE_SYMBOLS[a.processType] || '';
       var sec = U.h('div', { class: 'mb-3 mt-4' },
         U.h('div', { class: 'flex flex-wrap items-center gap-2 mb-2' },
           U.h('h4', { class: 'text-sm font-bold' }, (sym ? sym + ' ' : '') + a.name)));
-      sec.appendChild(UI.table(['عنصر کاری', 'وضعیت ارزیابی', ''], function (tbody) {
+      sec.appendChild(UI.table(['عنصر کاری', 'ارزیابی‌های ثبت‌شده و وضعیت'], function (tbody) {
         x.rows.forEach(function (r) {
           var el = r.element;
-          var ratingCell;
-          if (r.rated) {
-            ratingCell = UI.badge('R = ' + U.formatTimeValue(r.totalFactor, 2), 'green');
-            ratingCell.setAttribute('dir', 'ltr');
-            ratingCell.title = (r.tableName || '—') + ' — نسخه ' + U.formatInt(r.tableVersion);
-          } else {
-            ratingCell = UI.badge('ارزیابی نشده', 'outline');
+          var cell = U.h('div', { class: 'flex flex-col items-center gap-1.5 py-0.5' });
+
+          /* چیپ‌های ارزیابی‌های ثبت‌شده — عمومی (میراث) + هر اپراتور */
+          var chipsHost = U.h('div', { class: 'flex flex-wrap items-center justify-center gap-1.5' });
+          if (r.legacyRating) {
+            chipsHost.appendChild(ratingChip({
+              label: 'عمومی (همهٔ اپراتورها)',
+              totalFactor: r.legacyRating.totalFactor,
+              title: (r.legacyRating.tableName || '—') + (r.legacyRating.tableVersion ? ' — نسخه ' + U.formatInt(r.legacyRating.tableVersion) : '') + ' — ارزیابی عمومی عنصر (بدون اپراتور مشخص)',
+              onEdit: function () { openElementRatingDialog(projectId, r, null, appRefresh); },
+            }));
           }
+          (r.operatorRatings || []).forEach(function (orr) {
+            chipsHost.appendChild(ratingChip({
+              label: orr.operatorName,
+              totalFactor: orr.totalFactor,
+              title: (orr.tableName || '—') + (orr.tableVersion ? ' — نسخه ' + U.formatInt(orr.tableVersion) : '') + ' — ارزیابی اختصاصی این اپراتور برای همین عنصر',
+              onEdit: function () {
+                openElementRatingDialog(projectId, r, { id: orr.operatorId, displayName: orr.operatorName }, appRefresh);
+              },
+              danger: !r.timingOperatorIds || r.timingOperatorIds.indexOf(orr.operatorId) < 0,
+            }));
+          });
+          if (!r.legacyRating && (!r.operatorRatings || r.operatorRatings.length === 0)) {
+            chipsHost.appendChild(U.h('span', { class: 'badge outline', style: { fontSize: '11px' } }, 'هنوز ارزیابی‌ای ثبت نشده'));
+          }
+          cell.appendChild(chipsHost);
+
+          /* هشدارهای تکمیل‌نشدگی — v1.5.3 §۱ */
+          var opNameById = {};
+          try { DB.listOperators(projectId).forEach(function (o) { opNameById[o.id] = o.displayName; }); } catch (e) { /* فقط نام‌ها */ }
+          var missingNames = (r.missingRatingOperatorIds || []).map(function (oid) {
+            return opNameById[oid] || null;
+          }).filter(Boolean);
+          if (missingNames.length > 0) {
+            cell.appendChild(U.h('div', {
+              class: 'banner warning',
+              style: { padding: '4px 10px', fontSize: '11px', marginTop: '2px' },
+              role: 'alert',
+            }, U.icon('alertTriangle'),
+              U.h('div', { style: { color: 'var(--foreground)' } },
+                'اپراتورهای «' + missingNames.join('، ') + '» برای این عنصر ثبت زمان دارند ولی ارزیابی وستینگهاوس آن‌ها تکمیل نشده — از جدول ثبت زمان در صفحهٔ زمان‌سنجی انجام دهید.')));
+          } else if (!r.rated && r.timingOperatorIds && r.timingOperatorIds.length > 0) {
+            cell.appendChild(U.h('div', {
+              class: 'banner warning',
+              style: { padding: '4px 10px', fontSize: '11px', marginTop: '2px' },
+              role: 'alert',
+            }, U.icon('alertTriangle'),
+              U.h('div', { style: { color: 'var(--foreground)' } },
+                'این عنصر برگهٔ زمان‌سنجی و ثبت زمان دارد ولی هنوز هیچ ارزیابی وستینگهاوسی برای آن تعیین نشده است.')));
+          } else if (!r.rated) {
+            cell.appendChild(U.h('p', { class: 'text-[11px]', style: { color: 'var(--muted-foreground)', margin: 0 } },
+              'بدون ارزیابی — ثبت از دکمهٔ کنار نام عنصر در جدول ثبت زمان (صفحهٔ زمان‌سنجی) انجام می‌شود.'));
+          }
+
           tbody.appendChild(U.h('tr', null,
             U.h('td', { class: 'font-medium' }, el.name),
-            U.h('td', null, ratingCell),
-            U.h('td', null, U.h('div', { class: 'flex', style: { justifyContent: 'flex-end' } },
-              r.rated
-                ? U.h('button', {
-                    class: 'btn btn-outline btn-sm', type: 'button',
-                    'aria-label': 'ویرایش ارزیابی عنصر ' + el.name,
-                    onclick: function () { openRatingDialog(r); },
-                  }, U.icon('pencil'), 'ویرایش ارزیابی')
-                : U.h('button', {
-                    class: 'btn btn-brand btn-sm', type: 'button',
-                    'aria-label': 'ارزیابی عنصر ' + el.name,
-                    onclick: function () { openRatingDialog(r); },
-                  }, U.icon('gauge'), 'ارزیابی')))));
+            U.h('td', null, cell)));
         });
       }));
       return sec;
     }
 
-    // ═══════════ دیالوگ ارزیابی عنصر — هسته FR-13 ═══════════
-    function openRatingDialog(row) {
-      var el = row.element;
-      var activity = row.activity;
-      var station = DB.getStation(activity.stationId);
-      var stationName = station ? station.name : '';
-      var factors = DB.CONST.RATING_FACTORS;
-      var current = DB.getElementRating(el.id);
-
-      var form = {
-        tableId: '',
-        grades: { SKILL: null, EFFORT: null, CONDITIONS: null, CONSISTENCY: null },
-        copyFrom: null,
-        notes: current && current.assessment.notes ? current.assessment.notes : '',
-      };
-      // جدول پیش‌فرض: جدول ارزیابی فعلی، یا جدول پیش‌فرض پروژه، یا نخستین جدول
-      if (current && current.table) form.tableId = current.table.id;
-      if (!form.tableId) DB.listRatingTables(projectId).forEach(function (t) {
-        if (t.table.isDefault && !form.tableId) form.tableId = t.table.id;
-      });
-      if (!form.tableId) {
-        var ts0 = DB.listRatingTables(projectId);
-        if (ts0.length) form.tableId = ts0[0].table.id;
-      }
-      if (current) {
-        form.grades.SKILL = current.assessment.skillGrade;
-        form.grades.EFFORT = current.assessment.effortGrade;
-        form.grades.CONDITIONS = current.assessment.conditionsGrade;
-        form.grades.CONSISTENCY = current.assessment.consistencyGrade;
-      }
-
-      var saveBtn = null;
-      var tableHost = null, copyHost = null, copyBannerHost = null, factorsHost = null, warnHost = null, previewHost = null;
-
-      function currentTableData() {
-        var found = null;
-        DB.listRatingTables(projectId).forEach(function (t) { if (t.table.id === form.tableId) found = t; });
-        return found;
-      }
-      // درجه‌های مؤثر: در حالت کپی، درجه‌های عنصر مبدأ
-      function effectiveGrades() {
-        if (!form.copyFrom) return form.grades;
-        var src = DB.getElementRating(form.copyFrom);
-        if (!src) return { SKILL: null, EFFORT: null, CONDITIONS: null, CONSISTENCY: null };
-        return {
-          SKILL: src.assessment.skillGrade,
-          EFFORT: src.assessment.effortGrade,
-          CONDITIONS: src.assessment.conditionsGrade,
-          CONSISTENCY: src.assessment.consistencyGrade,
-        };
-      }
-      function findGrade(td, factor, code) {
-        if (!td) return null;
-        var out = null;
-        td.grades.forEach(function (gr) { if (gr.factor === factor && gr.gradeCode === code) out = gr; });
-        return out;
-      }
-      // عامل‌هایی که درجه انتخاب‌شده‌شان در جدول فعلی وجود ندارد — ثبت قطعاً خطا می‌خورد
-      function missingFactors() {
-        var td = currentTableData();
-        if (!td) return [];
-        var eg = effectiveGrades();
-        return factors.filter(function (f) {
-          var code = eg[f];
-          return !!code && !findGrade(td, f, code);
-        });
-      }
-      // مقدار هر عامل از جدول انتخابی؛ null = نامعلوم/ناموجود
-      function factorValues() {
-        var td = currentTableData();
-        var eg = effectiveGrades();
-        var out = { SKILL: null, EFFORT: null, CONDITIONS: null, CONSISTENCY: null };
-        factors.forEach(function (f) {
-          var code = eg[f];
-          if (!code) { out[f] = 0; return; }
-          var gr = findGrade(td, f, code);
-          out[f] = gr ? gr.value : null;
-        });
-        return out;
-      }
-      function ratedSources() {
-        return DB.getRatingMatrix(projectId)
-          .filter(function (r) { return r.rated && r.element.id !== el.id; })
-          .map(function (r) { return { id: r.element.id, label: r.activity.name + ' ← ' + r.element.name }; });
-      }
-
-      function renderTableSelect() {
-        U.clear(tableHost);
-        var tables = DB.listRatingTables(projectId);
-        if (tables.length === 0) {
-          tableHost.appendChild(U.h('div', { class: 'banner error' }, U.icon('xCircle'),
-            U.h('div', { class: 'flex flex-col items-start gap-2' },
-              U.h('span', { text: 'جدول ارزیابی‌ای وجود ندارد؛ ابتدا وضعیت زبانه «جدول‌های مرجع» را بررسی کنید.' }),
-              U.h('button', {
-                class: 'btn btn-outline btn-sm', type: 'button',
-                onclick: function () {
-                  var t = DB.getOrCreateSeedTable(projectId);
-                  if (t && t.id) {
-                    // نکته: getOrCreateSeedTable رکورد تازه را commit نمی‌کند؛
-                    // با یک به‌روزرسانی خنثیِ فراداده، ماندگاری تضمین می‌شود.
-                    try { DB.updateRatingTableMeta(t.id, { name: t.name }); } catch (e) { UI.toastError(e); }
-                    form.tableId = t.id;
-                  }
-                  renderTableSelect(); renderFactors(); renderWarning(); renderPreview(); renderSaveState();
-                },
-              }, 'ساخت جدول Seed'))));
-          return;
-        }
-        var options = tables.map(function (t) {
-          return {
-            value: t.table.id,
-            label: t.table.name + ' (نسخه ' + U.formatInt(t.table.version) + ')' + (t.table.isDefault ? ' — پیش‌فرض' : ''),
-          };
-        });
-        tableHost.appendChild(UI.field('جدول ارزیابی', UI.selectEl(options, form.tableId, function (v) {
-          form.tableId = v;
-          renderFactors(); renderWarning(); renderPreview(); renderSaveState();
-        }, 'جدول ارزیابی')));
-      }
-
-      function renderCopy() {
-        U.clear(copyHost);
-        copyHost.appendChild(U.h('label', { class: 'field-label' }, 'کپی از عنصر مشابه',
-          UI.helpDot('کپی از عنصر مشابه', COPY_HELP)));
-        var sources = ratedSources();
-        if (sources.length === 0) {
-          copyHost.appendChild(U.h('p', {
-            class: 'text-xs text-faint',
-            text: 'هنوز عنصر ارزیابی‌شده‌ای در این پروژه وجود ندارد؛ اولین ارزیابی را دستی ثبت کنید.',
-          }));
-          return;
-        }
-        var options = [{ value: '', label: '— انتخاب دستی درجه‌ها —' }];
-        sources.forEach(function (s) { options.push({ value: s.id, label: s.label }); });
-        copyHost.appendChild(UI.selectEl(options, form.copyFrom || '', function (v) {
-          form.copyFrom = v === '' ? null : v;
-          renderCopyBanner(); renderFactors(); renderWarning(); renderPreview(); renderSaveState();
-        }, 'کپی ارزیابی از عنصر مشابه'));
-      }
-
-      function renderCopyBanner() {
-        U.clear(copyBannerHost);
-        if (!form.copyFrom) return;
-        copyBannerHost.appendChild(U.h('div', { class: 'banner info' }, U.icon('info'),
-          U.h('div', { text: 'هنگام ذخیره، درجه‌ها از عنصر انتخاب‌شده کپی می‌شوند و انتخاب‌های دستی بالا نادیده گرفته می‌شوند؛ برای ویرایش دستی، گزینه «انتخاب دستی درجه‌ها» را برگزینید.' })));
-      }
-
-      function renderFactors() {
-        U.clear(factorsHost);
-        var td = currentTableData();
-        var eg = effectiveGrades();
-        factors.forEach(function (factor) {
-          var label = DB.CONST.RATING_FACTOR_LABELS[factor] || factor;
-          var options = [{ value: '', label: '— انتخاب نشده (صفر)' }];
-          if (td) {
-            td.grades.forEach(function (gr) {
-              if (gr.factor !== factor) return;
-              options.push({
-                value: gr.gradeCode,
-                label: gr.gradeCode + ' — ' + gr.label + ' (' +
-                  (gr.value >= 0 ? '+' : '') + U.formatTimeValue(gr.value, 2) + ')',
-              });
-            });
-          }
-          var sel = UI.selectEl(options, eg[factor] || '', function (v) {
-            form.grades[factor] = v === '' ? null : v;
-            renderWarning(); renderPreview(); renderSaveState();
-          }, 'درجه ' + label);
-          if (form.copyFrom) sel.disabled = true; // در حالت کپی، انتخاب‌های دستی نادیده گرفته می‌شوند
-          factorsHost.appendChild(UI.field(label, sel, FACTOR_HELP[factor]));
-        });
-      }
-
-      function renderWarning() {
-        U.clear(warnHost);
-        var missing = missingFactors();
-        if (missing.length === 0) return;
-        warnHost.appendChild(U.h('div', { class: 'banner warning', role: 'alert' }, U.icon('alertTriangle'),
-          U.h('div', {
-            text: 'درجه انتخاب‌شده برای ' +
-              missing.map(function (f) { return DB.CONST.RATING_FACTOR_LABELS[f] || f; }).join('، ') +
-              ' در جدول فعلی وجود ندارد؛ درجه را مجدداً انتخاب کنید یا جدول را عوض کنید.',
-          })));
-      }
-
-      function renderPreview() {
-        U.clear(previewHost);
-        var vals = factorValues();
-        var hasMissing = factors.some(function (f) { return vals[f] === null; });
-        var R = null;
-        if (!hasMissing) {
-          R = computeR({
-            skill: vals.SKILL, effort: vals.EFFORT,
-            conditions: vals.CONDITIONS, consistency: vals.CONSISTENCY,
-          });
-        }
-        function fs(v) { return v === null || v === undefined || !isFinite(v) ? '—' : signed2(v); }
-        previewHost.appendChild(U.h('div', { class: 'bg-brand-soft rounded-lg p-3' },
-          U.h('p', { class: 'text-sm leading-relaxed' },
-            U.h('b', { class: 'text-brand', text: 'پیش‌نمایش زنده: ' }),
-            U.h('span', { dir: 'ltr' },
-              'R = ۱ + (مهارت ' + fs(vals.SKILL) + ') + (تلاش ' + fs(vals.EFFORT) + ') + (شرایط ' +
-              fs(vals.CONDITIONS) + ') + (یکنواختی ' + fs(vals.CONSISTENCY) + ') = ',
-              U.h('b', { class: 'text-brand', text: R === null ? '—' : U.formatTimeValue(R, 2) }))),
-          U.h('p', {
-            class: 'text-xs text-muted mt-1',
-            text: 'مقادیر از درجه‌های انتخابی جدول خوانده می‌شوند؛ «انتخاب نشده» یعنی سهم صفر. مقدار نهایی پس از ذخیره توسط موتور محاسبات ثبت و ملاک است.',
-          })));
-      }
-
-      function renderSaveState() {
-        if (!saveBtn) return;
-        saveBtn.disabled = !form.tableId || missingFactors().length > 0;
-      }
-
-      function doSave(close) {
-        if (!form.tableId) return;
-        var grades;
-        if (form.copyFrom) {
-          var src = DB.getElementRating(form.copyFrom);
-          if (!src) { UI.toast('عنصر مبدأ یافت نشد؛ دوباره تلاش کنید.', { type: 'error' }); return; }
-          grades = {
-            skillGrade: src.assessment.skillGrade,
-            effortGrade: src.assessment.effortGrade,
-            conditionsGrade: src.assessment.conditionsGrade,
-            consistencyGrade: src.assessment.consistencyGrade,
-          };
-        } else {
-          grades = {
-            skillGrade: form.grades.SKILL,
-            effortGrade: form.grades.EFFORT,
-            conditionsGrade: form.grades.CONDITIONS,
-            consistencyGrade: form.grades.CONSISTENCY,
-          };
-        }
-        try {
-          var R = DB.saveElementRating(el.id, {
-            ratingTableId: form.tableId,
-            skillGrade: grades.skillGrade,
-            effortGrade: grades.effortGrade,
-            conditionsGrade: grades.conditionsGrade,
-            consistencyGrade: grades.consistencyGrade,
-            notes: form.notes.trim() || null,
-          });
-          close();
-          UI.toast('ارزیابی ثبت شد — R = ' + U.formatTimeValue(R, 2));
-          appRefresh();
-        } catch (err) { UI.toastError(err); }
-      }
-
-      UI.dialog({
-        title: 'ارزیابی عنصر «' + el.name + '»',
-        desc: stationName + ' › ' + activity.name +
-          ' — درجه هر عامل را از جدول مرجع انتخاب کنید؛ ضریب R به‌صورت زنده پیش‌نمایش می‌شود.',
-        size: 'lg',
-        bodyBuilder: function (body) {
-          tableHost = U.h('div');
-          copyHost = U.h('div');
-          copyBannerHost = U.h('div');
-          factorsHost = U.h('div', { class: 'grid gap-3 sm:grid-cols-2' });
-          warnHost = U.h('div');
-          previewHost = U.h('div');
-          var notesTa = U.h('textarea', {
-            class: 'textarea',
-            placeholder: 'مثلاً: مبنا مشاهده سه چرخه در شیفت صبح',
-            'aria-label': 'یادداشت ارزیابی',
-          });
-          notesTa.value = form.notes;
-          notesTa.addEventListener('input', function () { form.notes = notesTa.value; });
-
-          body.appendChild(tableHost);
-          body.appendChild(copyHost);
-          body.appendChild(copyBannerHost);
-          body.appendChild(factorsHost);
-          body.appendChild(warnHost);
-          body.appendChild(previewHost);
-          body.appendChild(UI.field('یادداشت (اختیاری)', notesTa));
-
-          renderTableSelect();
-          renderCopy();
-          renderCopyBanner();
-          renderFactors();
-          renderWarning();
-          renderPreview();
-          renderSaveState();
-        },
-        footerBuilder: function (close) {
-          saveBtn = U.h('button', {
-            class: 'btn btn-brand', type: 'button',
-            onclick: function () { doSave(close); },
-          }, U.icon('gauge'), 'ثبت ارزیابی');
-          return U.h('div', { class: 'dialog-footer' },
-            U.h('button', { class: 'btn', type: 'button', text: 'انصراف', onclick: close }),
-            U.h('div', { class: 'spacer' }),
-            saveBtn);
-        },
-      });
+    /* چیپ «نام — R = x» با دکمهٔ ویرایش کوچک داخلی */
+    function ratingChip(opts) {
+      var chip = U.h('span', {
+        class: 't2w-rate-chip' + (opts.danger ? ' stale' : ''),
+        title: opts.title || '',
+      },
+        U.h('span', { class: 't2w-rate-name', text: opts.label }),
+        U.h('b', { class: 'num', dir: 'ltr', text: 'R = ' + U.formatTimeValue(opts.totalFactor, 2) }),
+        U.h('button', {
+          class: 'icon-btn sm', type: 'button',
+          'aria-label': 'ویرایش ارزیابی ' + opts.label,
+          title: 'ویرایش ارزیابی ' + opts.label,
+          onclick: function (ev) { ev.stopPropagation(); opts.onEdit(); },
+        }, U.icon('pencil')));
+      return chip;
     }
 
     // ═══════════ زبانه جدول‌های مرجع — FR-13 ═══════════

@@ -140,12 +140,14 @@
         });
         sel.addEventListener('change', function () { operatorId = sel.value; });
         body.appendChild(U.h('div', null,
-          U.h('label', { class: 'field-label' }, 'اپراتور', UI.helpDot('اپراتور جلسه', {
-            what: 'اپراتوری که برگهٔ زمان‌سنجی این جلسه به او تعلق دارد.',
-            input: 'یکی از اپراتورهای ثبت‌شدهٔ پروژه را انتخاب کنید.',
-            example: '«اپراتور ۱ — آقای رضایی»',
-            note: 'برگهٔ هر اپراتور مستقل است و می‌توانید برای هر اپراتور چند جلسه ثبت کنید.',
-          })),
+          U.h('div', { class: 'field-label-row' },
+            U.h('label', { class: 'field-label', text: 'اپراتور' }),
+            UI.helpDot('اپراتور جلسه', {
+              what: 'اپراتوری که برگهٔ زمان‌سنجی این جلسه به او تعلق دارد.',
+              input: 'یکی از اپراتورهای ثبت‌شدهٔ پروژه را انتخاب کنید.',
+              example: '«اپراتور ۱ — آقای رضایی»',
+              note: 'برگهٔ هر اپراتور مستقل است و می‌توانید برای هر اپراتور چند جلسه ثبت کنید.',
+            })),
           sel));
 
         /* روش اندازه‌گیری */
@@ -833,7 +835,7 @@
           what: 'تعداد چرخه‌های معتبر ثبت‌شده در برابر هدف تعیین‌شده برای کل فعالیت (نه هر اپراتور).',
           input: 'هدف را در مشخصات فعالیت (ساختار تولید) تعیین کنید. شمارش بر اساس چرخه‌های کامل بدون مشاهدهٔ خارج‌شده است.',
           example: 'هدف ۱۰ چرخه؛ اگر ۷ چرخهٔ معتبر ثبت شده باشد، هشدار کمبود نمونه نمایش داده می‌شود.',
-          note: 'رسیدن به تعداد هدف فقط به معنای «رسیدن به تعداد ثبت‌شده» است و کفایت آماری تضمین‌شده تلقی نمی‌شود؛ شاخص‌های پراکندگی در فاز تحلیل نمایش داده می‌شوند.',
+          note: 'رسیدن به تعداد هدف فقط به معنای «رسیدن به تعداد ثبت‌شده» است و کفایت آماری تضمین‌شده تلقی نمی‌شود؛ شاخص‌های پراکندگی در صفحهٔ تحلیل نتایج نمایش داده می‌شوند.',
         }),
         U.h('div', { class: 'spacer' }),
         U.h('span', { class: 'font-extrabold num' },
@@ -1035,7 +1037,10 @@
       document.addEventListener('keydown', sheetKeyHandler);
     }
 
-    /* ── سربرگ ردیف عنصر (چسبان راست) — نام + حالت ورود + آمار + «+ موازی» §۶ ── */
+    /* ── سربرگ ردیف عنصر (چسبان راست) — نام + حالت ورود + آمار + «+ موازی» §۶ ──
+       v1.5.3 §۱ — دکمهٔ خیلی کوچک «ارزیابی وستینگهاوس» کنار نام عنصر:
+       ارزیابی اختصاصی همین اپراتور برای همین عنصر، در همان جدول ثبت زمان
+       باز می‌شود (بدون انتقال به صفحهٔ وستینگهاوس). ── */
     function elementRowHeader(el) {
       var mode = entryModeOf(sessionId, el);
       var st = stats.perElement[el.id] || { calcCount: 0, totalCount: 0 };
@@ -1044,6 +1049,48 @@
       var info = U.h('div', { class: 'min-w-0 flex-1' },
         U.h('div', { class: 'font-bold text-xs truncate', title: el.name, text: el.name }));
       var metaRow = U.h('div', { class: 'flex flex-wrap items-center gap-1', style: { marginTop: '2px' } });
+
+      /* دکمهٔ کوچک ارزیابی وستینگهاوس — وضعیت‌دار (سبز = ثبت‌شده) */
+      var rateBtn = U.h('button', { class: 'icon-btn sm t2t-rate-btn', type: 'button' }, U.icon('gauge'));
+      var rateBadge = U.h('span', { class: 't2t-rate-badge num', dir: 'ltr' });
+      function updateRatingUi() {
+        var r = null;
+        try { r = DB.getOperatorElementRating(sheet.operator.id, el.id); } catch (e) { r = null; }
+        if (r) {
+          rateBtn.classList.add('rated');
+          rateBtn.setAttribute('aria-label', 'ویرایش ارزیابی وستینگهاوس عنصر «' + el.name + '» برای ' + sheet.operator.displayName);
+          rateBtn.title = 'ویرایش ارزیابی وستینگهاوس — ' + sheet.operator.displayName + ' / «' + el.name + '» — R = ' + U.formatTimeValue(r.assessment.totalFactor, 2);
+          rateBadge.textContent = 'R = ' + U.formatTimeValue(r.assessment.totalFactor, 2);
+          rateBadge.title = 'ارزیابی ثبت‌شده: ' + sheet.operator.displayName + ' — ' +
+            (r.table ? r.table.name + ' (نسخه ' + U.formatInt(r.table.version) + ')' : '—');
+          if (!rateBadge.parentNode) metaRow.appendChild(rateBadge);
+        } else {
+          rateBtn.classList.remove('rated');
+          rateBtn.setAttribute('aria-label', 'ثبت ارزیابی وستینگهاوس عنصر «' + el.name + '» برای ' + sheet.operator.displayName);
+          rateBtn.title = 'ثبت ارزیابی وستینگهاوس (مهارت/تلاش/شرایط/یکنواختی) برای «' + el.name + '» — اپراتور ' + sheet.operator.displayName;
+          rateBadge.textContent = '';
+          if (rateBadge.parentNode) rateBadge.parentNode.removeChild(rateBadge);
+        }
+      }
+      rateBtn.addEventListener('click', function () {
+        if (!g.T2WEST || !g.T2WEST.openElementRatingDialog) {
+          UI.toast('ماژول ارزیابی وستینگهاوس هنوز بارگذاری نشده است.', { type: 'error' });
+          return;
+        }
+        var fullAct = null;
+        try { fullAct = DB.getActivity(sheet.activity.id); } catch (e) { fullAct = null; }
+        var actRow = fullAct
+          ? { id: fullAct.id, name: fullAct.name, stationId: fullAct.stationId, stationName: sheet.activity.stationName }
+          : sheet.activity;
+        g.T2WEST.openElementRatingDialog(
+          ctx.projectId,
+          { element: el, activity: actRow },
+          { id: sheet.operator.id, displayName: sheet.operator.displayName },
+          function () { updateRatingUi(); } /* به‌روزرسانی درجا — بدون رندر کامل برگه */
+        );
+      });
+      updateRatingUi();
+
       if (editable) {
         metaRow.appendChild(U.h('button', {
           class: 't2t-entry-chip', type: 'button',
@@ -1071,13 +1118,17 @@
       /* §۶ + v1.5.1 §۳ — میانبر افزودن رابطهٔ موازی از خود جدول
          (عناصر همهٔ فعالیت‌های پروژه) */
       if (editable) {
-        inner.appendChild(U.h('button', {
-          class: 'icon-btn sm', type: 'button',
-          'aria-label': 'افزودن عنصر موازی برای ' + el.name,
-          title: 'افزودن رابطهٔ موازی — عناصر همهٔ فعالیت‌های پروژه',
-          style: { width: '22px', height: '22px', flexShrink: '0' },
-          onclick: function () { openAddRelationDialog(el); },
-        }, U.icon('network')));
+        inner.appendChild(U.h('div', { class: 'flex items-center gap-0.5', style: { flexShrink: '0' } },
+          rateBtn,
+          U.h('button', {
+            class: 'icon-btn sm', type: 'button',
+            'aria-label': 'افزودن عنصر موازی برای ' + el.name,
+            title: 'افزودن رابطهٔ موازی — عناصر همهٔ فعالیت‌های پروژه',
+            style: { width: '22px', height: '22px', flexShrink: '0' },
+            onclick: function () { openAddRelationDialog(el); },
+          }, U.icon('network'))));
+      } else {
+        inner.appendChild(U.h('div', { class: 'flex items-center gap-0.5', style: { flexShrink: '0' } }, rateBtn));
       }
       th.appendChild(inner);
       return th;

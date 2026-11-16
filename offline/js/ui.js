@@ -356,8 +356,13 @@
     return sel;
   }
   function field(labelText, inputEl, helpContent, hint) {
+    /* v1.5.3 §۲ — آیکون راهنما بیرون از <label> قرار می‌گیرد؛ قبلاً داخل
+       label بود و کل ردیف برچسب، پاپ‌اور راهنما را باز می‌کرد (رفتار
+       پیش‌فرض label روی نخستین فرزند قابل‌برچسب). اکنون فقط خود آیکون کلیک‌پذیر است. */
     return U.h('div', null,
-      U.h('label', { class: 'field-label' }, labelText, helpContent ? helpDot(labelText, helpContent) : null),
+      U.h('div', { class: 'field-label-row' },
+        U.h('label', { class: 'field-label', text: labelText }),
+        helpContent ? helpDot(labelText, helpContent) : null),
       inputEl,
       hint ? U.h('div', { class: 'hint', text: hint }) : null);
   }
@@ -454,7 +459,7 @@
       FUTURE_PHASE: { variant: 'muted', icon: 'lock' },
     };
     var m = map[status] || map.PENDING;
-    var text = status === 'FUTURE_PHASE' ? 'فاز بعدی' : (label || '');
+    var text = label || '';
     return badge(text, m.variant, m.icon);
   }
 

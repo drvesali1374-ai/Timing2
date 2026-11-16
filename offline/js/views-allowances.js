@@ -129,7 +129,7 @@
             U.h('button', { class: 'icon-btn sm', 'aria-label': 'ویرایش تعریف ' + d.title, onclick: function () { openDefinitionDialog(projectId, d, draw); } }, U.icon('pencil')),
             !d.isArchived ? U.h('button', { class: 'icon-btn sm danger', 'aria-label': 'حذف یا بایگانی تعریف ' + d.title, onclick: function () { confirmArchiveDefinition(projectId, d, draw); } }, U.icon('trash')) : null);
           return [
-            U.h('div', { class: 'max-w-64 text-right' },
+            U.h('div', { class: 'max-w-64 text-center' },
               U.h('span', { class: 'text-[13px] font-bold', style: { display: 'block' }, text: d.title }),
               d.code ? U.h('span', { class: 'num text-[10px] text-faint', dir: 'ltr', text: d.code }) : null),
             U.h('div', { class: 'num text-xs' }, defaultLabel,
@@ -372,7 +372,7 @@
             row.hasLocalDecision ? { label: restoreMenuLabel(row), icon: 'rotateCcw', destructive: true, onClick: function () { runOp({ definitionId: row.definitionId, action: 'RESTORE' }, restoreToast(row)); } } : null,
           ].filter(Boolean), { class: 'icon-btn sm', 'aria-label': 'عملیات الونس ' + row.title });
           return [
-            U.h('div', { class: 'max-w-56 text-right' },
+            U.h('div', { class: 'max-w-56 text-center' },
               U.h('span', { class: 'text-[13px] font-bold', style: { display: 'block' }, text: row.title }),
               row.code ? U.h('span', { class: 'num text-[10px] text-faint', dir: 'ltr', text: row.code }) : null),
             U.h('span', { class: 'text-xs' },

@@ -109,6 +109,8 @@
   var SVG_ZOOM_OUT = '<circle cx="11" cy="11" r="8"/><line x1="21" x2="16.65" y1="21" y2="16.65"/><line x1="8" x2="14" y1="11" y2="11"/>';
   var SVG_ZOOM_IN = '<circle cx="11" cy="11" r="8"/><line x1="21" x2="16.65" y1="21" y2="16.65"/><line x1="11" x2="11" y1="8" y2="14"/><line x1="8" x2="14" y1="11" y2="11"/>';
   var SVG_MAXIMIZE = '<polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" x2="14" y1="3" y2="10"/><line x1="3" x2="10" y1="21" y2="14"/>';
+  /* v1.5.3 §۵-هـ — آیکون تمام‌صفحه (چهار گوشه) */
+  var SVG_EXPAND = '<path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/>';
   var SVG_RULER = '<path d="M21.3 15.3a2.4 2.4 0 0 1 0 3.4l-2.6 2.6a2.4 2.4 0 0 1-3.4 0L2.3 8.7a2.41 2.41 0 0 1 0-3.4l2.6-2.6a2.41 2.41 0 0 1 3.4 0Z"/><path d="m14.5 12.5 2-2"/><path d="m11.5 9.5 2-2"/><path d="m8.5 6.5 2-2"/><path d="m17.5 15.5 2-2"/>';
 
   /* ═══ مسیریابی orthogonal یال‌ها — پورت دقیق ChartCanvas.tsx (§۱۵.۴) ═══ */
@@ -586,6 +588,17 @@
   }
   var chartsViewActivePid = null;
   var delEdgeListener = null;    /* حذف یال انتخاب‌شده با Delete/Backspace */
+  var clickEdgeListener = null;  /* v1.5.3 §۵-ب — کلیک خارج یال = لغو انتخاب */
+  var fsBtnRef = null;           /* v1.5.3 §۵-هـ — مرجع دکمهٔ تمام‌صفحه برای Esc */
+  function exitFullscreen() {
+    var rootEl = document.querySelector('.charts-fs');
+    if (rootEl) rootEl.classList.remove('charts-fs');
+    if (fsBtnRef) {
+      fsBtnRef.setAttribute('aria-label', 'تمام‌صفحه');
+      fsBtnRef.title = 'نمایش نمودار در تمام صفحه — محیط طراحی بازتر با همهٔ ابزارها';
+      fsBtnRef.classList.remove('icon-btn-brand');
+    }
+  }
 
   function getViewState(key) {
     if (!viewStateByChart[key]) viewStateByChart[key] = { zoom: 1, pan: { x: 0, y: 0 } };
@@ -742,6 +755,37 @@
           │ [ظاهر/حذف یال §۱۰.۵] │ [خروجی PDF تم متمایز] — دکمه‌ها آیکونی؛
           نام کامل فقط در title (هاور) نمایش داده می‌شود ── */
       var hist = histOf(projectId);
+      /* v1.5.3 §۵-هـ — دکمهٔ تمام‌صفحه: ریشهٔ نما روی کل صفحه می‌نشیند و بوم
+         فضای باقی‌مانده را می‌گیرد؛ همهٔ ابزارها در نوار چسبان در دسترس می‌مانند.
+         ورود = جا دادن نمودار در فضای جدید؛ خروج = Esc یا همین دکمه */
+      var fsBtnEl = null;
+      function fsIsOn() { return root.classList.contains('charts-fs'); }
+      function syncFsBtn() {
+        if (!fsBtnEl) return;
+        var on = fsIsOn();
+        fsBtnRef = fsBtnEl;
+        fsBtnEl.setAttribute('aria-label', on ? 'خروج از تمام‌صفحه' : 'تمام‌صفحه');
+        fsBtnEl.title = on
+          ? 'خروج از حالت تمام‌صفحه (Esc)'
+          : 'نمایش نمودار در تمام صفحه — محیط طراحی بازتر با همهٔ ابزارها';
+        fsBtnEl.classList.toggle('icon-btn-brand', on);
+      }
+      function toggleFullscreen() {
+        var on = root.classList.toggle('charts-fs');
+        syncFsBtn();
+        if (on) setTimeout(function () { try { fitToView(); } catch (e) { /* فقط راحتی */ } }, 60);
+      }
+      function buildFullscreenBtn() {
+        fsBtnEl = U.h('button', {
+          class: 'icon-btn sm', type: 'button',
+          'aria-label': 'تمام‌صفحه',
+          title: 'نمایش نمودار در تمام صفحه — محیط طراحی بازتر با همهٔ ابزارها',
+          onclick: function () { toggleFullscreen(); },
+        }, lucideIcon(SVG_EXPAND));
+        syncFsBtn();
+        return fsBtnEl;
+      }
+
       var toolbarRow = U.h('div', { class: 'flex flex-wrap items-center gap-2' },
         /* ── ایجاد و ویرایش نمودار ── */
         U.h('div', { class: 'tb-group', role: 'group', 'aria-label': 'ایجاد و ویرایش نمودار' },
@@ -859,7 +903,9 @@
           class: 'btn btn-sm btn-pdf', type: 'button',
           title: 'خروجی PDF نمودار — تک‌صفحه‌ای یا تایل‌دار (برداری از دادهٔ نمودار)',
           onclick: function () { openPdfDialog(); },
-        }, U.icon('printer'), 'PDF'));
+        }, U.icon('printer'), 'PDF'),
+        /* v1.5.3 §۵-هـ — تمام‌صفحه: محیط طراحی بازتر با همهٔ ابزارها (OPC و FPC) */
+        buildFullscreenBtn());
       mountSticky(toolbarRow);
 
       /* چیپ‌های شمارش/راهنما — ردیف مستقل زیر بلوک چسبان (نوار فشرده بماند) */
@@ -1096,6 +1142,18 @@
         var h = el ? el.offsetHeight : 0;
         nodeH[n.id] = h > 0 ? h : NH;
       });
+      /* v1.5.3 §۵-الف — نام/زیرنویس چندخطی: اگر کارت بلندتر از برآورد NH
+         شد، بوم تا انتهای واقعی بلندترین کارت گسترش می‌یابد تا کارت
+         پایینی هرگز بریده نشود */
+      var neededH = CH;
+      nodes.forEach(function (n) {
+        neededH = Math.max(neededH, n.positionY + (nodeH[n.id] || NH) + MARGIN);
+      });
+      if (neededH > CH) {
+        CH = Math.ceil(neededH);
+        canvasWrap.style.height = CH + 'px';
+        svg.setAttribute('height', String(CH));
+      }
       redrawEdges();
 
       /* دادهٔ خروجی PDF — snapshot دادهٔ نمودار (نه DOM). سند چاپ در
@@ -1316,10 +1374,10 @@
             U.h('div', { class: 'flex-1 min-w-0' },
               U.h('p', { class: 'cn-label', title: n.label, text: n.label }),
               U.h('p', { class: 'cn-sub', text: (TYPE_LABEL[n.nodeType] || n.nodeType) + (n.isManual ? ' · گره دستی' : (n.stationName ? ' · ' + n.stationName : '')) }))),
-          /* کنترل‌ها — با هاور یا فوکوس نمایان (هم‌ارز وب) */
+          /* کنترل‌ها — با هاور یا فوکوس نمایان (هم‌ارز وب)
+             v1.5.3 §۵-د — دکمه‌های جابه‌جایی بالا/پایین حذف شدند (بی‌کاربرد؛
+             ترتیب با کشیدن اتصال یا کلیدهای جهت‌نما روی گرهٔ فعال تغییر می‌کند) */
           U.h('div', { class: 'node-ctrls' },
-            nodeCtrlBtn('arrowUp', 'جابه‌جایی «' + n.label + '» به بالا در توالی', n.sortOrder === 0, function () { moveNodeOrder(n, 'up'); }),
-            nodeCtrlBtn('arrowDown', 'جابه‌جایی «' + n.label + '» به پایین در توالی', n.sortOrder === nodes.length - 1, function () { moveNodeOrder(n, 'down'); }),
             n.isManual
               ? nodeCtrlBtn('pencil', 'ویرایش گره «' + n.label + '»', false, function () { openManualNodeDialog(n); })
               : null,
@@ -1507,7 +1565,10 @@
       bar.appendChild(U.h('button', {
         class: 'btn btn-sm btn-destructive', type: 'button',
         title: 'حذف اتصال انتخاب‌شده (یا کلید Delete)',
-        onclick: function () { confirmDeleteEdge(selectedEdge || edge); },
+        /* v1.5.3 §۵-ج — رفع باگ: ارجاع به selectedEditor که خارج از render
+           تعریف نشده بود باعث ReferenceError و بی‌اثر شدن دکمه برای یال‌های
+           دستی می‌شد؛ خود پارامتر edge همان یال انتخاب‌شده است */
+        onclick: function () { confirmDeleteEdge(edge); },
       }, U.icon('trash'), 'حذف اتصال'));
       return bar;
     }
@@ -1922,12 +1983,13 @@
       }
     }
 
-    /* ESC → لغو اتصال در جریان (اگر دیالوگی باز نباشد) */
+    /* ESC → لغو اتصال در جریان (اگر دیالوگی باز نباشد)؛ خروج از تمام‌صفحه */
     if (escListener) document.removeEventListener('keydown', escListener);
     escListener = function (e) {
       if (e.key !== 'Escape') return;
       if (!root.isConnected) return;
       if (document.querySelector('.dialog-overlay')) return;
+      if (root.classList.contains('charts-fs')) { exitFullscreen(); return; }
       if (cancelConnectFn) cancelConnectFn();
     };
     document.addEventListener('keydown', escListener);
@@ -1952,6 +2014,23 @@
       confirmDeleteEdge(edge); /* تأییدیهٔ حذف باز می‌شود */
     };
     document.addEventListener('keydown', delEdgeListener);
+
+    /* v1.5.3 §۵-ب — کلیک روی هر جای دیگر صفحه = خروج یال از حالت انتخاب.
+       کلیک روی خود یال، نوار چسبان ابزارها و دیالوگ‌ها محافظت می‌شود؛
+       درگ گره/زمینه با suppressClickUntil کنترل می‌شود. */
+    if (clickEdgeListener) document.removeEventListener('click', clickEdgeListener);
+    clickEdgeListener = function (ev) {
+      if (!root.isConnected) return;
+      if (Date.now() < suppressClickUntil) return;
+      if (document.querySelector('.dialog-overlay')) return;
+      var t = ev.target;
+      if (t && t.closest && (t.closest('.chart-edge') || t.closest('.sticky-heading') || t.closest('.helpdot-pop') || t.closest('.dd-menu'))) return;
+      if (selectedEdgeByProject[projectId]) {
+        delete selectedEdgeByProject[projectId];
+        render();
+      }
+    };
+    document.addEventListener('click', clickEdgeListener);
 
     render();
   };

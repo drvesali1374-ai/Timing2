@@ -1066,14 +1066,46 @@
     return { 'ارزیابی ارجاع‌دار به این جدول': inUse };
   }
   function getElementRating(elementId) {
-    var ra = state.ratingAssessments.find(function (r) { return r.workElementId === elementId; });
+    /* v1.5.3 §۱ — ارزیابی «عمومی» عنصر (بدون اپراتور مشخص؛ میراث نسخه‌های
+       قبل). ارزیابی‌های اختصاصی اپراتور با getOperatorElementRating خوانده می‌شوند. */
+    var ra = state.ratingAssessments.find(function (r) { return r.workElementId === elementId && !r.operatorId; });
     if (!ra) return null;
     var t = byId('ratingTables', ra.ratingTableId);
     return { assessment: ra, table: t || null };
   }
-  function saveElementRating(elementId, input) {
+  function getOperatorElementRating(operatorId, elementId) {
+    var ra = state.ratingAssessments.find(function (r) { return r.workElementId === elementId && r.operatorId === operatorId; });
+    if (!ra) return null;
+    var t = byId('ratingTables', ra.ratingTableId);
+    return { assessment: ra, table: t || null };
+  }
+  function listOperatorElementRatings(elementId) {
+    return state.ratingAssessments
+      .filter(function (r) { return r.workElementId === elementId && r.operatorId; })
+      .map(function (r) {
+        return { assessment: r, table: byId('ratingTables', r.ratingTableId) || null, operator: byId('operators', r.operatorId) || null };
+      })
+      .sort(function (a, b) {
+        var na = a.operator ? a.operator.displayName : '~';
+        var nb = b.operator ? b.operator.displayName : '~';
+        return cmpStr(na, nb);
+      });
+  }
+  function elementHasAnyRating(elementId) {
+    return state.ratingAssessments.some(function (r) { return r.workElementId === elementId; });
+  }
+  /* مرجع ترکیبی برای کپی ارزیابی: «elementId» (عمومی) یا «elementId|operatorId» */
+  function getRatingByRef(ref) {
+    var s = String(ref || '');
+    var sep = s.indexOf('|');
+    if (sep >= 0) return getOperatorElementRating(s.slice(sep + 1), s.slice(0, sep));
+    return getElementRating(s);
+  }
+  /* هستهٔ مشترک ذخیرهٔ ارزیابی — v1.5.3 §۱: کلید = (عنصر، اپراتور؟) */
+  function upsertRatingAssessment(elementId, operatorId, input) {
     var e = byId('workElements', elementId);
     if (!e) throw new Error('عنصر کاری یافت نشد.');
+    if (operatorId && !byId('operators', operatorId)) throw new Error('اپراتور یافت نشد.');
     var t = byId('ratingTables', input.ratingTableId);
     if (!t) throw new Error('جدول ارزیابی یافت نشد.');
     var grades = filterBy('ratingTableGrades', 'ratingTableId', t.id);
@@ -1090,7 +1122,7 @@
       consistency: valFor('CONSISTENCY', input.consistencyGrade || null),
     };
     var totalFactor = F.computeRatingFactor(vals);
-    var existing = state.ratingAssessments.find(function (r) { return r.workElementId === elementId; });
+    var existing = state.ratingAssessments.find(function (r) { return r.workElementId === elementId && (r.operatorId || null) === (operatorId || null); });
     if (existing) {
       Object.assign(existing, {
         ratingTableId: t.id,
@@ -1102,7 +1134,7 @@
       touch(existing);
     } else {
       state.ratingAssessments.push({
-        id: U.uid(), workElementId: elementId, ratingTableId: t.id,
+        id: U.uid(), workElementId: elementId, operatorId: operatorId || null, ratingTableId: t.id,
         skillGrade: input.skillGrade || null, effortGrade: input.effortGrade || null,
         conditionsGrade: input.conditionsGrade || null, consistencyGrade: input.consistencyGrade || null,
         skillValue: vals.skill, effortValue: vals.effort, conditionsValue: vals.conditions, consistencyValue: vals.consistency,
@@ -1111,15 +1143,49 @@
       });
     }
     markProjectCalculationsStale(projectIdOfActivity(e.activityId));
-    recordAudit({ entityType: 'RatingAssessment', entityId: elementId, action: 'CREATE', entityName: e.name, after: { totalFactor: totalFactor, table: t.name }, projectId: projectIdOfActivity(e.activityId) });
+    recordAudit({
+      entityType: 'RatingAssessment', entityId: elementId, action: 'CREATE', entityName: e.name,
+      after: { totalFactor: totalFactor, table: t.name, operatorId: operatorId || null },
+      projectId: projectIdOfActivity(e.activityId),
+    });
     commit();
     return totalFactor;
+  }
+  function saveElementRating(elementId, input) {
+    return upsertRatingAssessment(elementId, null, input);
+  }
+  /* v1.5.3 §۱ — ارزیابی اختصاصی «اپراتور × عنصر»: مهارت/تلاش/شرایط/یکنواختی
+     هر اپراتور برای هر عنصر جداگانه تعیین می‌شود (اپراتور A در عنصری ماهر و
+     در عنصر دیگر متوسط می‌تواند باشد). از جدول ثبت زمان (صفحهٔ زمان‌سنجی) ثبت می‌شود. */
+  function saveOperatorElementRating(operatorId, elementId, input) {
+    if (!operatorId) throw new Error('اپراتور برای ارزیابی اختصاصی مشخص نیست.');
+    return upsertRatingAssessment(elementId, operatorId, input);
   }
   function deleteElementRating(elementId) {
     state.ratingAssessments = state.ratingAssessments.filter(function (r) { return r.workElementId !== elementId; });
     var e = byId('workElements', elementId);
     if (e) markProjectCalculationsStale(projectIdOfActivity(e.activityId));
     commit();
+  }
+  function deleteOperatorElementRating(operatorId, elementId) {
+    state.ratingAssessments = state.ratingAssessments.filter(function (r) { return !(r.workElementId === elementId && r.operatorId === operatorId); });
+    var e = byId('workElements', elementId);
+    if (e) markProjectCalculationsStale(projectIdOfActivity(e.activityId));
+    commit();
+  }
+  /* اپراتورهایی که برای این عنصر ثبت زمان (مشاهده) دارند — برای هشدارهای
+     تکمیل‌نشدگی ارزیابی در صفحهٔ وستینگهاوس */
+  function timingOperatorsOfElement(elementId) {
+    var out = {};
+    var obs = filterBy('elementObservations', 'workElementId', elementId);
+    obs.forEach(function (o) {
+      var c = byId('cycleObservations', o.cycleId);
+      if (!c) return;
+      var s = byId('studySessions', c.sessionId);
+      if (!s) return;
+      out[s.operatorId] = true;
+    });
+    return Object.keys(out);
   }
   function getRatingMatrix(projectId) {
     var els = [];
@@ -1128,10 +1194,29 @@
     });
     return els.map(function (x) {
       var r = getElementRating(x.element.id);
+      var opRatings = listOperatorElementRatings(x.element.id).map(function (o) {
+        return {
+          operatorId: o.assessment.operatorId,
+          operatorName: o.operator ? o.operator.displayName : 'اپراتور حذف‌شده',
+          totalFactor: o.assessment.totalFactor,
+          tableName: o.table ? o.table.name : null,
+          tableVersion: o.table ? o.table.version : null,
+          updatedAt: o.assessment.updatedAt,
+        };
+      });
+      var timingOps = timingOperatorsOfElement(x.element.id);
+      var missingOps = timingOps.filter(function (oid) {
+        return !opRatings.some(function (orr) { return orr.operatorId === oid; });
+      });
       return {
         element: x.element, activity: x.activity,
-        rated: !!r, totalFactor: r ? r.assessment.totalFactor : null,
+        rated: !!r || opRatings.length > 0,
+        totalFactor: r ? r.assessment.totalFactor : null,
         tableName: r && r.table ? r.table.name : null, tableVersion: r && r.table ? r.table.version : null,
+        legacyRating: r ? { totalFactor: r.assessment.totalFactor, tableName: r.table ? r.table.name : null, tableVersion: r.table ? r.table.version : null } : null,
+        operatorRatings: opRatings,
+        timingOperatorIds: timingOps,
+        missingRatingOperatorIds: missingOps,
       };
     });
   }
@@ -1775,11 +1860,28 @@
       });
       var samplesArr = Object.keys(perOperatorSamples).map(function (oid) { return { operatorId: oid, values: perOperatorSamples[oid] }; });
       var agg = F.aggregateElement(samplesArr, aggregationMethod);
-      var rating = state.ratingAssessments.find(function (r) { return r.workElementId === el.id; });
+      /* v1.5.3 §۱ — ارزیابی دوسطحی: (۱) ارزیابی عمومی عنصر (میراث نسخه‌های
+         قبل)؛ (۲) ارزیابی اختصاصی هر اپراتور برای همین عنصر. NT عنصر از
+         ارزیابی عمومی می‌آید و اگر نبود، میانگین وزنی ارزیابی‌های اپراتورها
+         (وزن = تعداد مشاهدات در محاسبات) به کار می‌رود. */
+      var rating = state.ratingAssessments.find(function (r) { return r.workElementId === el.id && !r.operatorId; });
+      var opRatingByOp = {};
+      state.ratingAssessments.forEach(function (r) {
+        if (r.workElementId === el.id && r.operatorId) opRatingByOp[r.operatorId] = r;
+      });
       var ratingDto = null;
       if (rating) {
         var t = byId('ratingTables', rating.ratingTableId);
-        ratingDto = { totalFactor: rating.totalFactor, tableName: t ? t.name : '؟', tableVersion: t ? t.version : 0 };
+        ratingDto = { totalFactor: rating.totalFactor, tableName: t ? t.name : '؟', tableVersion: t ? t.version : 0, source: 'ELEMENT' };
+      } else {
+        var wSum = 0, wCnt = 0;
+        Object.keys(perOperatorSamples).forEach(function (oid) {
+          var orr = opRatingByOp[oid];
+          if (orr) { wSum += orr.totalFactor * perOperatorSamples[oid].length; wCnt += perOperatorSamples[oid].length; }
+        });
+        if (wCnt > 0) {
+          ratingDto = { totalFactor: F.round12(wSum / wCnt), tableName: 'میانگین وزنی ارزیابی اپراتورها', tableVersion: null, source: 'OPERATOR_WEIGHTED' };
+        }
       }
       var ot = agg.value;
       var nt = ot !== null && ratingDto !== null ? F.round12(ot * ratingDto.totalFactor) : null;
@@ -1799,7 +1901,10 @@
       Object.keys(perOperatorSamples).forEach(function (oid) {
         var opStats = F.descriptiveStats(perOperatorSamples[oid]);
         var opMean = opStats.mean;
-        var opNt = opMean !== null && ratingDto !== null ? F.round12(opMean * ratingDto.totalFactor) : null;
+        /* v1.5.3 §۱ — NT هر اپراتور از ارزیابی اختصاصی همان اپراتور؛ در
+           نبود آن، ارزیابی مؤثر عنصر (عمومی یا میانگین وزنی) */
+        var opEffR = opRatingByOp[oid] ? opRatingByOp[oid].totalFactor : (ratingDto ? ratingDto.totalFactor : null);
+        var opNt = opMean !== null && opEffR !== null ? F.round12(opMean * opEffR) : null;
         var opSt = null;
         if (opNt !== null) { try { opSt = F.computeElementStandardTime(opNt, elFactors, allowanceMethod).st; } catch (e) { opSt = null; } }
         var opRows = rows.filter(function (r) { return r.ctx.session.operatorId === oid; });
@@ -3389,6 +3494,9 @@
     createRatingTableVersion: createRatingTableVersion, updateRatingTableMeta: updateRatingTableMeta,
     updateRatingTableGrade: updateRatingTableGrade, deleteRatingTable: deleteRatingTable,
     getElementRating: getElementRating, saveElementRating: saveElementRating, deleteElementRating: deleteElementRating,
+    getOperatorElementRating: getOperatorElementRating, saveOperatorElementRating: saveOperatorElementRating,
+    deleteOperatorElementRating: deleteOperatorElementRating, listOperatorElementRatings: listOperatorElementRatings,
+    elementHasAnyRating: elementHasAnyRating, getRatingByRef: getRatingByRef, timingOperatorsOfElement: timingOperatorsOfElement,
     getRatingMatrix: getRatingMatrix,
 
     listSessions: listSessions, createSession: createSession, updateSession: updateSession,

@@ -89,10 +89,13 @@
     return s.length > 400 ? s.slice(0, 400) + '…' : s;
   }
 
-  /* فیلد با برچسب راهنمای مستقل (برخلاف UI.field، متن helpDot دقیقاً از مشخصات) */
+  /* فیلد با برچسب راهنمای مستقل (برخلاف UI.field، متن helpDot دقیقاً از مشخصات)
+     v1.5.3 §۲ — آیکون راهنما بیرون از <label>؛ فقط خود آیکون کلیک‌پذیر است */
   function fieldWithHelp(labelText, helpLabel, helpContent, inputEl, hint) {
     return U.h('div', null,
-      U.h('label', { class: 'field-label' }, labelText, helpContent ? UI.helpDot(helpLabel, helpContent) : null),
+      U.h('div', { class: 'field-label-row' },
+        U.h('label', { class: 'field-label', text: labelText }),
+        helpContent ? UI.helpDot(helpLabel, helpContent) : null),
       inputEl,
       hint ? U.h('div', { class: 'hint', text: hint }) : null);
   }

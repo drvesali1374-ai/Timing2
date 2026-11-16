@@ -26,6 +26,13 @@
   var _treeSearch = {}; // جست‌وجوی درخت per پروژه — §۷.۴
   var _drag = null; // درگ جاری: { type, id, scope } — اصلاح الزام ۱: تعریف مستقل (پیشتر دراثر کامنت داشت و ReferenceError می‌داد)
 
+  // ── v1.5.3 §۳ — زبانهٔ «نماهای تفکیکی و درختی» (جدا از ساختار سلسله‌مراتبی؛
+  //     بدون هیچ تغییری در نمای موجود) ──
+  var _structureMainTab = {}; // projectId -> 'hierarchy' | 'explorer'
+  var _explorerSubTab = {};  // projectId -> 'tree' | 'stations' | 'activities' | 'elements'
+  var _explorerOpen = {};    // stationId -> bool (باز/بسته شاخه درخت ساده؛ پیش‌فرض باز)
+  var _explorerReturn = null; // { projectId } — نشان دادن دکمهٔ بازگشت در صفحهٔ فعالیت
+
   // بازبینی تکمیلی ج۱ (§۴): هنگام جست‌وجوی فعال، مرتب‌سازی درخت قفل می‌شود.
   // آرایه reorder باید همیشه «کل» فرزندان را پوشش دهد؛ با فیلتر، گره‌های پنهان از
   // محاسبه حذف می‌شوند و sortOrder تکراری/ترتیب نامطمئن پس از بارگذاری می‌سازد.
@@ -48,7 +55,7 @@
     what: 'فعالیت کار قابل‌تعریف و مستقلی در ایستگاه است که از عناصر کاری تشکیل می‌شود و صفحه اختصاصی چهارزبانه دارد: مشخصات، عناصر کاری، زمان‌سنجی و تحلیل نتایج.',
     input: 'نامی کوتاه و گویا؛ ترجیحاً فعل + مفعول.',
     example: '«بستن درب پنل» یا «کنترل کیفیت نهایی»',
-    note: 'نوع رویداد فرایندی فعالیت در نمودارهای فرایند (فاز ۵) با نماد ASCME نمایش داده می‌شود.',
+    note: 'نوع رویداد فرایندی فعالیت در نمودارهای فرایند با نماد ASCME نمایش داده می‌شود.',
   };
   var ELEMENT_NAME_HELP = {
     what: 'عنصر کاری کوچک‌ترین واحد قابل‌اندازه‌گیری فعالیت است؛ شناسه آن پایدار است و تغییر نام، ارتباط تاریخی و گره‌های نموداری را از بین نمی‌برد.',
@@ -376,8 +383,8 @@
       window.addEventListener('pointercancel', onWindowUp);
       timer = setTimeout(function () {
         timer = null;
-        // شنونده‌های pointermove/up متصل می‌مانند — فاز انتظار با پرچم dragging
-        // از فاز درگ جدا می‌شود (در پایان درگ در cleanup حذف می‌شوند).
+        // شنونده‌های pointermove/up متصل می‌مانند — حالت انتظار با پرچم dragging
+        // از حالت درگ جدا می‌شود (در پایان درگ در cleanup حذف می‌شوند).
         dragging = true;
         suppressClick = true;
         _drag = { type: type, id: id, scope: scope };
@@ -512,6 +519,24 @@
         U.h('h1', { class: 'text-xl font-extrabold', text: 'ساختار تولید' }),
         U.h('p', { class: 'text-sm text-muted num', text: U.formatInt(stations.length) + ' ایستگاه · ' + U.formatInt(totalActs) + ' فعالیت · ' + U.formatInt(totalEls) + ' عنصر کاری' })))));
 
+    /* v1.5.3 §۳ — دو زبانهٔ مستقل: «ساختار سلسله‌مراتبی» (نمای موجود، بدون
+       هیچ تغییری) و «نماهای تفکیکی و درختی» (فهرست جدا + درخت ساده لینک‌دار) */
+    var mainTab = _structureMainTab[projectId] || 'hierarchy';
+    var tabsWrap = U.h('div', { class: 'mt-3' },
+      UI.tabsBar([
+        { key: 'hierarchy', label: 'ساختار سلسله‌مراتبی', icon: 'listTree' },
+        { key: 'explorer', label: 'نماهای تفکیکی و درختی', icon: 'folderTree' },
+      ], mainTab, function (k) {
+        _structureMainTab[projectId] = k;
+        appRefresh();
+      }));
+    container.appendChild(tabsWrap);
+
+    if (mainTab === 'explorer') {
+      container.appendChild(U.h('div', { class: 'mt-4' }, buildExplorerView(ctx, stations)));
+      return;
+    }
+
     // ── بدنه: درخت + جزئیات — دو ستون هم‌عرض (۵۰-۵۰) ──
     var treeCol = U.h('div', { class: 'w-full shrink-0 t2-tree-col' }, buildTreeCard(ctx, stations));
     var detailsCol = U.h('div', { class: 'flex-1 min-w-0 w-full' });
@@ -533,6 +558,204 @@
 
     container.appendChild(U.h('div', { class: 'flex flex-col lg:flex-row gap-4 items-start t2-two-col' }, treeCol, detailsCol));
   };
+
+  // ═══════════════════════════════════════════════════════════
+  // v1.5.3 §۳ — نماهای تفکیکی و درختی (زبانهٔ مستقل، جدا از سلسله‌مراتب)
+  // ایستگاه‌ها جدا / فعالیت‌ها جدا / عناصر کاری جدا + درخت سادهٔ لینک‌دار؛
+  // کلیک روی هر مورد به صفحهٔ مربوط به آن می‌رود و دکمهٔ بازگشت برمی‌گرداند.
+  // ═══════════════════════════════════════════════════════════
+  function explorerGoActivity(projectId, activityId) {
+    _explorerReturn = { projectId: projectId };
+    appNavigate('/p/' + projectId + '/activity/' + activityId);
+  }
+  function explorerGoStation(projectId, stationId) {
+    /* ایستگاه صفحهٔ مستقل ندارد؛ نمای سلسله‌مراتبی با انتخاب همین ایستگاه باز می‌شود */
+    _structureMainTab[projectId] = 'hierarchy';
+    selectStation(projectId, stationId);
+  }
+
+  function buildExplorerView(ctx, stations) {
+    var projectId = ctx.projectId;
+    var sub = _explorerSubTab[projectId] || 'tree';
+    var wrap = U.h('div', { class: 'flex flex-col gap-4' });
+
+    wrap.appendChild(UI.tabsBar([
+      { key: 'tree', label: 'نمای درختی ساده', icon: 'listTree' },
+      { key: 'stations', label: 'همهٔ ایستگاه‌ها', icon: 'factory' },
+      { key: 'activities', label: 'همهٔ فعالیت‌ها', icon: 'workflow' },
+      { key: 'elements', label: 'همهٔ عناصر کاری', icon: 'tags' },
+    ], sub, function (k) { _explorerSubTab[projectId] = k; appRefresh(); }));
+
+    wrap.appendChild(U.h('p', {
+      class: 'text-xs leading-relaxed',
+      style: { color: 'var(--muted-foreground)' },
+      text: 'این نماها مستقل از ساختار سلسله‌مراتبی‌اند: با کلیک روی هر ایستگاه، فعالیت یا عنصر کاری، به صفحهٔ مربوط به آن می‌روید و با دکمهٔ «بازگشت» به همین‌جا برمی‌گردید.',
+    }));
+
+    if (sub === 'tree') wrap.appendChild(explorerTree(projectId, stations));
+    else if (sub === 'stations') wrap.appendChild(explorerFlatList(projectId, 'stations', stations));
+    else if (sub === 'activities') wrap.appendChild(explorerFlatList(projectId, 'activities', stations));
+    else wrap.appendChild(explorerFlatList(projectId, 'elements', stations));
+
+    return wrap;
+  }
+
+  /* ── درخت سادهٔ سه‌سطحی: ایستگاه ← فعالیت ← عنصر کاری (مختصر و لینک‌دار) ── */
+  function explorerTree(projectId, stations) {
+    if (stations.length === 0) {
+      return U.h('section', { class: 'card p-6' }, UI.emptyState({
+        title: 'هنوز ایستگاهی ثبت نشده است',
+        desc: 'برای دیدن درخت، ابتدا در زبانهٔ «ساختار سلسله‌مراتبی» ایستگاه و فعالیت بسازید.',
+        icon: 'factory',
+      }));
+    }
+    var host = U.h('div', { class: 'flex flex-col gap-2' });
+    stations.forEach(function (st) {
+      var acts = DB.sortActivities(st.id);
+      var elTotal = 0;
+      acts.forEach(function (a) { elTotal += DB.sortElements(a.id).length; });
+      var open = _explorerOpen[st.id] !== false;
+
+      var actHost = U.h('div', { class: 'flex flex-col gap-1', style: { marginInlineStart: '18px', borderInlineStart: '1px dashed var(--border)', paddingInlineStart: '10px' } });
+      if (open) {
+        if (acts.length === 0) {
+          actHost.appendChild(U.h('p', { class: 'text-xs', style: { color: 'var(--faint)', margin: 0 } }, 'فعالیتی ندارد'));
+        }
+        acts.forEach(function (a) {
+          var els = DB.sortElements(a.id);
+          var actRow = U.h('button', {
+            class: 't2x-row', type: 'button',
+            title: 'رفتن به صفحهٔ فعالیت «' + a.name + '» (مشخصات، عناصر، زمان‌سنجی و تحلیل)',
+            onclick: function () { explorerGoActivity(projectId, a.id); },
+          },
+            U.h('span', { class: 'num text-[10px]', style: { color: 'var(--brand)', fontWeight: 800 }, text: String.fromCharCode(9633) + ' ' }),
+            U.h('span', { class: 'font-semibold', style: { fontSize: '13px' }, text: a.name }),
+            U.h('span', { class: 'text-[10px]', style: { color: 'var(--muted-foreground)' },
+              text: ' ' + processLabelOf(a.processType) + ' · ' + U.formatInt(els.length) + ' عنصر' }),
+            U.h('span', { class: 'spacer' }),
+            U.icon('squareArrowOutUpRight', 'i16'));
+          actHost.appendChild(actRow);
+
+          els.forEach(function (e) {
+            actHost.appendChild(U.h('button', {
+              class: 't2x-row sub', type: 'button',
+              title: 'رفتن به صفحهٔ فعالیت «' + a.name + '» — عنصر «' + e.name + '» در جدول ثبت زمان همان فعالیت ثبت/مصرف می‌شود',
+              onclick: function () { explorerGoActivity(projectId, a.id); },
+            },
+              U.h('span', { class: 'text-[10px]', style: { color: 'var(--muted-foreground)' }, text: '• ' }),
+              U.h('span', { style: { fontSize: '12px' }, text: e.name }),
+              U.h('span', { class: 'spacer' })));
+          });
+        });
+      }
+
+      var stCard = U.h('div', { class: 'card p-2.5' },
+        U.h('div', { class: 'flex items-center gap-2' },
+          U.h('button', {
+            class: 'icon-btn sm shrink-0', type: 'button',
+            'aria-label': (open ? 'بستن' : 'بازکردن') + ' شاخهٔ ' + st.name,
+            title: open ? 'بستن شاخه' : 'بازکردن شاخه',
+            onclick: function () { _explorerOpen[st.id] = !open; appRefresh(); },
+          }, U.icon(open ? 'chevronDown' : 'chevronLeft')),
+          U.h('button', {
+            class: 'flex min-w-0 flex-1 items-center gap-2', type: 'button',
+            style: { background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontFamily: 'inherit', textAlign: 'start' },
+            title: 'نمایش «' + st.name + '» در ساختار سلسله‌مراتبی',
+            onclick: function () { explorerGoStation(projectId, st.id); },
+          },
+            U.h('span', { class: 'chip-icon', style: { width: '28px', height: '28px' } }, U.icon('factory')),
+            U.h('span', { class: 'min-w-0' },
+              U.h('span', { class: 'block truncate font-bold', style: { fontSize: '13px' }, text: st.name }),
+              U.h('span', { class: 'block num text-[10px]', style: { color: 'var(--muted-foreground)' },
+                text: U.formatInt(acts.length) + ' فعالیت · ' + U.formatInt(elTotal) + ' عنصر کاری' })))),
+        open ? actHost : null);
+      host.appendChild(stCard);
+    });
+    return host;
+  }
+
+  /* ── فهرست تفکیکی: فقط ایستگاه‌ها یا فقط فعالیت‌ها یا فقط عناصر کاری ── */
+  function explorerFlatList(projectId, kind, stations) {
+    var rows = [];
+    var headers;
+    if (kind === 'stations') {
+      headers = ['ایستگاه', 'تعداد فعالیت', 'تعداد عنصر کاری'];
+      stations.forEach(function (st) {
+        var acts = DB.sortActivities(st.id);
+        var elTotal = 0;
+        acts.forEach(function (a) { elTotal += DB.sortElements(a.id).length; });
+        rows.push({ st: st, acts: acts, elTotal: elTotal });
+      });
+      if (rows.length === 0) {
+        return U.h('section', { class: 'card p-6' }, UI.emptyState({ title: 'هنوز ایستگاهی ثبت نشده است', icon: 'factory' }));
+      }
+      return UI.table(headers, function (tbody) {
+        rows.forEach(function (r) {
+          tbody.appendChild(U.h('tr', { class: 'card-hover' },
+            U.h('td', { class: 'font-medium' },
+              U.h('button', {
+                class: 't2x-linklike', type: 'button',
+                title: 'نمایش «' + r.st.name + '» در ساختار سلسله‌مراتبی',
+                onclick: function () { explorerGoStation(projectId, r.st.id); },
+              }, r.st.name)),
+            U.h('td', { class: 'num' }, U.formatInt(r.acts.length)),
+            U.h('td', { class: 'num' }, U.formatInt(r.elTotal))));
+        });
+      });
+    }
+    if (kind === 'activities') {
+      headers = ['فعالیت', 'ایستگاه', 'نوع فرایندی', 'عناصر کاری'];
+      var actRows = [];
+      stations.forEach(function (st) {
+        DB.sortActivities(st.id).forEach(function (a) {
+          actRows.push({ a: a, st: st, els: DB.sortElements(a.id).length });
+        });
+      });
+      if (actRows.length === 0) {
+        return U.h('section', { class: 'card p-6' }, UI.emptyState({ title: 'هنوز فعالیتی ثبت نشده است', icon: 'workflow' }));
+      }
+      return UI.table(headers, function (tbody) {
+        actRows.forEach(function (r) {
+          tbody.appendChild(U.h('tr', { class: 'card-hover' },
+            U.h('td', { class: 'font-medium' },
+              U.h('button', {
+                class: 't2x-linklike', type: 'button',
+                title: 'رفتن به صفحهٔ فعالیت «' + r.a.name + '»',
+                onclick: function () { explorerGoActivity(projectId, r.a.id); },
+              }, r.a.name)),
+            U.h('td', null, r.st.name),
+            U.h('td', null, processSymbolOf(r.a.processType) + ' ' + processLabelOf(r.a.processType)),
+            U.h('td', { class: 'num' }, U.formatInt(r.els))));
+        });
+      });
+    }
+    /* عناصر کاری */
+    headers = ['عنصر کاری', 'فعالیت', 'ایستگاه'];
+    var elRows = [];
+    stations.forEach(function (st) {
+      DB.sortActivities(st.id).forEach(function (a) {
+        DB.sortElements(a.id).forEach(function (e) {
+          elRows.push({ e: e, a: a, st: st });
+        });
+      });
+    });
+    if (elRows.length === 0) {
+      return U.h('section', { class: 'card p-6' }, UI.emptyState({ title: 'هنوز عنصر کاری ثبت نشده است', icon: 'tags' }));
+    }
+    return UI.table(headers, function (tbody) {
+      elRows.forEach(function (r) {
+        tbody.appendChild(U.h('tr', { class: 'card-hover' },
+          U.h('td', { class: 'font-medium' },
+            U.h('button', {
+              class: 't2x-linklike', type: 'button',
+              title: 'رفتن به صفحهٔ فعالیت «' + r.a.name + '» (جدول ثبت زمان همین عنصر در آنجاست)',
+              onclick: function () { explorerGoActivity(projectId, r.a.id); },
+            }, r.e.name)),
+          U.h('td', null, r.a.name),
+          U.h('td', null, r.st.name)));
+      });
+    });
+  }
 
   // ── کارت درخت ساختار — چهار سطح + جست‌وجو (§۷) ──
   function buildTreeCard(ctx, stations) {
@@ -1220,12 +1443,27 @@
     }
     var station = DB.getStation(activity.stationId);
     var elements = DB.sortElements(activityId);
+    /* v1.5.3 §۱ — عنصر «ارزیابی‌شده» = ارزیابی عمومی یا حداقل یک ارزیابی اپراتور */
     var ratedCount = 0;
-    elements.forEach(function (e) { if (DB.getElementRating(e.id)) ratedCount++; });
+    elements.forEach(function (e) { if (DB.elementHasAnyRating(e.id)) ratedCount++; });
 
     var ctx = { projectId: projectId, activity: activity, station: station };
     var tab = _activityTab[activityId] || 'info';
     var processLabel = processLabelOf(activity.processType);
+
+    /* v1.5.3 §۳ — دکمهٔ بازگشت: اگر از «نماهای تفکیکی و درختی» ساختار آمده باشید */
+    if (_explorerReturn && _explorerReturn.projectId === projectId) {
+      container.appendChild(U.h('div', { class: 'mb-2' },
+        U.h('button', {
+          class: 'btn btn-sm btn-outline', type: 'button',
+          title: 'بازگشت به زبانهٔ «نماهای تفکیکی و درختی» در صفحهٔ ساختار تولید',
+          onclick: function () {
+            _explorerReturn = null;
+            _structureMainTab[projectId] = 'explorer';
+            appNavigate('/p/' + projectId + '/structure');
+          },
+        }, U.icon('arrowRight'), 'بازگشت به نماهای ساختار')));
+    }
 
     // ── مسیر (breadcrumb) ──
     container.appendChild(U.h('nav', { class: 'text-xs text-muted flex items-center gap-1 flex-wrap mb-2', 'aria-label': 'مسیر فعالیت' },
@@ -1313,7 +1551,7 @@
     return U.h('div', { class: 'banner success mt-3' }, U.icon('checkCircle'),
       U.h('div', null,
         U.h('b', { text: 'همه عناصر این فعالیت ارزیابی شده‌اند.' }),
-        U.h('span', { text: 'ثبت مشاهدات در مرحله «زمان‌سنجی» (فاز ۳) انجام می‌شود.' })));
+        U.h('span', { text: 'ثبت مشاهدات در صفحهٔ «زمان‌سنجی» انجام می‌شود.' })));
   }
 
   // ── زبانه ۱: مشخصات فعالیت ──
@@ -1403,7 +1641,7 @@
       section.appendChild(UI.emptyState({
         icon: 'listTree',
         title: 'هنوز عنصر کاری ثبت نشده است',
-        desc: 'هر چرخه فعالیت از عناصر کاری تشکیل می‌شود؛ برای زمان‌سنجی (فاز ۳) حداقل به یک عنصر نیاز دارید.',
+        desc: 'هر چرخه فعالیت از عناصر کاری تشکیل می‌شود؛ برای زمان‌سنجی حداقل به یک عنصر نیاز دارید.',
         actionLabel: 'ثبت اولین عنصر کاری',
         onAction: function () { openElementDialog(activity.id, null); },
       }));

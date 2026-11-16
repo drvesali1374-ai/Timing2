@@ -256,6 +256,21 @@ svg.icon { width: 16px; height: 16px; flex-shrink: 0; }
     0 0 14px color-mix(in srgb, var(--amber) 45%, transparent);
 }
 .icon-btn.bulb-on .icon { filter: drop-shadow(0 0 5px color-mix(in srgb, var(--amber) 70%, transparent)); }
+
+/* v1.5.3 §۹ — لامپ راهنمای هدر: کمی بزرگ‌تر + چشمک هر ۴ ثانیه (روشن، سپس خاموش).
+   وقتی پنل راهنما باز است (bulb-on) چشمک متوقف و لامپ پیوسته روشن می‌ماند. */
+.icon-btn.lg.lamp-blink { width: 42px; height: 42px; }
+.icon-btn.lg.lamp-blink .icon { width: 22px; height: 22px; }
+@keyframes t2-lamp-blink {
+  0%   { color: var(--muted-foreground); filter: none; }
+  6%   { color: var(--amber); filter: drop-shadow(0 0 6px color-mix(in srgb, var(--amber) 75%, transparent)); }
+  46%  { color: var(--amber); filter: drop-shadow(0 0 6px color-mix(in srgb, var(--amber) 75%, transparent)); }
+  56%  { color: var(--muted-foreground); filter: none; }
+  100% { color: var(--muted-foreground); filter: none; }
+}
+.icon-btn.lamp-blink:not(.bulb-on) { animation: t2-lamp-blink 4s ease-in-out infinite; }
+.icon-btn.lamp-blink:not(.bulb-on):hover { animation-play-state: paused; color: var(--amber); }
+@media (prefers-reduced-motion: reduce) { .icon-btn.lamp-blink:not(.bulb-on) { animation: none; } }
 .help-panel .hp-head-chip {
   width: 32px; height: 32px; border-radius: calc(var(--radius) + 5px); flex-shrink: 0;
   display: inline-flex; align-items: center; justify-content: center;
@@ -373,6 +388,9 @@ svg.icon { width: 16px; height: 16px; flex-shrink: 0; }
      توضیح بلند right (RTL). عددها tabular-nums + ltr. */
   table.table th, table.tbl th { text-align: center; }
   table.table td, table.tbl td { text-align: center; }
+  /* v1.5.3 — محتوای سلول‌های جدول نیز وسط‌چین: اگر تنها فرزند سلول یک
+     ظرف flex باشد، محتوای آن وسط‌چین می‌شود (هم‌ارز هدر) */
+  table.table td > .flex:only-child, table.tbl td > .flex:only-child { justify-content: center; }
   table.table td.tbl-text, table.tbl td.tbl-text,
   table.table td.text-right, table.tbl td.text-right { text-align: right; }
   table.table td.tbl-num, table.tbl td.tbl-num {
@@ -453,6 +471,10 @@ svg.icon { width: 16px; height: 16px; flex-shrink: 0; }
 
 /* ── فرم ── */
 .field-label { display: block; font-size: 12.5px; font-weight: 600; margin-bottom: 5px; color: var(--foreground); }
+/* v1.5.3 §۲ — ردیف برچسب فیلد: برچسب و آیکون راهنما کنار هم؛ فقط خود آیکون
+   کلیک‌پذیر است (قبلاً آیکون داخل <label> بود و کل ردیف، راهنما را باز می‌کرد) */
+.field-label-row { display: flex; align-items: center; gap: 4px; margin-bottom: 5px; }
+.field-label-row .field-label { margin-bottom: 0; }
 .input, .textarea, .select {
   width: 100%; min-height: 36px; padding: 6px 12px; border-radius: calc(var(--radius) - 2px);
   border: 1px solid var(--input); background: var(--card); color: var(--foreground);
@@ -503,7 +525,7 @@ select.select { appearance: none; background-image: url("data:image/svg+xml,%3Cs
 .table-wrap { width: 100%; overflow-x: auto; border-radius: var(--radius); border: 1px solid var(--border); background: var(--card); }
 table.table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
 table.table th {
-  background: var(--surface-2); font-weight: 600; text-align: start; padding: 8px 12px;
+  background: var(--surface-2); font-weight: 600; text-align: center; padding: 8px 12px;
   border-bottom: 1px solid var(--border); white-space: nowrap; font-size: 11.5px; color: var(--muted-foreground);
 }
 table.table td { padding: 8px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
@@ -732,12 +754,12 @@ tr.row-excluded > td { background: color-mix(in srgb, var(--red-soft) 35%, trans
   font-size: 11px; font-weight: 700;
 }
 .chart-node .cn-label {
-  font-size: 14px; font-weight: 700; line-height: 24px; min-width: 0;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 14px; font-weight: 700; line-height: 1.45; min-width: 0;
+  overflow-wrap: break-word; word-break: break-word; white-space: normal;
 }
 .chart-node .cn-sub {
-  font-size: 11px; line-height: 20px; color: var(--muted-foreground); min-width: 0;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 11px; line-height: 1.5; color: var(--muted-foreground); min-width: 0;
+  overflow-wrap: break-word; word-break: break-word; white-space: normal;
 }
 .node-ctrls {
   /* v1.5.2 نهایی §۲ — نوار ابزار هاور در «گوشهٔ موربِ بیرون کارت» می‌نشیند
@@ -849,8 +871,9 @@ tr.row-excluded > td { background: color-mix(in srgb, var(--red-soft) 35%, trans
 .print-report .pr-title { font-size: 19px; font-weight: 800; }
 .print-report .pr-meta { font-size: 12px; color: #444; }
 .print-report table { width: 100%; border-collapse: collapse; font-size: 11.5px; }
-.print-report th, .print-report td { border: 1px solid #bbb; padding: 4px 7px; text-align: start; }
+.print-report th, .print-report td { border: 1px solid #bbb; padding: 4px 7px; text-align: center; }
 .print-report th { background: #f0f0f0; }
+.print-report td.pr-note { text-align: right; }
 .print-break-avoid { break-inside: avoid; }
 @media print {
   body { background: #fff !important; }
@@ -1016,6 +1039,20 @@ code.inline { background: var(--muted); padding: 3px 9px; border-radius: 6px; fo
 }
 .chart-viewport.panning { cursor: grabbing; }
 .chart-viewport.connecting { cursor: crosshair; }
+
+/* v1.5.3 §۵-هـ — حالت تمام‌صفحهٔ نمودار: ریشهٔ نما روی کل صفحه می‌نشیند و
+   بوم فضای باقی‌مانده را می‌گیرد؛ همهٔ ابزارها (نوار چسبان) در دسترس می‌مانند. */
+.charts-fs {
+  position: fixed; inset: 0; z-index: 55;
+  background: var(--background);
+  padding: 10px 14px 14px;
+  overflow-y: auto;
+  border-radius: 0;
+}
+.charts-fs .chart-viewport { flex: 1 1 auto; min-height: 70vh; }
+.charts-fs .sticky-heading { top: 0 !important; }
+.charts-fs .sticky-heading[data-stuck='true'] { background: var(--background); }
+@media print { .charts-fs { position: static; inset: auto; padding: 0; overflow: visible; } }
 .chart-content { position: absolute; top: 0; left: 0; transform-origin: 0 0; will-change: transform; }
 /* بوم داخلی: پن جای اسکرول را گرفته — سرریز مرئی تا گره‌های نزدیک لبه قطع نشوند */
 .chart-viewport .chart-canvas-wrap { overflow: visible; min-width: 0; }
@@ -1092,6 +1129,46 @@ code.inline { background: var(--muted); padding: 3px 9px; border-radius: 6px; fo
 
 .zoom-group .icon-btn.sm { width: 26px; height: 26px; }
 .zoom-pct { min-width: 46px; text-align: center; font-size: 11.5px; font-weight: 700; }
+
+/* ═══ v1.5.3 §۱ — چیپ ارزیابی «اپراتور × عنصر» در صفحهٔ وستینگهاوس ═══ */
+.t2x-row {
+  display: flex; align-items: center; gap: 6px; width: 100%;
+  background: transparent; border: none; cursor: pointer; font-family: inherit;
+  padding: 4px 6px; border-radius: calc(var(--radius) - 4px); text-align: start;
+  color: var(--foreground); min-height: 30px;
+  transition: background .12s var(--ease);
+}
+.t2x-row:hover { background: var(--brand-soft); }
+.t2x-row.sub { min-height: 26px; padding-inline-start: 14px; }
+.t2x-row.sub:hover { background: color-mix(in srgb, var(--brand-soft) 55%, transparent); }
+.t2x-linklike {
+  background: none; border: none; padding: 0; cursor: pointer; font-family: inherit;
+  font-weight: 600; color: var(--brand); text-decoration: underline dotted;
+  font-size: inherit;
+}
+.t2x-linklike:hover { color: var(--brand-2); }
+
+.t2w-rate-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  border: 1px solid color-mix(in srgb, var(--green) 45%, var(--border));
+  background: var(--green-soft); color: var(--green);
+  border-radius: 99px; padding: 2px 6px 2px 4px; font-size: 11.5px;
+}
+.t2w-rate-chip.stale {
+  border-color: color-mix(in srgb, var(--amber) 45%, var(--border));
+  background: var(--amber-soft); color: var(--amber);
+}
+.t2w-rate-chip .t2w-rate-name { font-weight: 700; color: var(--foreground); white-space: nowrap; }
+.t2w-rate-chip .icon-btn.sm { width: 20px; height: 20px; }
+.t2w-rate-chip .icon-btn.sm .icon { width: 11px; height: 11px; }
+/* دکمهٔ کوچک ارزیابی در سربرگ ردیف عنصرِ جدول ثبت زمان */
+.t2t-rate-btn.rated { color: var(--green); background: var(--green-soft); }
+.t2t-rate-btn.rated:hover { background: color-mix(in srgb, var(--green) 18%, transparent); color: var(--green); }
+.t2t-rate-badge {
+  font-size: 9.5px; font-weight: 800; padding: 0 6px; border-radius: 99px;
+  background: var(--green-soft); color: var(--green);
+  border: 1px solid color-mix(in srgb, var(--green) 35%, transparent);
+}
 .zoom-reset {
   height: 26px; padding-inline: 7px; font-size: 11px; border: none;
   background: transparent; color: var(--muted-foreground);
