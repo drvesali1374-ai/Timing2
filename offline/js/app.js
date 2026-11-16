@@ -152,7 +152,10 @@
         U.h('p', { class: 'flex items-center gap-1.5' },
           U.h('span', { class: 'font-bold', style: { color: 'var(--muted-foreground)' }, text: 'زمان‌سنجی صنعتی' }),
           U.h('span', { 'aria-hidden': 'true', text: '·' }),
-          U.h('span', { text: 'نسخه اول — کامل (۷ فاز)' })),
+          U.h('span', { text: 'نسخه اول — کامل (۷ فاز)' }),
+          U.h('span', { 'aria-hidden': 'true', text: '·' }),
+          /* شناسهٔ نسخه — برای اطمینان کاربر از به‌روز بودن (راند ۲ اصلاحات بازبینی) */
+          U.h('span', { style: { fontFamily: 'ui-monospace, monospace' }, title: 'شناسهٔ ساخت — برای اطمینان از به‌روز بودن نسخه', text: 'v1.5.2-r2' })),
         U.h('p', { class: 'flex items-center gap-3' },
           U.h('span', { class: 'flex items-center gap-1', title: 'بدون هیچ درخواست خارجی در زمان اجرا' }, U.icon('wifiOff'), 'کارکرد کاملاً آفلاین'),
           U.h('span', { class: 'flex items-center gap-1', title: 'داده‌ها روی دیسک محلی همین میزبان' }, U.icon('shieldCheck'), 'داده محلی و امن'))));
