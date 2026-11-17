@@ -96,10 +96,11 @@ export function TopBar({ projectId }: { projectId: string }) {
           size="icon"
           aria-label={helpOpen ? 'بستن راهنمای مرحله' : 'نمایش راهنمای مرحله'}
           aria-pressed={helpOpen}
+          title="راهنمای همین صفحه — برای راهنمای جامع همهٔ بخش‌ها، «راهنما» را در منوی کناری باز کنید"
           onClick={() => setHelpOpen(!helpOpen)}
-          className={cn('size-9', helpOpen && 'bulb-on')}
+          className={cn('lamp-blink size-[42px]', helpOpen && 'bulb-on')}
         >
-          <Lightbulb className="size-4.5" aria-hidden />
+          <Lightbulb className="size-[22px]" aria-hidden />
         </Button>
       </div>
     </header>

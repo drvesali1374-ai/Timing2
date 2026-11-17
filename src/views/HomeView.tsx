@@ -412,7 +412,7 @@ export default function HomeView() {
               {[
                 'پروژه مطالعه بسازید — نام خط تولید، محصول و تاریخ مطالعه را ثبت کنید.',
                 'ساختار خط (ایستگاه، فعالیت، عنصر کاری) و اپراتورها را تعریف کنید.',
-                'تعریف‌های الونس و ارزیابی وستینگهاوس را تنظیم کنید؛ زمان‌سنجی و گزارش‌ها در فازهای بعدی فعال می‌شوند.',
+                'تعریف‌های الونس و ارزیابی وستینگهاوس را تنظیم کنید؛ سپس زمان‌سنجی و ثبت مشاهدات را انجام دهید.',
               ].map((step, i) => (
                 <li key={i} className="flex items-start gap-2 rounded-xl bg-muted p-3 text-xs leading-6">
                   <span className="num mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full bg-brand-soft text-[11px] font-bold text-brand">

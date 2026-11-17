@@ -14,6 +14,7 @@ import {
   Gauge,
   LayoutDashboard,
   Network,
+  Notebook,
   Settings2,
   Timer,
   Users,
@@ -43,6 +44,7 @@ const STAGE_ICONS: Record<string, typeof Settings2> = {
   dashboard: LayoutDashboard,
   reports: FileText,
   data: DatabaseBackup,
+  help: Notebook,
 }
 
 export function StageSidebarContent({ projectId, activeStage }: { projectId: string; activeStage: RouteStage }) {
@@ -54,6 +56,8 @@ export function StageSidebarContent({ projectId, activeStage }: { projectId: str
 
   const items = [
     ...STUDY_STAGES.map((s) => ({ key: s.key as RouteStage, label: s.label, desc: s.desc, isTool: false })),
+    /* v1.5.3 §۸ — راهنمای جامع: توضیح سادهٔ همهٔ بخش‌ها، فرمول‌ها و مثال‌ها */
+    { key: 'help' as RouteStage, label: 'راهنما', desc: 'راهنمای ساده و جامع همهٔ بخش‌ها با فرمول‌ها و مثال‌ها', isTool: true },
     { key: 'data' as RouteStage, label: 'داده و پشتیبان', desc: 'پشتیبان‌گیری، بازیابی، بسته پروژه و تاریخچه', isTool: true },
   ]
 
@@ -102,11 +106,6 @@ export function StageSidebarContent({ projectId, activeStage }: { projectId: str
                         <StageStatusDot status={stageState?.status ?? 'PENDING'} />
                         <Icon className="size-4.5 shrink-0 opacity-70" aria-hidden />
                         <span className="min-w-0 flex-1 truncate text-[13px]">{item.label}</span>
-                        {stageState?.status === 'FUTURE_PHASE' && stageState.phase && (
-                          <span className="num rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-bold text-faint">
-                            فاز {stageState.phase.toLocaleString('fa-IR')}
-                          </span>
-                        )}
                       </button>
                     </li>
                   )

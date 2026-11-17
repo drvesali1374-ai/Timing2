@@ -8,9 +8,9 @@ import { create } from 'zustand'
 import type { StageKey } from '@/domain/types'
 import { STAGE_KEYS } from '@/domain/types'
 
-/** مرحله «داده و پشتیبان» — ابزار، جزو مراحل مطالعه نیست ولی مسیر دارد */
-export type RouteStage = StageKey | 'data'
-export const ROUTE_STAGES: RouteStage[] = [...STAGE_KEYS, 'data']
+/** مراحل ابزار — جزو مراحل مطالعه نیستند ولی مسیر دارند */
+export type RouteStage = StageKey | 'data' | 'help'
+export const ROUTE_STAGES: RouteStage[] = [...STAGE_KEYS, 'data', 'help']
 
 export type AppView =
   | { name: 'home' }
@@ -25,6 +25,10 @@ interface AppState {
   selectedStationId: string | null
   /** پیش‌انتخاب فیلتر فعالیت برای مرکز گزارش‌ها (خروجی سریع — FR-22) */
   reportPrefillActivityId: string | null
+  /** v1.5.3 §۳ — زبانهٔ فعال صفحهٔ ساختار: سلسله‌مراتب یا نماهای تفکیکی و درختی */
+  structureMainTab: 'hierarchy' | 'explorer'
+  /** v1.5.3 §۳ — دکمهٔ بازگشت در صفحهٔ فعالیت وقتی از «نماهای ساختار» آمده باشد */
+  explorerReturn: boolean
   navigate: (view: AppView) => void
   setReportPrefillActivity: (activityId: string | null) => void
   goHome: () => void
@@ -33,6 +37,8 @@ interface AppState {
   toggleSidebar: () => void
   setHelpOpen: (open: boolean) => void
   setSelectedStation: (stationId: string | null) => void
+  setStructureMainTab: (tab: 'hierarchy' | 'explorer') => void
+  setExplorerReturn: (v: boolean) => void
 }
 
 function viewToHash(view: AppView): string {
@@ -63,6 +69,8 @@ export const useAppStore = create<AppState>((set) => ({
   helpOpen: false,
   selectedStationId: null,
   reportPrefillActivityId: null,
+  structureMainTab: 'hierarchy',
+  explorerReturn: false,
   navigate: (view) => {
     const hash = viewToHash(view)
     if (window.location.hash !== hash) {
@@ -79,6 +87,8 @@ export const useAppStore = create<AppState>((set) => ({
   setHelpOpen: (open) => set({ helpOpen: open }),
   setSelectedStation: (stationId) => set({ selectedStationId: stationId }),
   setReportPrefillActivity: (activityId) => set({ reportPrefillActivityId: activityId }),
+  setStructureMainTab: (tab) => set({ structureMainTab: tab }),
+  setExplorerReturn: (v) => set({ explorerReturn: v }),
 }))
 
 /** همگام‌سازی وضعیت با hash مرورگر (بارگذاری مجدد/اشتراک مسیر) */

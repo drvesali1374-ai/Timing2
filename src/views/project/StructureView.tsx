@@ -65,6 +65,8 @@ import { ConfirmDeleteDialog, EmptyState } from '@/components/common/Feedback'
 import { HelpDot } from '@/components/common/HelpDot'
 import { SaveIndicator } from '@/components/common/SaveIndicator'
 import { SectionHeading } from '@/components/common/SectionHeading'
+import { StructureExplorer } from './structure/StructureExplorer'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { SortableList } from '@/components/common/SortableList'
 import { useAutosave } from '@/hooks/use-autosave'
 import { useIsMobile } from '@/hooks/use-mobile'
@@ -133,7 +135,7 @@ const ACTIVITY_NAME_HELP = {
   what: 'فعالیت کار قابل‌تعریف و مستقلی در ایستگاه است که از عناصر کاری تشکیل می‌شود و صفحه اختصاصی چهارزبانه دارد: مشخصات، عناصر کاری، زمان‌سنجی و تحلیل نتایج.',
   input: 'نامی کوتاه و گویا؛ ترجیحاً فعل + مفعول.',
   example: '«بستن درب پنل» یا «کنترل کیفیت نهایی»',
-  note: 'نوع رویداد فرایندی فعالیت در نمودارهای فرایند (فاز ۵) با نماد ASCME نمایش داده می‌شود.',
+  note: 'نوع رویداد فرایندی فعالیت در نمودارهای فرایند با نماد ASCME نمایش داده می‌شود.',
 } as const
 
 const PROCESS_TYPE_HELP = {
@@ -188,6 +190,9 @@ export default function StructureView({ projectId }: { projectId: string }) {
   const setSelectedStation = useAppStore((s) => s.setSelectedStation)
   const openActivity = useAppStore((s) => s.openActivity)
   const navigate = useAppStore((s) => s.navigate)
+  // v1.5.3 §۳ — زبانهٔ فعال: سلسله‌مراتب یا نماهای تفکیکی و درختی
+  const structureMainTab = useAppStore((s) => s.structureMainTab)
+  const setStructureMainTab = useAppStore((s) => s.setStructureMainTab)
 
   // ── وضعیت محلی ──
   const [treeOpen, setTreeOpen] = useState(true) // درخت تاشوی موبایل
@@ -580,7 +585,7 @@ export default function StructureView({ projectId }: { projectId: string }) {
     const deps: Record<string, number> = {}
     const obsCount = elementDepsQuery.data?.element._count?.observations ?? 0
     if (obsCount > 0) deps['مشاهده'] = obsCount
-    if (elementDepsQuery.data?.element.rating) deps['ارزیابی وستینگهاوس این عنصر'] = 1
+    if (elementDepsQuery.data?.element.rating || elementDepsQuery.data?.element.hasAnyRating) deps['ارزیابی وستینگهاوس این عنصر'] = 1
     return deps
   }, [deletingElement, elementDepsQuery.data])
 
@@ -651,6 +656,14 @@ export default function StructureView({ projectId }: { projectId: string }) {
         </div>
       </SectionHeading>
 
+      {/* v1.5.3 §۳ — دو زبانهٔ مستقل: «ساختار سلسله‌مراتبی» (نمای موجود، بدون
+          هیچ تغییری) و «نماهای تفکیکی و درختی» (فهرست جدا + درخت سادهٔ لینک‌دار) */}
+      <Tabs value={structureMainTab} onValueChange={(v) => setStructureMainTab(v as 'hierarchy' | 'explorer')} dir="rtl">
+        <TabsList>
+          <TabsTrigger value="hierarchy">ساختار سلسله‌مراتبی</TabsTrigger>
+          <TabsTrigger value="explorer">نماهای تفکیکی و درختی</TabsTrigger>
+        </TabsList>
+        <TabsContent value="hierarchy" className="mt-4">
       {/* محتوا */}
       {treeQuery.isLoading ? (
         <div className="grid items-start gap-5 lg:grid-cols-2">
@@ -1000,9 +1013,16 @@ export default function StructureView({ projectId }: { projectId: string }) {
         onConfirm={() => deletingElement && deleteElementMutation.mutate(deletingElement.element.id)}
         loading={deleteElementMutation.isPending}
       />
+        </TabsContent>
+        <TabsContent value="explorer" className="mt-4">
+          {/* v1.5.3 §۳ — نماهای تفکیکی و درختی: ایستگاه‌ها/فعالیت‌ها/عناصر جدا + درخت ساده */}
+          <StructureExplorer projectId={projectId} stations={stations} />
+        </TabsContent>
+      </Tabs>
     </div>
   )
 }
+
 
 // ═══════════════════════════════════════════════════════════
 // درخت ساختار — چهار سطح + جست‌وجو + باز/بستن همه — §۷

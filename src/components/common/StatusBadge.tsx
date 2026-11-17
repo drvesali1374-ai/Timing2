@@ -20,7 +20,8 @@ export function StageStatusBadge({ status, className }: { status: string; classN
   const conf = MAP[status] ?? MAP.PENDING
   const Icon = conf.icon
   const label =
-    status === 'FUTURE_PHASE' ? 'فاز بعدی' : STAGE_STATUS_LABELS[status as StageStatus] ?? status
+    /* v1.5.3 §۷ — ارجاع به «فاز» از رابط کاربر حذف شد */
+    status === 'FUTURE_PHASE' ? 'در دست تهیه' : (STAGE_STATUS_LABELS[status as StageStatus] ?? status)
   return (
     <span
       className={cn(

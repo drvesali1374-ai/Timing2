@@ -282,9 +282,30 @@ export async function listElements(activityId: string) {
   const elements = await db.workElement.findMany({
     where: { activityId },
     orderBy: { sortOrder: 'asc' },
-    include: { rating: { include: { ratingTable: { select: { name: true, version: true } } } } },
+    include: {
+      ratings: { include: { ratingTable: { select: { name: true, version: true } }, operator: { select: { id: true, displayName: true } } } },
+    },
   })
-  return { activity: a, elements }
+  // v1.5.3 §۱ — تخت‌سازی: rating = ارزیابی عمومی (سازگار با DTO قبلی)
+  return {
+    activity: a,
+    elements: elements.map((e) => {
+      const general = e.ratings.find((r) => r.operatorId === null) ?? null
+      const { ratings, ...rest } = e
+      return {
+        ...rest,
+        rating: general
+          ? {
+              totalFactor: general.totalFactor,
+              ratingTableId: general.ratingTableId,
+              ratingTableName: general.ratingTable.name,
+              ratingTableVersion: general.ratingTable.version,
+            }
+          : null,
+        hasAnyRating: ratings.length > 0,
+      }
+    }),
+  }
 }
 
 export async function createElement(activityId: string, input: ElementCreateInput) {
@@ -385,7 +406,7 @@ export async function getStructureTree(projectId: string) {
     db.workElement.findMany({
       where: { activity: { station: { projectId } } },
       orderBy: { sortOrder: 'asc' },
-      include: { rating: { select: { totalFactor: true } } },
+      include: { ratings: { select: { totalFactor: true, operatorId: true } } },
     }),
   ])
   return stations.map((s) => ({
@@ -400,11 +421,18 @@ export async function getStructureTree(projectId: string) {
         updatedAt: a.updatedAt.toISOString(),
         elements: elements
           .filter((e) => e.activityId === a.id)
-          .map((e) => ({
-            ...e,
-            createdAt: e.createdAt.toISOString(),
-            updatedAt: e.updatedAt.toISOString(),
-          })),
+          .map((e) => {
+            // v1.5.3 §۱ — تخت‌سازی: rating = ارزیابی عمومی؛ hasAnyRating = عمومی یا اختصاصی
+            const general = e.ratings.find((r) => r.operatorId === null) ?? null
+            const { ratings, ...rest } = e
+            return {
+              ...rest,
+              createdAt: e.createdAt.toISOString(),
+              updatedAt: e.updatedAt.toISOString(),
+              rating: general ? { totalFactor: general.totalFactor } : null,
+              hasAnyRating: ratings.length > 0,
+            }
+          }),
       })),
   }))
 }

@@ -239,10 +239,11 @@ export const ratingTableUpdateSchema = z.object({
 
 export const assessmentPutSchema = z.object({
   ratingTableId: z.string().uuid('جدول ارزیابی معتبر نیست'),
-  skillGrade: z.string().trim().max(10).nullable(),
-  effortGrade: z.string().trim().max(10).nullable(),
-  conditionsGrade: z.string().trim().max(10).nullable(),
-  consistencyGrade: z.string().trim().max(10).nullable(),
+  operatorId: z.string().uuid('اپراتور معتبر نیست').nullable().optional(), // v1.5.3 §۱ — ارزیابی اختصاصی اپراتور
+  skillGrade: z.string().trim().max(10).nullable().optional(),
+  effortGrade: z.string().trim().max(10).nullable().optional(),
+  conditionsGrade: z.string().trim().max(10).nullable().optional(),
+  consistencyGrade: z.string().trim().max(10).nullable().optional(),
   notes: z.string().trim().max(2000).nullable().optional(),
   copyFromElementId: z.string().uuid().nullable().optional(), // کپی ارزیابی از عنصر مشابه — FR-13
 })

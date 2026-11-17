@@ -106,7 +106,8 @@ model WorkElement {
   updatedAt        DateTime             @updatedAt @map("updated_at")
   activity         Activity             @relation(fields: [activityId], references: [id], onDelete: Cascade)
   observations     ElementObservation[]
-  rating           RatingAssessment?
+  // v1.5.3 §۱ — یک ارزیابی عمومی (بدون اپراتور) + چند ارزیابی اختصاصی اپراتور
+  ratings          RatingAssessment[]
 
   @@index([activityId])
   @@map("work_elements")
@@ -177,6 +178,8 @@ model Operator {
   updatedAt   DateTime       @updatedAt @map("updated_at")
   project     Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
   sessions    StudySession[]
+  // v1.5.3 §۱ — ارزیابی‌های اختصاصی «اپراتور × عنصر» در وستینگهاوس
+  ratingAssessments RatingAssessment[]
 
   @@index([projectId])
   @@map("operators")
@@ -326,10 +329,14 @@ model RatingTableGrade {
   @@map("rating_table_grades")
 }
 
-// ارزیابی در سطح عنصر کاری — مشترک برای تمام مشاهدات همان عنصر — FR-13/۱۰.۲
+// ارزیابی عنصر کاری — v1.5.3 §۱: دو سطح
+// • operatorId = NULL → ارزیابی عمومی عنصر (میراث نسخه‌های قبل)
+// • operatorId مشخص → ارزیابی اختصاصی همان اپراتور برای همین عنصر
+//   (اپراتور A در عنصری ماهر و در عنصر دیگر متوسط می‌تواند باشد)
 model RatingAssessment {
   id               String      @id @default(uuid())
-  workElementId    String      @unique @map("work_element_id")
+  workElementId    String      @map("work_element_id")
+  operatorId       String?     @map("operator_id")
   ratingTableId    String      @map("rating_table_id")
   skillGrade       String?     @map("skill_grade")
   effortGrade      String?     @map("effort_grade")
@@ -345,7 +352,10 @@ model RatingAssessment {
   updatedAt        DateTime    @updatedAt @map("updated_at")
   workElement      WorkElement @relation(fields: [workElementId], references: [id], onDelete: Cascade)
   ratingTable      RatingTable @relation(fields: [ratingTableId], references: [id], onDelete: Restrict)
+  operator         Operator?   @relation(fields: [operatorId], references: [id], onDelete: Cascade)
 
+  @@unique([workElementId, operatorId])
+  @@index([operatorId])
   @@map("rating_assessments")
 }
 

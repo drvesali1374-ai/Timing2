@@ -27,6 +27,7 @@ import {
   Timer,
   Trash2,
   X,
+  ArrowRight,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -122,7 +123,7 @@ const ACTIVITY_NAME_HELP = {
   what: 'فعالیت کار قابل‌تعریف و مستقلی در ایستگاه است که از عناصر کاری تشکیل می‌شود؛ این صفحه اختصاصی همین فعالیت است.',
   input: 'نامی کوتاه و گویا؛ ترجیحاً فعل + مفعول.',
   example: '«بستن درب پنل» یا «کنترل کیفیت نهایی»',
-  note: 'نوع رویداد فرایندی در نمودارهای فرایند (فاز ۵) با نماد ASCME نمایش داده می‌شود و روی محاسبات زمان اثری ندارد.',
+  note: 'نوع رویداد فرایندی فعالیت در نمودارهای فرایند با نماد ASCME نمایش داده می‌شود و روی محاسبات زمان اثری ندارد.',
 } as const
 
 const PROCESS_TYPE_HELP = {
@@ -162,6 +163,10 @@ function ActivityScreen({ projectId, activityId }: { projectId: string; activity
   const isMobile = useIsMobile()
   const qc = useQueryClient()
   const navigate = useAppStore((s) => s.navigate)
+  // v1.5.3 §۳ — دکمهٔ بازگشت: اگر از «نماهای تفکیکی و درختی» ساختار آمده باشید
+  const explorerReturn = useAppStore((s) => s.explorerReturn)
+  const setExplorerReturn = useAppStore((s) => s.setExplorerReturn)
+  const setStructureMainTab = useAppStore((s) => s.setStructureMainTab)
   const [tab, setTab] = useState<TabKey>('info')
 
   // ── داده‌ها ──
@@ -199,7 +204,8 @@ function ActivityScreen({ projectId, activityId }: { projectId: string; activity
   )
 
   const elements = elementsQ.data?.elements ?? []
-  const ratedCount = elements.filter((e) => e.rating != null).length
+  // v1.5.3 §۱ — عنصر «ارزیابی‌شده» = ارزیابی عمومی یا حداقل یک ارزیابی اپراتور
+  const ratedCount = elements.filter((e) => e.rating != null || e.hasAnyRating === true).length
 
   // ── بی‌اعتبارسازی کش ──
   const invalidateActivityScope = () => {
@@ -252,6 +258,23 @@ function ActivityScreen({ projectId, activityId }: { projectId: string; activity
 
   return (
     <div className="animate-view-in mx-auto max-w-5xl space-y-4">
+      {/* v1.5.3 §۳ — دکمهٔ بازگشت: اگر از «نماهای تفکیکی و درختی» ساختار آمده باشید */}
+      {explorerReturn && (
+        <Button
+          variant="outline"
+          size="sm"
+          className="gap-1.5"
+          title="بازگشت به زبانهٔ «نماهای تفکیکی و درختی» در صفحهٔ ساختار تولید"
+          onClick={() => {
+            setExplorerReturn(false)
+            setStructureMainTab('explorer')
+            navigate({ name: 'project', projectId, stage: 'structure' })
+          }}
+        >
+          <ArrowRight className="size-4" aria-hidden />
+          بازگشت به نماهای ساختار
+        </Button>
+      )}
       {/* سربرگ: بازگشت + مسیر + نوع فرایندی + وضعیت + اقدام بعدی — FR-03 */}
       <header className="space-y-3">
         <div className="flex flex-wrap items-center gap-2">
@@ -323,7 +346,7 @@ function ActivityScreen({ projectId, activityId }: { projectId: string; activity
             <CircleCheck className="size-4 shrink-0 text-green" aria-hidden />
             <span className="font-bold text-green">همه عناصر این فعالیت ارزیابی شده‌اند.</span>
             <span className="text-muted-foreground">
-              ثبت مشاهدات در مرحله «زمان‌سنجی» (فاز ۳) انجام می‌شود.
+              ثبت مشاهدات در صفحهٔ «زمان‌سنجی» انجام می‌شود.
             </span>
           </div>
         )}
@@ -406,12 +429,12 @@ function ActivityScreen({ projectId, activityId }: { projectId: string; activity
           />
         </TabsContent>
 
-        {/* ۳. زمان‌سنجی — فاز ۳ فعال: برگهٔ چرخه‌محور این فعالیت */}
+        {/* ۳. زمان‌سنجی: برگهٔ چرخه‌محور این فعالیت */}
         <TabsContent value="timing">
           <TimingView projectId={projectId} initialActivityId={activityId} />
         </TabsContent>
 
-        {/* ۴. تحلیل نتایج — فاز ۴: آمار، وستینگهاوس، مجازها و مقایسهٔ اپراتورها */}
+        {/* ۴. تحلیل نتایج: آمار، وستینگهاوس، مجازها و مقایسهٔ اپراتورها */}
         <TabsContent value="analysis">
           <AnalysisContent activityId={activityId} />
         </TabsContent>
@@ -688,7 +711,7 @@ function ElementsSection({
         <EmptyState
           icon={<ListTree className="size-7" aria-hidden />}
           title="هنوز عنصر کاری ثبت نشده است"
-          description="هر چرخه فعالیت از عناصر کاری تشکیل می‌شود؛ برای زمان‌سنجی (فاز ۳) حداقل به یک عنصر نیاز دارید. نوع عنصر (دستی، خودکار ماشین، انتظار، هم‌زمان) را می‌توانید بعداً نیز تغییر دهید."
+          description="هر چرخه فعالیت از عناصر کاری تشکیل می‌شود؛ برای زمان‌سنجی حداقل به یک عنصر نیاز دارید. نوع عنصر (دستی، خودکار ماشین، انتظار، هم‌زمان) را می‌توانید بعداً نیز تغییر دهید."
           action={
             <Button onClick={openCreate} className="btn-brand gap-1.5 border-0">
               <Plus className="size-4" aria-hidden />

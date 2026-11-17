@@ -73,3 +73,5 @@ server.log
 /examples/
 /mini-services/
 /tests/
+public/Timing2-Offline.html
+public/offline/

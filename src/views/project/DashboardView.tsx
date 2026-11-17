@@ -351,7 +351,7 @@ function ActivitiesWidget({ data }: { data: ProjectDashboardDto }) {
         <Table>
           <TableHeader className="sticky top-0 z-10 bg-muted/95 backdrop-blur">
             <TableRow>
-              <TableHead className="text-right">ایستگاه / فعالیت</TableHead>
+              <TableHead>ایستگاه / فعالیت</TableHead>
               <TableHead className="text-center">چرخهٔ معتبر</TableHead>
               <TableHead className="text-center">هدف</TableHead>
               <TableHead className="text-center">ST (ثانیه)</TableHead>
@@ -499,7 +499,7 @@ function OperatorsWidget({ data }: { data: ProjectDashboardDto }) {
         <Table>
           <TableHeader className="bg-muted/60">
             <TableRow>
-              <TableHead className="text-right">اپراتور</TableHead>
+              <TableHead>اپراتور</TableHead>
               <TableHead className="text-center">مشاهدات</TableHead>
               <TableHead className="text-center">فعالیت‌ها</TableHead>
               <TableHead className="text-center">شاخص نسبی</TableHead>

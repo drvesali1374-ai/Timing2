@@ -582,7 +582,7 @@ function BackupTab() {
             <div className="scroll-slim max-h-96 overflow-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b bg-surface-2 text-right text-xs text-muted-foreground">
+                  <tr className="border-b bg-surface-2 text-xs text-muted-foreground">
                     <th className="sticky top-0 z-10 bg-surface-2 px-4 py-3 font-bold">نوع</th>
                     <th className="sticky top-0 z-10 bg-surface-2 px-4 py-3 font-bold">تاریخ ایجاد</th>
                     <th className="sticky top-0 z-10 bg-surface-2 px-4 py-3 font-bold">حجم</th>
@@ -823,7 +823,7 @@ function AuditTab({ projectId }: { projectId: string }) {
               <div className="scroll-slim max-h-[32rem] overflow-auto">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="border-b bg-surface-2 text-right text-xs text-muted-foreground">
+                    <tr className="border-b bg-surface-2 text-xs text-muted-foreground">
                       <th className="sticky top-0 z-10 bg-surface-2 px-3 py-3 font-bold">زمان</th>
                       <th className="sticky top-0 z-10 bg-surface-2 px-3 py-3 font-bold">عمل</th>
                       <th className="sticky top-0 z-10 bg-surface-2 px-3 py-3 font-bold">موجودیت</th>

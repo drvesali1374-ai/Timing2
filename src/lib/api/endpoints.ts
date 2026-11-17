@@ -99,6 +99,8 @@ export interface ElementDto {
   createdAt: string
   updatedAt: string
   rating?: { totalFactor: number } | null
+  /** v1.5.3 §۱ — ارزیابی عمومی یا حداقل یک ارزیابی اختصاصی اپراتور وجود دارد */
+  hasAnyRating?: boolean
 }
 
 export interface OperatorDto {
@@ -229,7 +231,10 @@ export interface RatingTableDetailDto extends RatingTableDto {
 export interface ElementRatingDto {
   element: { id: string; name: string }
   projectId: string
+  /** ارزیابی مؤثر همین سطح (اختصاصی اپراتور؛ وگرنه عمومی) */
   assessment: {
+    operatorId: string | null
+    operatorName: string | null
     ratingTableId: string
     ratingTableName: string
     ratingTableVersion: number
@@ -245,6 +250,10 @@ export interface ElementRatingDto {
     totalFactor: number
     notes: string | null
   } | null
+  /** ارزیابی عمومی عنصر (بدون اپراتور) */
+  generalAssessment: ElementRatingDto['assessment']
+  /** همهٔ ارزیابی‌های اختصاصی اپراتورهای این عنصر */
+  operatorRatings: NonNullable<ElementRatingDto['assessment']>[]
 }
 
 export interface RatingMatrixDto {
@@ -260,6 +269,16 @@ export interface RatingMatrixDto {
         id: string
         name: string
         rating: { totalFactor: number; ratingTableId: string; ratingTableName: string; ratingTableVersion: number } | null
+        /** v1.5.3 §۱ — ارزیابی‌های اختصاصی «اپراتور × عنصر» */
+        operatorRatings: {
+          operatorId: string
+          operatorName: string
+          totalFactor: number
+          ratingTableName: string
+          ratingTableVersion: number
+        }[]
+        /** اپراتورهایی که برای این عنصر ثبت زمان دارند */
+        timingOperatorIds: string[]
       }[]
     }[]
   }[]
@@ -627,7 +646,8 @@ export const ratingApi = {
   updateTable: (id: string, body: Record<string, unknown>, changeId?: string) =>
     api.put<{ table: RatingTableDto }>(`/api/rating-tables/${id}`, body, changeId),
   deleteTable: (id: string) => api.del<{ deleted: boolean }>(`/api/rating-tables/${id}`),
-  elementRating: (elementId: string) => api.get<ElementRatingDto>(`/api/elements/${elementId}/rating`),
+  elementRating: (elementId: string, operatorId?: string | null) =>
+    api.get<ElementRatingDto>(`/api/elements/${elementId}/rating${operatorId ? `?operatorId=${operatorId}` : ''}`),
   putElementRating: (elementId: string, body: Record<string, unknown>) =>
     api.put<ElementRatingDto>(`/api/elements/${elementId}/rating`, body),
   matrix: (projectId: string) => api.get<RatingMatrixDto>(`/api/projects/${projectId}/rating-matrix`),

@@ -222,7 +222,7 @@ function DefinitionsTab({ projectId, prefs }: { projectId: string; prefs: Prefs 
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-border/60 text-center text-[11px] text-muted-foreground">
-                    <th className="px-3 py-2 text-right font-bold">عنوان و کد</th>
+                    <th className="px-3 py-2 font-bold">عنوان و کد</th>
                     <th className="px-3 py-2 font-bold">پیش‌فرض</th>
                     <th className="px-3 py-2 font-bold">وضعیت</th>
                     <th className="px-3 py-2 font-bold">تخصیص‌ها</th>
@@ -239,7 +239,7 @@ function DefinitionsTab({ projectId, prefs }: { projectId: string; prefs: Prefs 
                         d.isArchived && 'opacity-55'
                       )}
                     >
-                      <td className="max-w-64 px-3 py-2.5 text-right">
+                      <td className="max-w-64 px-3 py-2.5 text-center">
                         <span className="line-clamp-2 text-[13px] font-bold">{d.title}</span>
                         {d.code && (
                           <span className="num text-[10px] text-faint" dir="ltr">

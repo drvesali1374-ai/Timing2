@@ -159,48 +159,76 @@ export async function deleteRatingTable(tableId: string) {
   })
 }
 
-/** ارزیابی یک عنصر — فرم R و جدول در حال استفاده — FR-13 */
-export async function getElementRating(elementId: string) {
+/** ارزیابی یک عنصر — فرم R و جدول در حال استفاده — FR-13
+ *  v1.5.3 §۱: operatorId مشخص → ارزیابی اختصاصی «اپراتور × عنصر»؛
+ *  خروجی هم ارزیابی مؤثر همان سطح را می‌دهد و هم فهرست همهٔ ارزیابی‌های عنصر */
+export async function getElementRating(elementId: string, operatorId?: string | null) {
   const element = await db.workElement.findUnique({
     where: { id: elementId },
     include: {
       activity: { include: { station: { select: { project: { select: { id: true } } } } } },
-      rating: { include: { ratingTable: { select: { id: true, name: true, version: true, source: true } } } },
+      ratings: {
+        include: {
+          ratingTable: { select: { id: true, name: true, version: true, source: true } },
+          operator: { select: { id: true, displayName: true } },
+        },
+      },
     },
   })
   if (!element) throw new AppError('ELEMENT_NOT_FOUND', 'عنصر کاری یافت نشد.', 404)
+  const toAssessmentDto = (r: (typeof element.ratings)[number]) => ({
+    operatorId: r.operatorId,
+    operatorName: r.operator?.displayName ?? null,
+    ratingTableId: r.ratingTableId,
+    ratingTableName: r.ratingTable.name,
+    ratingTableVersion: r.ratingTable.version,
+    ratingTableSource: r.ratingTable.source,
+    skillGrade: r.skillGrade,
+    effortGrade: r.effortGrade,
+    conditionsGrade: r.conditionsGrade,
+    consistencyGrade: r.consistencyGrade,
+    skillValue: r.skillValue,
+    effortValue: r.effortValue,
+    conditionsValue: r.conditionsValue,
+    consistencyValue: r.consistencyValue,
+    totalFactor: r.totalFactor,
+    notes: r.notes,
+  })
+  const general = element.ratings.find((r) => r.operatorId === null) ?? null
+  const operatorSpecific = operatorId ? (element.ratings.find((r) => r.operatorId === operatorId) ?? null) : null
+  const effective = operatorSpecific ?? general
   return {
     element: { id: element.id, name: element.name },
     projectId: element.activity.station.project.id,
-    assessment: element.rating
-      ? {
-          ratingTableId: element.rating.ratingTableId,
-          ratingTableName: element.rating.ratingTable.name,
-          ratingTableVersion: element.rating.ratingTable.version,
-          ratingTableSource: element.rating.ratingTable.source,
-          skillGrade: element.rating.skillGrade,
-          effortGrade: element.rating.effortGrade,
-          conditionsGrade: element.rating.conditionsGrade,
-          consistencyGrade: element.rating.consistencyGrade,
-          skillValue: element.rating.skillValue,
-          effortValue: element.rating.effortValue,
-          conditionsValue: element.rating.conditionsValue,
-          consistencyValue: element.rating.consistencyValue,
-          totalFactor: element.rating.totalFactor,
-          notes: element.rating.notes,
-        }
-      : null,
+    // ارزیابی مؤثر همین سطح (اختصاصی اپراتور؛ وگرنه عمومی)
+    assessment: effective ? toAssessmentDto(effective) : null,
+    // ارزیابی عمومی عنصر (بدون اپراتور) — میراث نسخه‌های قبل
+    generalAssessment: general ? toAssessmentDto(general) : null,
+    // همهٔ ارزیابی‌های اختصاصی اپراتورهای این عنصر
+    operatorRatings: element.ratings.filter((r) => r.operatorId !== null).map(toAssessmentDto),
   }
 }
 
-/** ثبت/به‌روزرسانی ارزیابی عنصر — محاسبه R با موتور محاسبات */
+/** ثبت/به‌روزرسانی ارزیابی عنصر — محاسبه R با موتور محاسبات
+ *  v1.5.3 §۱: کلید = (عنصر، اپراتور؟) — اپراتور مشخص یعنی ارزیابی اختصاصی */
 export async function putElementRating(elementId: string, input: AssessmentPutInput) {
   const element = await db.workElement.findUnique({
     where: { id: elementId },
-    include: { activity: { include: { station: { select: { project: { select: { id: true } } } } } } },
+    include: {
+      activity: { include: { station: { select: { project: { select: { id: true } } } } } },
+    },
   })
   if (!element) throw new AppError('ELEMENT_NOT_FOUND', 'عنصر کاری یافت نشد.', 404)
   const projectId = element.activity.station.project.id
+  const operatorId = input.operatorId ?? null
+
+  // اپراتور باید به همین پروژه تعلق داشته باشد — v1.5.3 §۱
+  if (operatorId) {
+    const operator = await db.operator.findUnique({ where: { id: operatorId } })
+    if (!operator || operator.projectId !== projectId) {
+      throw new AppError('OPERATOR_NOT_IN_PROJECT', 'اپراتور به این پروژه تعلق ندارد.', 422)
+    }
+  }
 
   // جدول باید به همین پروژه تعلق داشته باشد — FR-13
   const table = await db.ratingTable.findUnique({
@@ -211,7 +239,8 @@ export async function putElementRating(elementId: string, input: AssessmentPutIn
     throw new AppError('RATING_TABLE_NOT_IN_PROJECT', 'جدول ارزیابی به این پروژه تعلق ندارد.', 422)
   }
 
-  // اگر کپی از عنصر دیگر درخواست شده، درجه‌ها از آن عنصر خوانده می‌شود — FR-13
+  // اگر کپی درخواست شده، درجه‌ها از منبع خوانده می‌شود — FR-13
+  // مرجع کپی: «elementId» (عمومی) یا «elementId|operatorId» (اختصاصی) — v1.5.3 §۱
   let gradesInput = {
     skillGrade: input.skillGrade,
     effortGrade: input.effortGrade,
@@ -219,11 +248,12 @@ export async function putElementRating(elementId: string, input: AssessmentPutIn
     consistencyGrade: input.consistencyGrade,
   }
   if (input.copyFromElementId) {
-    const source = await db.ratingAssessment.findUnique({
-      where: { workElementId: input.copyFromElementId },
+    const [srcElementId, srcOperatorId] = String(input.copyFromElementId).split('|')
+    const source = await db.ratingAssessment.findFirst({
+      where: { workElementId: srcElementId, operatorId: srcOperatorId ?? null },
     })
     if (!source) {
-      throw new AppError('SOURCE_ASSESSMENT_NOT_FOUND', 'عنصر مبدأ برای کپی ارزیابی، ارزیابی ثبت‌شده ندارد.', 422)
+      throw new AppError('SOURCE_ASSESSMENT_NOT_FOUND', 'مورد مبدأ برای کپی ارزیابی، ارزیابی ثبت‌شده ندارد.', 422)
     }
     gradesInput = {
       skillGrade: source.skillGrade,
@@ -254,56 +284,89 @@ export async function putElementRating(elementId: string, input: AssessmentPutIn
   const consistencyValue = gradeValue('CONSISTENCY', gradesInput.consistencyGrade)
   const totalFactor = computeRatingFactor({ skill: skillValue, effort: effortValue, conditions: conditionsValue, consistency: consistencyValue })
 
-  const existing = await db.ratingAssessment.findUnique({ where: { workElementId: elementId } })
-
-  const assessment = await db.ratingAssessment.upsert({
-    where: { workElementId: elementId },
-    create: {
-      workElementId: elementId,
-      ratingTableId: table.id,
-      skillGrade: gradesInput.skillGrade,
-      effortGrade: gradesInput.effortGrade,
-      conditionsGrade: gradesInput.conditionsGrade,
-      consistencyGrade: gradesInput.consistencyGrade,
-      skillValue,
-      effortValue,
-      conditionsValue,
-      consistencyValue,
-      totalFactor,
-      notes: input.notes ?? null,
-    },
-    update: {
-      ratingTableId: table.id,
-      skillGrade: gradesInput.skillGrade,
-      effortGrade: gradesInput.effortGrade,
-      conditionsGrade: gradesInput.conditionsGrade,
-      consistencyGrade: gradesInput.consistencyGrade,
-      skillValue,
-      effortValue,
-      conditionsValue,
-      consistencyValue,
-      totalFactor,
-      notes: input.notes ?? null,
-    },
+  const existing = await db.ratingAssessment.findFirst({
+    where: { workElementId: elementId, operatorId },
   })
+
+  const assessment = existing
+    ? await db.ratingAssessment.update({
+        where: { id: existing.id },
+        data: {
+          ratingTableId: table.id,
+          skillGrade: gradesInput.skillGrade,
+          effortGrade: gradesInput.effortGrade,
+          conditionsGrade: gradesInput.conditionsGrade,
+          consistencyGrade: gradesInput.consistencyGrade,
+          skillValue,
+          effortValue,
+          conditionsValue,
+          consistencyValue,
+          totalFactor,
+          notes: input.notes ?? null,
+        },
+      })
+    : await db.ratingAssessment.create({
+        data: {
+          workElementId: elementId,
+          operatorId,
+          ratingTableId: table.id,
+          skillGrade: gradesInput.skillGrade,
+          effortGrade: gradesInput.effortGrade,
+          conditionsGrade: gradesInput.conditionsGrade,
+          consistencyGrade: gradesInput.consistencyGrade,
+          skillValue,
+          effortValue,
+          conditionsValue,
+          consistencyValue,
+          totalFactor,
+          notes: input.notes ?? null,
+        },
+      })
 
   // تغییر ضریب عملکرد بر محاسبات اثر دارد — FR-27
   await db.calculationRun.updateMany({ where: { projectId }, data: { status: 'STALE' } })
 
   await recordAudit({
     entityType: 'RatingAssessment', entityId: assessment.id, action: existing ? 'UPDATE' : 'CREATE',
-    entityName: `${element.name} — R=${totalFactor}`,
+    entityName: `${element.name}${operatorId ? ' × اپراتور' : ''} — R=${totalFactor}`,
     before: existing ? { totalFactor: existing.totalFactor, ratingTableId: existing.ratingTableId } : undefined,
-    after: { totalFactor, ratingTableId: table.id, ratingTableVersion: table.version, grades: gradesInput },
+    after: { totalFactor, ratingTableId: table.id, ratingTableVersion: table.version, grades: gradesInput, operatorId },
     projectId,
   })
-  return getElementRating(elementId)
+  return getElementRating(elementId, operatorId)
 }
 
-/** ماتریس ارزیابی همه عناصر پروژه (برای نمای کلی وستینگهاوس) */
+/** حذف ارزیابی — عمومی یا اختصاصی اپراتور — v1.5.3 §۱ */
+export async function deleteElementRating(elementId: string, operatorId?: string | null) {
+  const element = await db.workElement.findUnique({
+    where: { id: elementId },
+    include: {
+      activity: { include: { station: { select: { project: { select: { id: true } } } } } },
+    },
+  })
+  if (!element) throw new AppError('ELEMENT_NOT_FOUND', 'عنصر کاری یافت نشد.', 404)
+  const existing = await db.ratingAssessment.findFirst({
+    where: { workElementId: elementId, operatorId: operatorId ?? null },
+  })
+  if (!existing) throw new AppError('ASSESSMENT_NOT_FOUND', 'ارزیابی یافت نشد.', 404)
+  await db.ratingAssessment.delete({ where: { id: existing.id } })
+  await db.calculationRun.updateMany({
+    where: { projectId: element.activity.station.project.id },
+    data: { status: 'STALE' },
+  })
+  await recordAudit({
+    entityType: 'RatingAssessment', entityId: existing.id, action: 'DELETE',
+    entityName: `${element.name}${operatorId ? ' × اپراتور' : ''}`,
+    projectId: element.activity.station.project.id,
+  })
+  return { deleted: true }
+}
+
+/** ماتریس ارزیابی همه عناصر پروژه — v1.5.3 §۱: ارزیابی عمومی + اختصاصی هر
+ *  اپراتور + اپراتورهای دارای ثبت زمان برای همین عنصر (برای هشدارهای ناقص) */
 export async function getRatingMatrix(projectId: string) {
   await assertProject(projectId)
-  const [tables, stations] = await Promise.all([
+  const [tables, stations, observationOps] = await Promise.all([
     db.ratingTable.findMany({ where: { projectId }, orderBy: { createdAt: 'asc' } }),
     db.station.findMany({
       where: { projectId },
@@ -314,13 +377,31 @@ export async function getRatingMatrix(projectId: string) {
           include: {
             workElements: {
               orderBy: { sortOrder: 'asc' },
-              include: { rating: { include: { ratingTable: { select: { name: true, version: true } } } } },
+              include: {
+                ratings: {
+                  include: {
+                    ratingTable: { select: { name: true, version: true } },
+                    operator: { select: { id: true, displayName: true } },
+                  },
+                },
+              },
             },
           },
         },
       },
     }),
+    // اپراتورهایی که برای هر عنصر ثبت زمان (مشاهده) دارند — هشدار تکمیل‌نشدگی
+    db.elementObservation.findMany({
+      where: { workElement: { activity: { station: { projectId } } } },
+      select: { workElementId: true, cycle: { select: { session: { select: { operatorId: true } } } } },
+    }),
   ])
+  const timingOpsByElement = new Map<string, Set<string>>()
+  for (const o of observationOps) {
+    const set = timingOpsByElement.get(o.workElementId) ?? new Set<string>()
+    set.add(o.cycle.session.operatorId)
+    timingOpsByElement.set(o.workElementId, set)
+  }
   const defaultTable = tables.find((t) => t.isDefault) ?? tables[0] ?? null
   return {
     tables: tables.map((t) => ({ id: t.id, name: t.name, version: t.version, isDefault: t.isDefault, source: t.source })),
@@ -331,18 +412,33 @@ export async function getRatingMatrix(projectId: string) {
       activities: s.activities.map((a) => ({
         id: a.id,
         name: a.name,
-        elements: a.workElements.map((e) => ({
-          id: e.id,
-          name: e.name,
-          rating: e.rating
-            ? {
-                totalFactor: e.rating.totalFactor,
-                ratingTableId: e.rating.ratingTableId,
-                ratingTableName: e.rating.ratingTable.name,
-                ratingTableVersion: e.rating.ratingTable.version,
-              }
-            : null,
-        })),
+        elements: a.workElements.map((e) => {
+          const general = e.ratings.find((r) => r.operatorId === null) ?? null
+          const operatorRatings = e.ratings
+            .filter((r) => r.operatorId !== null)
+            .map((r) => ({
+              operatorId: r.operatorId as string,
+              operatorName: r.operator?.displayName ?? 'اپراتور حذف‌شده',
+              totalFactor: r.totalFactor,
+              ratingTableName: r.ratingTable.name,
+              ratingTableVersion: r.ratingTable.version,
+            }))
+          const timingOperatorIds = [...(timingOpsByElement.get(e.id) ?? [])]
+          return {
+            id: e.id,
+            name: e.name,
+            rating: general
+              ? {
+                  totalFactor: general.totalFactor,
+                  ratingTableId: general.ratingTableId,
+                  ratingTableName: general.ratingTable.name,
+                  ratingTableVersion: general.ratingTable.version,
+                }
+              : null,
+            operatorRatings,
+            timingOperatorIds,
+          }
+        }),
       })),
     })),
   }

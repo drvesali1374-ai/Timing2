@@ -15,7 +15,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { ChevronDown, CopyPlus, Factory, Gauge, Loader2, Table2, Trash2 } from 'lucide-react'
+import { AlertTriangle, ChevronDown, CopyPlus, Factory, Gauge, Loader2, Pencil, Table2, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -42,13 +42,16 @@ import {
 } from '@/components/ui/select'
 import { HelpDot, type HelpContent } from '@/components/common/HelpDot'
 import { SectionHeading } from '@/components/common/SectionHeading'
+import { ElementRatingDialog, type RatingDialogOperator } from '@/views/project/rating/ElementRatingDialog'
 import { ConfirmDeleteDialog, EmptyState } from '@/components/common/Feedback'
 import { SaveIndicator } from '@/components/common/SaveIndicator'
 import { PersianNumberInput } from '@/components/common/PersianNumberInput'
 import { useAutosave } from '@/hooks/use-autosave'
 import { ApiError } from '@/lib/api-client'
 import {
+  operatorsApi,
   ratingApi,
+  type OperatorDto,
   type RatingGradeDto,
   type RatingMatrixDto,
   type RatingTableDto,
@@ -155,15 +158,15 @@ export default function WestinghouseView({ projectId }: { projectId: string }) {
   const ratedCount = allElements.filter((e) => e.rating !== null).length
   const pct = allElements.length === 0 ? 0 : Math.round((ratedCount / allElements.length) * 100)
 
-  // ── دیالوگ ارزیابی ──
-  const [dialogEl, setDialogEl] = useState<MatrixElementRow | null>(null)
-  const candidateSources = useMemo(
-    () =>
-      allElements
-        .filter((e) => e.rating !== null && e.id !== dialogEl?.id)
-        .map((e) => ({ id: e.id, label: `${e.activityName} ← ${e.name}` })),
-    [allElements, dialogEl?.id]
-  )
+  // ── دیالوگ ارزیابی — v1.5.3 §۱: زمینهٔ «عنصر × اپراتور؟» ──
+  const [dialogCtx, setDialogCtx] = useState<{ el: MatrixElementRow; operator: RatingDialogOperator | null } | null>(null)
+
+  // نام اپراتورها برای هشدارهای تکمیل‌نشدگی ارزیابی
+  const operatorsQ = useQuery({
+    queryKey: qk.operators(projectId),
+    queryFn: () => operatorsApi.list(projectId),
+  })
+  const operators: OperatorDto[] = operatorsQ.data?.items ?? []
 
   // ── انتخاب جدول مرجع در زبانه جدول‌ها — انتخاب مؤثر در render محاسبه می‌شود ──
   const [selectedTableId, setSelectedTableId] = useState<string | null>(null)
@@ -266,10 +269,10 @@ export default function WestinghouseView({ projectId }: { projectId: string }) {
                     <HelpDot
                       label="ارزیابی وستینگهاوس"
                       content={{
-                        what: 'ضریب عملکرد R = 1 + مهارت + تلاش + شرایط + یکنواختی؛ برای هر عنصر یک‌بار ثبت و به تمام مشاهدات همان عنصر از همه اپراتورها اعمال می‌شود (تصمیم مالک محصول).',
-                        input: 'برای هر عنصر، جدول مرجع و درجه هر عامل را انتخاب کنید؛ امکان کپی از عنصر مشابه نیز وجود دارد.',
+                        what: 'ضریب عملکرد R = 1 + مهارت + تلاش + شرایط + یکنواختی؛ ارزیابی برای هر «عنصر کاری × اپراتور» ثبت می‌شود، چون یک اپراتور ممکن است در عنصری ماهر و در عنصر دیگر (مثلاً بسته‌بندی) متوسط باشد.',
+                        input: 'ثبت ارزیابی از دکمهٔ کوچک کنار نام هر عنصر در جدول ثبت زمان (صفحهٔ زمان‌سنجی) انجام می‌شود؛ در این صفحه ارزیابی‌های ثبت‌شده را فقط مشاهده و اصلاح کنید.',
                         example: 'مهارت +۰٫۰۶، تلاش +۰٫۰۲، شرایط ۰ و یکنواختی +۰٫۰۱ ⇒ R = ۱٫۰۹',
-                        note: 'جدول Seed صرفاً نقطه شروع نرم‌افزار است و باید توسط کارشناس/رویه شرکت تأیید شود.',
+                        note: 'عناصری که ثبت زمان دارند ولی ارزیابی کامل ندارند، در این صفحه هشدار می‌گیرند. جدول Seed صرفاً نقطه شروع است و باید توسط کارشناس/رویه شرکت تأیید شود.',
                       }}
                     />
                   </div>
@@ -297,7 +300,8 @@ export default function WestinghouseView({ projectId }: { projectId: string }) {
                     station={station}
                     prefs={prefs}
                     isMobile={isMobile}
-                    onRate={setDialogEl}
+                    operators={operators}
+                    onRate={setDialogCtx}
                   />
                 ))}
               </div>
@@ -406,15 +410,12 @@ export default function WestinghouseView({ projectId }: { projectId: string }) {
         </TabsContent>
       </Tabs>
 
-      {/* دیالوگ ارزیابی عنصر — هسته FR-13 */}
+      {/* دیالوگ مشترک ارزیابی عنصر — v1.5.3 §۱ (اپراتور × عنصر) */}
       <ElementRatingDialog
-        element={dialogEl}
-        tables={matrix?.tables ?? NO_TABLES}
-        defaultTableId={matrix?.defaultTableId ?? null}
-        candidateSources={candidateSources}
+        element={dialogCtx?.el ?? null}
+        operator={dialogCtx?.operator ?? null}
         projectId={projectId}
-        prefs={prefs}
-        onClose={() => setDialogEl(null)}
+        onClose={() => setDialogCtx(null)}
       />
 
       {/* تأیید حذف جدول — FR-26 */}
@@ -441,12 +442,14 @@ function StationSection({
   station,
   prefs,
   isMobile,
+  operators,
   onRate,
 }: {
   station: RatingMatrixDto['stations'][number]
   prefs: Prefs
   isMobile: boolean
-  onRate: (el: MatrixElementRow) => void
+  operators: OperatorDto[]
+  onRate: (ctx: { el: MatrixElementRow; operator: RatingDialogOperator | null }) => void
 }) {
   const [open, setOpen] = useState(true)
   const allElements = station.activities.flatMap((a) => a.elements)
@@ -481,6 +484,7 @@ function StationSection({
               stationName={station.name}
               prefs={prefs}
               isMobile={isMobile}
+              operators={operators}
               onRate={onRate}
             />
           ))
@@ -491,22 +495,88 @@ function StationSection({
 }
 
 // ═══════════════════════════════════════════════════════════
-// فعالیت در ماتریس — جدول/کارت عناصر با دکمه ارزیابی
+// فعالیت در ماتریس — v1.5.3 §۱ بازطراحی: هر عنصر، فهرست ارزیابی‌های
+// «اپراتور × عنصر» را با دکمهٔ ویرایش اختصاصی نشان می‌دهد + هشدار ناقص‌ها
 // ═══════════════════════════════════════════════════════════
 function ActivityElements({
   activity,
   stationName,
   prefs,
   isMobile,
+  operators,
   onRate,
 }: {
   activity: MatrixActivity
   stationName: string
   prefs: Prefs
   isMobile: boolean
-  onRate: (el: MatrixElementRow) => void
+  operators: OperatorDto[]
+  onRate: (ctx: { el: MatrixElementRow; operator: RatingDialogOperator | null }) => void
 }) {
-  const rated = activity.elements.filter((e) => e.rating !== null).length
+  const rated = activity.elements.filter((e) => e.rating !== null || (e.operatorRatings?.length ?? 0) > 0).length
+  const opNameById = useMemo(() => new Map(operators.map((o) => [o.id, o.displayName])), [operators])
+
+  const cell = (el: MatrixElement) => {
+    const timingOps = el.timingOperatorIds ?? []
+    const ratedOpIds = new Set((el.operatorRatings ?? []).map((r) => r.operatorId))
+    const missingNames = timingOps.filter((id) => !ratedOpIds.has(id)).map((id) => opNameById.get(id)).filter(Boolean) as string[]
+    const hasAny = el.rating !== null || (el.operatorRatings?.length ?? 0) > 0
+    return (
+      <div className="flex flex-col items-center gap-1.5 py-0.5">
+        {/* چیپ‌های ارزیابی‌های ثبت‌شده — عمومی (میراث) + هر اپراتور */}
+        <div className="flex flex-wrap items-center justify-center gap-1.5">
+          {el.rating && (
+            <RatingChip
+              label="عمومی (همهٔ اپراتورها)"
+              totalFactor={el.rating.totalFactor}
+              title={`${el.rating.ratingTableName}${el.rating.ratingTableVersion ? ` — نسخه ${formatInt(el.rating.ratingTableVersion, prefs)}` : ''} — ارزیابی عمومی عنصر (بدون اپراتور مشخص)`}
+              prefs={prefs}
+              onEdit={() => onRate({ el: { ...el, activityName: activity.name, stationName }, operator: null })}
+            />
+          )}
+          {(el.operatorRatings ?? []).map((orr) => (
+            <RatingChip
+              key={orr.operatorId}
+              label={orr.operatorName}
+              totalFactor={orr.totalFactor}
+              title={`${orr.ratingTableName}${orr.ratingTableVersion ? ` — نسخه ${formatInt(orr.ratingTableVersion, prefs)}` : ''} — ارزیابی اختصاصی این اپراتور برای همین عنصر`}
+              stale={!timingOps.includes(orr.operatorId)}
+              prefs={prefs}
+              onEdit={() =>
+                onRate({ el: { ...el, activityName: activity.name, stationName }, operator: { id: orr.operatorId, displayName: orr.operatorName } })
+              }
+            />
+          ))}
+          {!hasAny && (
+            <Badge variant="outline" className="text-[11px] text-faint">
+              هنوز ارزیابی‌ای ثبت نشده
+            </Badge>
+          )}
+        </div>
+        {/* هشدارهای تکمیل‌نشدگی — v1.5.3 §۱ */}
+        {missingNames.length > 0 ? (
+          <p className="flex items-center gap-1.5 rounded-lg bg-amber-soft px-2.5 py-1 text-right text-[11px] leading-5 text-amber" role="alert">
+            <AlertTriangle className="size-3.5 shrink-0" aria-hidden />
+            <span className="text-foreground">
+              اپراتورهای «{missingNames.join('، ')}» برای این عنصر ثبت زمان دارند ولی ارزیابی وستینگهاوس آن‌ها تکمیل نشده — از
+              جدول ثبت زمان در صفحهٔ زمان‌سنجی انجام دهید.
+            </span>
+          </p>
+        ) : !hasAny && timingOps.length > 0 ? (
+          <p className="flex items-center gap-1.5 rounded-lg bg-amber-soft px-2.5 py-1 text-right text-[11px] leading-5 text-amber" role="alert">
+            <AlertTriangle className="size-3.5 shrink-0" aria-hidden />
+            <span className="text-foreground">
+              این عنصر برگهٔ زمان‌سنجی و ثبت زمان دارد ولی هنوز هیچ ارزیابی وستینگهاوسی برای آن تعیین نشده است.
+            </span>
+          </p>
+        ) : !hasAny ? (
+          <p className="text-[11px] leading-5 text-muted-foreground">
+            بدون ارزیابی — ثبت از دکمهٔ کنار نام عنصر در جدول ثبت زمان (صفحهٔ زمان‌سنجی) انجام می‌شود.
+          </p>
+        ) : null}
+      </div>
+    )
+  }
 
   return (
     <div className="border-t first:border-t-0">
@@ -525,66 +595,26 @@ function ActivityElements({
         /* کارت موبایل — FR-30 */
         <div className="grid gap-3 p-3 sm:grid-cols-2">
           {activity.elements.map((el) => (
-            <ElementCard
-              key={el.id}
-              el={el}
-              prefs={prefs}
-              onRate={() => onRate({ ...el, activityName: activity.name, stationName })}
-            />
+            <div key={el.id} className="rounded-xl border p-3">
+              <p className="text-sm font-bold">{el.name}</p>
+              <div className="mt-2">{cell(el)}</div>
+            </div>
           ))}
         </div>
       ) : (
-        /* جدول دسکتاپ */
+        /* جدول دسکتاپ — ستون‌ها وسط‌چین (v1.5.3 §۴) */
         <table className="w-full text-sm">
           <thead>
-            <tr className="border-b bg-surface-2/70 text-right text-xs text-muted-foreground">
-              <th className="px-4 py-2.5 font-bold">عنصر کاری</th>
-              <th className="px-4 py-2.5 font-bold">وضعیت ارزیابی</th>
-              <th className="px-4 py-2.5" aria-label="عملیات" />
+            <tr className="border-b bg-surface-2/70 text-xs text-muted-foreground">
+              <th className="px-4 py-2.5 text-center font-bold">عنصر کاری</th>
+              <th className="px-4 py-2.5 text-center font-bold">ارزیابی‌های ثبت‌شده و وضعیت</th>
             </tr>
           </thead>
           <tbody>
             {activity.elements.map((el) => (
               <tr key={el.id} className="border-b transition-colors last:border-0 hover:bg-muted/50">
-                <td className="px-4 py-2.5 font-medium">{el.name}</td>
-                <td className="px-4 py-2.5">
-                  {el.rating ? (
-                    <Badge
-                      className="num bg-green-soft text-green"
-                      title={`${el.rating.ratingTableName} — نسخه ${formatInt(el.rating.ratingTableVersion, prefs)}`}
-                    >
-                      R = {formatTimeValue(el.rating.totalFactor, prefs)}
-                    </Badge>
-                  ) : (
-                    <Badge variant="outline" className="text-faint">
-                      ارزیابی نشده
-                    </Badge>
-                  )}
-                </td>
-                <td className="px-4 py-2.5">
-                  <div className="flex justify-end">
-                    {el.rating ? (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => onRate({ ...el, activityName: activity.name, stationName })}
-                        aria-label={`ویرایش ارزیابی عنصر ${el.name}`}
-                      >
-                        ویرایش ارزیابی
-                      </Button>
-                    ) : (
-                      <Button
-                        size="sm"
-                        className="btn-brand gap-1 border-0"
-                        onClick={() => onRate({ ...el, activityName: activity.name, stationName })}
-                        aria-label={`ارزیابی عنصر ${el.name}`}
-                      >
-                        <Gauge className="size-3.5" aria-hidden />
-                        ارزیابی
-                      </Button>
-                    )}
-                  </div>
-                </td>
+                <td className="px-4 py-2.5 text-center font-medium">{el.name}</td>
+                <td className="px-4 py-2.5 text-center">{cell(el)}</td>
               </tr>
             ))}
           </tbody>
@@ -594,430 +624,46 @@ function ActivityElements({
   )
 }
 
-// ═══════════════════════════════════════════════════════════
-// کارت موبایل عنصر در ماتریس — FR-30
-// ═══════════════════════════════════════════════════════════
-function ElementCard({
-  el,
+/** چیپ «نام — R = x» با دکمهٔ ویرایش کوچک داخلی — v1.5.3 §۱ */
+function RatingChip({
+  label,
+  totalFactor,
+  title,
+  onEdit,
+  stale,
   prefs,
-  onRate,
 }: {
-  el: MatrixElement
+  label: string
+  totalFactor: number
+  title: string
+  onEdit: () => void
+  stale?: boolean
   prefs: Prefs
-  onRate: () => void
 }) {
   return (
-    <div className="rounded-xl border p-3">
-      <p className="text-sm font-bold">{el.name}</p>
-      <div className="mt-2 flex flex-wrap items-center gap-1.5">
-        {el.rating ? (
-          <Badge
-            className="num bg-green-soft text-green"
-            title={`${el.rating.ratingTableName} — نسخه ${formatInt(el.rating.ratingTableVersion, prefs)}`}
-          >
-            R = {formatTimeValue(el.rating.totalFactor, prefs)}
-          </Badge>
-        ) : (
-          <Badge variant="outline" className="text-faint">
-            ارزیابی نشده
-          </Badge>
-        )}
-      </div>
-      <div className="mt-3">
-        {el.rating ? (
-          <Button variant="outline" size="sm" onClick={onRate} aria-label={`ویرایش ارزیابی عنصر ${el.name}`}>
-            ویرایش ارزیابی
-          </Button>
-        ) : (
-          <Button size="sm" className="btn-brand gap-1 border-0" onClick={onRate} aria-label={`ارزیابی عنصر ${el.name}`}>
-            <Gauge className="size-3.5" aria-hidden />
-            ارزیابی
-          </Button>
-        )}
-      </div>
-    </div>
-  )
-}
-
-// ═══════════════════════════════════════════════════════════
-// دیالوگ ارزیابی عنصر — FR-13
-// جدول + چهار عامل + پیش‌نمایش زنده R + کپی از عنصر مشابه
-// ═══════════════════════════════════════════════════════════
-interface RatingFormState {
-  tableId: string
-  grades: Record<RatingFactor, string | null>
-  notes: string
-  copyFrom: string | null
-}
-
-function ElementRatingDialog({
-  element,
-  tables,
-  defaultTableId,
-  candidateSources,
-  projectId,
-  prefs,
-  onClose,
-}: {
-  element: MatrixElementRow | null
-  tables: RatingMatrixDto['tables']
-  defaultTableId: string | null
-  candidateSources: { id: string; label: string }[]
-  projectId: string
-  prefs: Prefs
-  onClose: () => void
-}) {
-  const qc = useQueryClient()
-  const open = element !== null
-
-  // ارزیابی فعلی عنصر — مبنای مقداردهی اولیه فرم
-  const ratingQ = useQuery({
-    queryKey: qk.elementRating(open ? element.id : 'none'),
-    queryFn: () => ratingApi.elementRating(element!.id),
-    enabled: open,
-  })
-
-  const [edits, setEdits] = useState<RatingFormState | null>(null)
-
-  const close = () => {
-    setEdits(null)
-    onClose()
-  }
-
-  // فرم مؤثر: ویرایش‌های کاربر روی مقدار اولیه مشتق‌شده از ارزیابی فعلی — بدون effect
-  const a = ratingQ.data?.assessment ?? null
-  const baseForm: RatingFormState = {
-    tableId: a?.ratingTableId ?? defaultTableId ?? tables[0]?.id ?? '',
-    grades: {
-      SKILL: a?.skillGrade ?? null,
-      EFFORT: a?.effortGrade ?? null,
-      CONDITIONS: a?.conditionsGrade ?? null,
-      CONSISTENCY: a?.consistencyGrade ?? null,
-    },
-    notes: a?.notes ?? '',
-    copyFrom: null,
-  }
-  const form: RatingFormState | null = edits ?? (element ? baseForm : null)
-  const updateForm = (next: RatingFormState) => setEdits(next)
-
-  // درجه‌های جدول انتخابی — با تغییر جدول بارگذاری می‌شود
-  const tableQ = useQuery({
-    queryKey: qk.ratingTable(form?.tableId ?? 'none'),
-    queryFn: () => ratingApi.table(form!.tableId),
-    enabled: open && form !== null && form.tableId !== '',
-  })
-
-  // ارزیابی عنصر مبدأ برای پیش‌نمایش زنده کپی
-  const sourceQ = useQuery({
-    queryKey: qk.elementRating(form?.copyFrom ?? 'none'),
-    queryFn: () => ratingApi.elementRating(form!.copyFrom!),
-    enabled: open && form !== null && form.copyFrom !== null,
-  })
-
-  const gradesByFactor = useMemo(() => {
-    const m: Record<RatingFactor, RatingGradeDto[]> = { SKILL: [], EFFORT: [], CONDITIONS: [], CONSISTENCY: [] }
-    for (const g of tableQ.data?.grades ?? []) {
-      if ((RATING_FACTORS as readonly string[]).includes(g.factor)) m[g.factor as RatingFactor].push(g)
-    }
-    return m
-  }, [tableQ.data])
-
-  // کدهای مؤثر: دستی یا کپی‌شده از عنصر مبدأ
-  const effectiveGrades = useMemo((): Record<RatingFactor, string | null> => {
-    if (!form) return EMPTY_GRADES
-    if (!form.copyFrom) return form.grades
-    const a = sourceQ.data?.assessment
-    if (!a) return EMPTY_GRADES
-    return {
-      SKILL: a.skillGrade,
-      EFFORT: a.effortGrade,
-      CONDITIONS: a.conditionsGrade,
-      CONSISTENCY: a.consistencyGrade,
-    }
-  }, [form, sourceQ.data])
-
-  // مقدار هر عامل از جدول انتخابی (منطق سرور)؛ null = نامعلوم/ناموجود
-  const factorValue = (factor: RatingFactor): number | null => {
-    if (!form) return null
-    if (form.copyFrom && !sourceQ.data?.assessment) return null // در انتظار بارگذاری عنصر مبدأ
-    const code = effectiveGrades[factor]
-    if (!code) return 0 // انتخاب نشده = صفر
-    const g = gradesByFactor[factor].find((x) => x.gradeCode === code)
-    return g ? g.value : null // کد در جدول فعلی وجود ندارد
-  }
-
-  const values = {
-    skill: factorValue('SKILL'),
-    effort: factorValue('EFFORT'),
-    conditions: factorValue('CONDITIONS'),
-    consistency: factorValue('CONSISTENCY'),
-  }
-  const previewR =
-    values.skill === null || values.effort === null || values.conditions === null || values.consistency === null
-      ? null
-      : computeRatingFactor({
-          skill: values.skill,
-          effort: values.effort,
-          conditions: values.conditions,
-          consistency: values.consistency,
-        })
-
-  // عامل‌هایی که درجه انتخاب‌شده‌شان در جدول فعلی وجود ندارد — ثبت قطعاً خطا می‌خورد
-  const missingFactors = tableQ.data
-    ? (RATING_FACTORS as readonly RatingFactor[]).filter((f) => {
-        const code = effectiveGrades[f]
-        return !!code && !gradesByFactor[f].some((g) => g.gradeCode === code)
-      })
-    : []
-
-  const saveMutation = useMutation({
-    // شناسه عنصر در نتیجه بازگردانده می‌شود تا هنگام callback معتبر بماند
-    mutationFn: async () => {
-      const elId = element!.id
-      const f = form!
-      const res = await ratingApi.putElementRating(elId, {
-        ratingTableId: f.tableId,
-        skillGrade: f.grades.SKILL,
-        effortGrade: f.grades.EFFORT,
-        conditionsGrade: f.grades.CONDITIONS,
-        consistencyGrade: f.grades.CONSISTENCY,
-        notes: f.notes.trim() || null,
-        copyFromElementId: f.copyFrom,
-      })
-      return { res, elId }
-    },
-    onSuccess: ({ res, elId }) => {
-      void qc.invalidateQueries({ queryKey: qk.ratingMatrix(projectId) })
-      void qc.invalidateQueries({ queryKey: qk.structure(projectId) })
-      void qc.invalidateQueries({ queryKey: qk.elementRating(elId) })
-      void qc.invalidateQueries({ queryKey: qk.projectSummary(projectId) })
-      toast.success(`ارزیابی ثبت شد — R = ${formatTimeValue(res.assessment?.totalFactor ?? null, prefs)}`)
-      close()
-    },
-    onError: (err) => toast.error(err instanceof Error ? err.message : 'ثبت ارزیابی ناموفق بود'),
-  })
-
-  return (
-    <Dialog open={open} onOpenChange={(o) => !o && close()}>
-      <DialogContent dir="rtl" className="scroll-slim max-h-[88vh] overflow-y-auto sm:max-w-2xl">
-        <DialogHeader>
-          <DialogTitle className="flex flex-wrap items-center gap-1.5">
-            ارزیابی عنصر «{element?.name ?? ''}»
-            <HelpDot
-              label="سیاست ارزیابی"
-              content={{
-                what: 'برای هر عنصر کاری یک ارزیابی با چهار عامل مهارت، تلاش، شرایط و یکنواختی ثبت می‌شود.',
-                note: 'ارزیابی برای عنصر یک‌بار ثبت و به تمام مشاهدات همان عنصر از همه اپراتورها اعمال می‌شود (تصمیم مالک محصول)؛ سیستم ارزیابی جداگانه اپراتوری جعل نمی‌کند.',
-              }}
-            />
-          </DialogTitle>
-          <DialogDescription>
-            {element ? `${element.stationName} › ${element.activityName} — ` : ''}
-            درجه هر عامل را از جدول مرجع انتخاب کنید؛ ضریب R به‌صورت زنده پیش‌نمایش می‌شود.
-          </DialogDescription>
-        </DialogHeader>
-
-        {ratingQ.error ? (
-          <EmptyState
-            className="py-6"
-            title="بارگذاری ارزیابی فعلی ناموفق بود"
-            description={ratingQ.error instanceof Error ? ratingQ.error.message : 'خطای نامشخص'}
-            action={
-              <Button
-                variant="outline"
-                onClick={() => element && qc.invalidateQueries({ queryKey: qk.elementRating(element.id) })}
-              >
-                تلاش مجدد
-              </Button>
-            }
-          />
-        ) : form === null || ratingQ.isLoading ? (
-          <div className="space-y-3">
-            <Skeleton className="h-10 w-full" />
-            <Skeleton className="h-10 w-full" />
-            <Skeleton className="h-10 w-full" />
-            <Skeleton className="h-10 w-full" />
-            <Skeleton className="h-24 w-full" />
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {/* جدول ارزیابی */}
-            <div className="space-y-1.5">
-              <div className="flex items-center gap-1">
-                <Label>جدول ارزیابی</Label>
-                <HelpDot
-                  label="جدول ارزیابی"
-                  content={{
-                    what: 'جدول مرجعی که کد و مقدار درجه‌های چهار عامل از آن خوانده می‌شود؛ هر ارزیابی به نسخه جدول مورد استفاده ارجاع دارد.',
-                    note: 'با تغییر جدول، درجه‌ها از جدول جدید خوانده می‌شوند؛ جدول Seed صرفاً نقطه شروع است و باید توسط کارشناس/رویه شرکت تأیید شود.',
-                  }}
-                />
-              </div>
-              <Select
-                value={form.tableId}
-                onValueChange={(v) => {
-                  updateForm({ ...form, tableId: v })
-                }}
-              >
-                <SelectTrigger className="w-full" aria-label="جدول ارزیابی">
-                  <SelectValue placeholder="جدول را انتخاب کنید" />
-                </SelectTrigger>
-                <SelectContent>
-                  {tables.map((t) => (
-                    <SelectItem key={t.id} value={t.id}>
-                      <span className="num">
-                        {t.name} (نسخه {formatInt(t.version, prefs)}){t.isDefault ? ' — پیش‌فرض' : ''}
-                      </span>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {tables.length === 0 && (
-                <p className="text-xs text-amber">
-                  جدول ارزیابی‌ای وجود ندارد؛ ابتدا وضعیت زبانه «جدول‌های مرجع» را بررسی کنید.
-                </p>
-              )}
-            </div>
-
-            {/* کپی از عنصر مشابه — FR-13 */}
-            <div className="space-y-1.5">
-              <div className="flex items-center gap-1">
-                <Label>کپی از عنصر مشابه</Label>
-                <HelpDot
-                  label="کپی از عنصر مشابه"
-                  content={{
-                    what: 'درجه‌های چهار عامل یک عنصر دیگرِ همین پروژه را عیناً به این عنصر کپی می‌کند؛ برای عناصر تکراری مشابه.',
-                    input: 'یک عنصر دارای ارزیابی انتخاب کنید، یا حالت «انتخاب دستی درجه‌ها» را نگه دارید.',
-                    note: 'مقدار درجه‌ها از جدول انتخابی بالا خوانده می‌شود؛ اگر جدول کدی را نداشته باشد، ثبت با خطا مواجه می‌شود.',
-                  }}
-                />
-              </div>
-              <Select
-                value={form.copyFrom ?? NONE}
-                onValueChange={(v) => {
-                  updateForm({ ...form, copyFrom: v === NONE ? null : v })
-                }}
-              >
-                <SelectTrigger className="w-full" aria-label="کپی ارزیابی از عنصر مشابه">
-                  <SelectValue placeholder="انتخاب دستی درجه‌ها" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={NONE}>— انتخاب دستی درجه‌ها —</SelectItem>
-                  {candidateSources.map((src) => (
-                    <SelectItem key={src.id} value={src.id}>
-                      <span className="text-xs">{src.label}</span>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {form.copyFrom && (
-                <p className="rounded-lg bg-cyan-soft p-2 text-xs leading-5 text-cyan">
-                  هنگام ذخیره، درجه‌ها از عنصر انتخاب‌شده کپی می‌شوند و انتخاب‌های دستی بالا نادیده گرفته می‌شوند؛ برای ویرایش
-                  دستی، گزینه «انتخاب دستی درجه‌ها» را برگزینید.
-                </p>
-              )}
-              {candidateSources.length === 0 && !form.copyFrom && (
-                <p className="text-xs text-faint">
-                  هنوز عنصر ارزیابی‌شده‌ای در این پروژه وجود ندارد؛ اولین ارزیابی را دستی ثبت کنید.
-                </p>
-              )}
-            </div>
-
-            {/* چهار عامل */}
-            <div className="grid gap-3 sm:grid-cols-2">
-              {RATING_FACTORS.map((factor) => (
-                <div key={factor} className="space-y-1.5">
-                  <div className="flex items-center gap-1">
-                    <Label>{RATING_FACTOR_LABELS[factor]}</Label>
-                    <HelpDot label={RATING_FACTOR_LABELS[factor]} content={FACTOR_HELP[factor]} />
-                  </div>
-                  <Select
-                    value={effectiveGrades[factor] ?? NONE}
-                    onValueChange={(v) => {
-                      updateForm({ ...form, grades: { ...form.grades, [factor]: v === NONE ? null : v } })
-                    }}
-                    disabled={form.copyFrom !== null || tableQ.isLoading}
-                  >
-                    <SelectTrigger className="w-full" aria-label={`درجه ${RATING_FACTOR_LABELS[factor]}`}>
-                      <SelectValue placeholder={`درجه ${RATING_FACTOR_LABELS[factor]}`} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value={NONE}>— انتخاب نشده (صفر)</SelectItem>
-                      {gradesByFactor[factor].map((g) => (
-                        <SelectItem key={g.id} value={g.gradeCode}>
-                          <span className="num">
-                            {g.gradeCode} — {g.label} ({formatSigned(g.value, prefs)})
-                          </span>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              ))}
-            </div>
-
-            {/* هشدار درجه ناموجود در جدول */}
-            {missingFactors.length > 0 && (
-              <p className="rounded-lg bg-amber-soft p-2 text-xs leading-5 text-amber" role="alert">
-                درجه انتخاب‌شده برای {missingFactors.map((f) => RATING_FACTOR_LABELS[f]).join('، ')} در جدول فعلی وجود
-                ندارد؛ درجه را مجدداً انتخاب کنید یا جدول را عوض کنید.
-              </p>
-            )}
-
-            {/* پیش‌نمایش زنده R — محاسبه کلاینت؛ مقدار نهایی ملاک، پاسخ سرور است */}
-            <div className="rounded-xl border border-brand/30 bg-brand-soft/50 p-3" aria-live="polite">
-              <p className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-sm leading-7">
-                <span className="font-bold text-brand">پیش‌نمایش زنده:</span>
-                <span className="num">
-                  R = ۱ + (مهارت {formatSigned(values.skill, prefs)}) + (تلاش {formatSigned(values.effort, prefs)}) +
-                  (شرایط {formatSigned(values.conditions, prefs)}) + (یکنواختی{' '}
-                  {formatSigned(values.consistency, prefs)}) ={' '}
-                  <span className="text-base font-extrabold text-brand">
-                    {previewR === null ? '—' : formatTimeValue(previewR, prefs, 2)}
-                  </span>
-                </span>
-              </p>
-              <p className="mt-1 text-[11px] leading-5 text-muted-foreground">
-                مقادیر از درجه‌های انتخابی جدول خوانده می‌شوند؛ «انتخاب نشده» یعنی سهم صفر. مقدار نهایی پس از ذخیره توسط
-                سرور محاسبه و ملاک است.
-              </p>
-            </div>
-
-            {/* یادداشت */}
-            <div className="space-y-1.5">
-              <Label htmlFor="rating-notes">یادداشت (اختیاری)</Label>
-              <Textarea
-                id="rating-notes"
-                value={form.notes}
-                onChange={(e) => {
-                  updateForm({ ...form, notes: e.target.value })
-                }}
-                placeholder="مثلاً: مبنا مشاهده سه چرخه در شیفت صبح"
-                className="min-h-16"
-              />
-            </div>
-          </div>
-        )}
-
-        <DialogFooter className="flex-row justify-between gap-2 sm:justify-end">
-          <Button variant="outline" onClick={close}>
-            انصراف
-          </Button>
-          <Button
-            onClick={() => saveMutation.mutate()}
-            disabled={saveMutation.isPending || form === null || form.tableId === '' || missingFactors.length > 0}
-            className="btn-brand border-0"
-          >
-            {saveMutation.isPending ? (
-              <Loader2 className="size-4 animate-spin" aria-hidden />
-            ) : (
-              <Gauge className="size-4" aria-hidden />
-            )}
-            ثبت ارزیابی
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    <span
+      className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11.5px] ${
+        stale ? 'border-amber/45 bg-amber-soft text-amber' : 'border-green/45 bg-green-soft text-green'
+      }`}
+      title={title}
+    >
+      <span className="font-bold text-foreground">{label}</span>
+      <b className="num" dir="ltr">
+        R = {formatTimeValue(totalFactor, prefs, 2)}
+      </b>
+      <button
+        type="button"
+        aria-label={`ویرایش ارزیابی ${label}`}
+        title={`ویرایش ارزیابی ${label}`}
+        onClick={(e) => {
+          e.stopPropagation()
+          onEdit()
+        }}
+        className="flex size-5 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-brand-soft hover:text-brand"
+      >
+        <Pencil className="size-3" aria-hidden />
+      </button>
+    </span>
   )
 }
 

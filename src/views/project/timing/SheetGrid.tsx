@@ -40,6 +40,7 @@ import {
 } from './shared'
 import { CycleTimeline } from './CycleTimeline'
 import { AddRelationControl, ArchiveRelationControl } from '../relations/RelationControls'
+import { ElementRateButton } from '../rating/ElementRateButton'
 import type { SheetHistory } from './useSheetHistory'
 import { SuspectDiagnosticDialog, type SuspectDiagTarget } from './SuspectDiagnosticDialog'
 import { DeleteCycleConfirm } from './DeleteCycleConfirm'
@@ -550,26 +551,41 @@ export function SheetGrid({
                           )}
                         </div>
                       </div>
-                      {/* §۶ — میانبر افزودن رابطهٔ موازی از خود جدول */}
-                      {editable && (
-                        <AddRelationControl
-                          projectId={sheet.activity.projectId}
-                          elementId={row.elementId}
-                          elementName={row.name}
-                          currentActivityId={sheet.activity.id}
-                          candidates={relationCandidates(row.elementId)}
-                          trigger={
-                            <button
-                              type="button"
-                              aria-label={`افزودن عنصر موازی برای ${row.name}`}
-                              title="افزودن رابطهٔ موازی — عناصر همهٔ فعالیت‌های پروژه"
-                              className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-brand-soft hover:text-brand"
-                            >
-                              <CornerDownRight className="size-3.5 rotate-90" aria-hidden />
-                            </button>
-                          }
-                        />
-                      )}
+                      {/* v1.5.3 §۱ — دکمهٔ خیلی کوچک ارزیابی وستینگهاوس: همین اپراتور × همین عنصر،
+                          در همان جدول ثبت زمان باز می‌شود (بدون انتقال به صفحهٔ وستینگهاوس) */}
+                      <div className="flex shrink-0 flex-col items-center gap-0.5">
+                        <div className="flex items-center gap-0.5">
+                          <ElementRateButton
+                            projectId={sheet.activity.projectId}
+                            elementId={row.elementId}
+                            elementName={row.name}
+                            activityName={sheet.activity.name}
+                            stationName={sheet.activity.stationName}
+                            operatorId={sheet.operator.id}
+                            operatorName={sheet.operator.displayName}
+                          />
+                          {/* §۶ — میانبر افزودن رابطهٔ موازی از خود جدول */}
+                          {editable && (
+                            <AddRelationControl
+                              projectId={sheet.activity.projectId}
+                              elementId={row.elementId}
+                              elementName={row.name}
+                              currentActivityId={sheet.activity.id}
+                              candidates={relationCandidates(row.elementId)}
+                              trigger={
+                                <button
+                                  type="button"
+                                  aria-label={`افزودن عنصر موازی برای ${row.name}`}
+                                  title="افزودن رابطهٔ موازی — عناصر همهٔ فعالیت‌های پروژه"
+                                  className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-brand-soft hover:text-brand"
+                                >
+                                  <CornerDownRight className="size-3.5 rotate-90" aria-hidden />
+                                </button>
+                              }
+                            />
+                          )}
+                        </div>
+                      </div>
                     </div>
                   </th>
                   {cycles.map((cycle, colIdx) => {

@@ -234,7 +234,14 @@ export async function getActivityAnalysis(activityId: string): Promise<ActivityA
       station: { select: { name: true, project: { select: { id: true } } } },
       workElements: {
         orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
-        include: { rating: { include: { ratingTable: { select: { name: true, version: true } } } } },
+        include: {
+          ratings: {
+            include: {
+              ratingTable: { select: { name: true, version: true } },
+              operator: { select: { id: true, displayName: true } },
+            },
+          },
+        },
       },
     },
   })
@@ -324,15 +331,33 @@ export async function getActivityAnalysis(activityId: string): Promise<ActivityA
       aggregationMethod
     )
 
-    // ضریب وستینگهاوس مشترک عنصر — ۱۰.۲
-    const rating = el.rating
-    const ratingDto = rating
-      ? {
-          totalFactor: rating.totalFactor,
-          tableName: rating.ratingTable.name,
-          tableVersion: rating.ratingTable.version,
+    // v1.5.3 §۱ — ارزیابی دوسطحی: (۱) عمومی عنصر (میراث قبل)؛ (۲) اختصاصی هر اپراتور.
+    // NT عنصر از ارزیابی عمومی می‌آید؛ اگر نبود، میانگین وزنی ارزیابی‌های اپراتورها
+    // (وزن = تعداد مشاهدات در محاسبات همان اپراتور).
+    const generalRating = el.ratings.find((r) => r.operatorId === null) ?? null
+    const opRatingByOp = new Map<string, (typeof el.ratings)[number]>()
+    for (const r of el.ratings) if (r.operatorId !== null) opRatingByOp.set(r.operatorId, r)
+    let ratingDto: { totalFactor: number; tableName: string; tableVersion: number } | null = null
+    if (generalRating) {
+      ratingDto = {
+        totalFactor: generalRating.totalFactor,
+        tableName: generalRating.ratingTable.name,
+        tableVersion: generalRating.ratingTable.version,
+      }
+    } else {
+      let wSum = 0
+      let wCnt = 0
+      for (const [operatorId, vals] of perOperatorSamples) {
+        const orr = opRatingByOp.get(operatorId)
+        if (orr) {
+          wSum += orr.totalFactor * vals.length
+          wCnt += vals.length
         }
-      : null
+      }
+      if (wCnt > 0) {
+        ratingDto = { totalFactor: round12(wSum / wCnt), tableName: 'میانگین وزنی ارزیابی اپراتورها', tableVersion: 0 }
+      }
+    }
 
     const ot = agg.value
     const nt = ot !== null && ratingDto !== null ? round12(ot * ratingDto.totalFactor) : null
@@ -358,12 +383,14 @@ export async function getActivityAnalysis(activityId: string): Promise<ActivityA
       }
     }
 
-    // مقایسهٔ اپراتورها — FR-19 (R مشترک؛ تفاوت از میانگین مشاهده‌شده)
+    // مقایسهٔ اپراتورها — FR-19 — v1.5.3 §۱: NT هر اپراتور از ارزیابی اختصاصی
+    // همان اپراتور؛ در نبود آن، ارزیابی مؤثر عنصر (عمومی یا میانگین وزنی)
     const operators: OperatorComparisonRow[] = []
     for (const [operatorId, vals] of perOperatorSamples) {
       const opStats = descriptiveStats(vals)
       const opMean = opStats.mean
-      const opNt = opMean !== null && ratingDto !== null ? round12(opMean * ratingDto.totalFactor) : null
+      const opEffR = opRatingByOp.get(operatorId)?.totalFactor ?? ratingDto?.totalFactor ?? null
+      const opNt = opMean !== null && opEffR !== null ? round12(opMean * opEffR) : null
       let opSt: number | null = null
       if (opNt !== null) {
         try {

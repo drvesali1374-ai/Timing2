@@ -321,17 +321,102 @@
     filter: drop-shadow(0 0 5px color-mix(in srgb, var(--amber) 70%, transparent));
   }
 
-  /* ═══════════ سیاست alignment جداول — §۸.۳ جلسه اول ═══════════
-     هدر همه ستون‌ها center؛ داده کوتاه/عدد/کد/تاریخ/status/badge
-     center؛ توضیح بلند right (RTL). عددها tabular-nums + ltr.
-     به‌صورت CSS مشترک — نه کلاس تکراری در هر جدول. */
+  /* ═══ v1.5.3 §۹ — لامپ راهنمای هدر: کمی بزرگ‌تر + چشمک هر ۴ ثانیه ═══
+     وقتی پنل راهنما باز است (bulb-on) چشمک متوقف و لامپ پیوسته روشن می‌ماند. */
+  .lamp-blink {
+    width: 42px;
+    height: 42px;
+  }
+  .lamp-blink svg {
+    width: 22px;
+    height: 22px;
+  }
+  @keyframes t2-lamp-blink {
+    0% {
+      color: var(--muted-foreground);
+      filter: none;
+    }
+    6% {
+      color: var(--amber);
+      filter: drop-shadow(0 0 6px color-mix(in srgb, var(--amber) 75%, transparent));
+    }
+    46% {
+      color: var(--amber);
+      filter: drop-shadow(0 0 6px color-mix(in srgb, var(--amber) 75%, transparent));
+    }
+    56% {
+      color: var(--muted-foreground);
+      filter: none;
+    }
+    100% {
+      color: var(--muted-foreground);
+      filter: none;
+    }
+  }
+  .lamp-blink:not(.bulb-on) {
+    animation: t2-lamp-blink 4s ease-in-out infinite;
+  }
+  .lamp-blink:not(.bulb-on):hover {
+    animation-play-state: paused;
+    color: var(--amber);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .lamp-blink:not(.bulb-on) {
+      animation: none;
+    }
+  }
+
+  /* ═══ v1.5.3 §۵-هـ — حالت تمام‌صفحهٔ نمودار فرایند ═══
+     ریشهٔ نما روی کل صفحه می‌نشیند و بوم فضای باقی‌مانده را می‌گیرد؛
+     همهٔ ابزارها (نوار چسبان) در دسترس می‌مانند. */
+  .charts-fs {
+    position: fixed;
+    inset: 0;
+    z-index: 55;
+    background: var(--background);
+    padding: 10px 14px 14px;
+    overflow-y: auto;
+    border-radius: 0;
+  }
+  .charts-fs .chart-viewport {
+    flex: 1 1 auto;
+    min-height: 70vh;
+  }
+  .charts-fs .sticky-heading {
+    top: 0 !important;
+  }
+  .charts-fs .sticky-heading[data-stuck='true'] {
+    background: var(--background);
+  }
+  @media print {
+    .charts-fs {
+      position: static;
+      inset: auto;
+      padding: 0;
+      overflow: visible;
+    }
+  }
+
+  /* ═══════════ سیاست alignment جداول — §۸.۳ جلسه اول + v1.5.3 §۴ ═══════════
+     هدر همهٔ ستون‌های «همهٔ» جداول پروژه center؛ داده‌ها نیز center؛
+     محتوای سلول اگر تنها فرزند flex باشد وسط‌چین. توضیح بلند right (RTL).
+     عددها tabular-nums + ltr. به‌صورت CSS مشترک — نه کلاس تکراری. */
+  table th,
   table.tbl th,
-  table.tbl thead th {
+  table.tbl thead th,
+  [data-slot='table-head'] {
     text-align: center;
   }
+  table td,
   table.tbl td,
-  table.tbl tbody td {
+  table.tbl tbody td,
+  [data-slot='table-cell'] {
     text-align: center;
+  }
+  /* محتوای سلول: ظرف flex تنها فرزند → وسط‌چین (هم‌ارز هدر) — v1.5.3 §۴ */
+  table td > .flex:only-child,
+  table.tbl td > .flex:only-child {
+    justify-content: center;
   }
   /* توضیح بلند — ستون متن راست‌چین RTL */
   table.tbl td.tbl-text,

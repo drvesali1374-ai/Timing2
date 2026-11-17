@@ -197,8 +197,9 @@ export async function getStudyReport(
   if (analyses.length > 0) {
     const elementIds = analyses.flatMap((an) => an.elements.map((e) => e.id))
     if (elementIds.length > 0) {
+      // v1.5.3 §۱ — گزارش رسمی از ارزیابی عمومی عنصر (بدون اپراتور) استفاده می‌کند
       const rows = await db.ratingAssessment.findMany({
-        where: { workElementId: { in: elementIds } },
+        where: { workElementId: { in: elementIds }, operatorId: null },
         include: { ratingTable: { select: { name: true, version: true } } },
       })
       ratingRows.push(...rows)

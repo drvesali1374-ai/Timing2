@@ -9,7 +9,9 @@ type Ctx = { params: Promise<{ id: string }> }
 export function GET(req: NextRequest, ctx: Ctx) {
   return handle(req, async () => {
     const { id } = await ctx.params
-    return ok(await getElementRating(id))
+    // v1.5.3 §۱ — اپراتور مشخص (کوئری) → ارزیابی اختصاصی همان اپراتور
+    const operatorId = new URL(req.url).searchParams.get('operatorId')
+    return ok(await getElementRating(id, operatorId))
   })
 }
 

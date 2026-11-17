@@ -15,6 +15,8 @@ export const qk = {
   allowanceDefinitions: (projectId: string) => ['allowance-definitions', projectId] as const,
   scopeAllowances: (scopeType: string, scopeId: string) => ['scope-allowances', scopeType, scopeId] as const,
   elementRating: (elementId: string) => ['element-rating', elementId] as const,
+  // v1.5.3 §۱ — ارزیابی اختصاصی اپراتور × عنصر
+  operatorElementRating: (elementId: string, operatorId: string) => ['element-rating', elementId, operatorId] as const,
   operators: (projectId: string) => ['operators', projectId] as const,
   ratingTables: (projectId: string) => ['rating-tables', projectId] as const,
   ratingTable: (tableId: string) => ['rating-table', tableId] as const,

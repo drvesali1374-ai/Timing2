@@ -176,7 +176,7 @@ export default function OperatorsView({ projectId }: { projectId: string }) {
         <EmptyState
           icon={<UserRound className="size-7" aria-hidden />}
           title="هنوز اپراتوری ثبت نشده است"
-          description="برای زمان‌سنجی (فاز ۳) حداقل به یک اپراتور نیاز دارید. اپراتور در سطح پروژه تعریف می‌شود و می‌تواند در چند فعالیت شرکت کند؛ برگه هر اپراتور مستقل خواهد بود."
+          description="برای زمان‌سنجی حداقل به یک اپراتور نیاز دارید. اپراتور در سطح پروژه تعریف می‌شود و می‌تواند در چند فعالیت شرکت کند؛ برگه هر اپراتور مستقل خواهد بود."
           action={
             <Button onClick={openCreate} className="btn-brand gap-1.5 border-0">
               <Plus className="size-4" aria-hidden />
@@ -202,7 +202,7 @@ export default function OperatorsView({ projectId }: { projectId: string }) {
         <div className="card-premium overflow-hidden">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b bg-surface-2/70 text-right text-xs text-muted-foreground">
+              <tr className="border-b bg-surface-2/70 text-xs text-muted-foreground">
                 <th className="px-4 py-3 font-bold">نام نمایشی</th>
                 <th className="px-4 py-3 font-bold">کد</th>
                 <th className="px-4 py-3 font-bold">توضیحات</th>
@@ -252,7 +252,7 @@ export default function OperatorsView({ projectId }: { projectId: string }) {
       {/* راهنمای بخش */}
       <p className="rounded-xl bg-muted p-3 text-xs leading-6 text-muted-foreground">
         <b className="text-foreground">یادآوری: </b>
-        برگه زمان‌سنجی هر اپراتور برای هر فعالیت مستقل است و در فاز ۳ فعال می‌شود. حذف اپراتور به‌طور دائمی
+        برگه زمان‌سنجی هر اپراتور برای هر فعالیت مستقل است. حذف اپراتور به‌طور دائمی
         است و جلسات او را نیز حذف می‌کند.
       </p>
 

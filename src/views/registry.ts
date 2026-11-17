@@ -18,6 +18,7 @@ export type RegistryView =
   | 'dashboard'
   | 'reports'
   | 'data'
+  | 'help'
 
 export type ViewComponent = ComponentType<{ projectId: string }>
 
@@ -35,4 +36,5 @@ export const registry: Record<RegistryView, ViewComponent> = {
   dashboard: lazy(() => import('./project/DashboardView')),
   reports: lazy(() => import('./project/ReportsView')),
   data: lazy(() => import('./project/DataView')),
+  help: lazy(() => import('./project/HelpView')),
 }

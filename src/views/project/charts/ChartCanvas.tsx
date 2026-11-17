@@ -19,12 +19,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
-  ChevronDown,
-  ChevronUp,
+  Expand,
   FileDown,
   History,
   Loader2,
   Maximize2,
+  Minimize2,
   Network,
   Pencil,
   Plus,
@@ -128,16 +128,17 @@ export default function ChartCanvas({
 
   /** ابعاد مؤثر بوم: تنظیم صریح کاربر یا گسترهٔ محتوا — قبل از جهش‌ها
    *  محاسبه می‌شود (mutationFn چیدمان خودکار به آن نیاز دارد). */
+  const [nodeH, setNodeH] = useState<Record<string, number>>({})
   const effCanvas = useMemo(() => {
     let w = canvasQ.data?.width ?? 0
     let h = canvasQ.data?.height ?? 0
     for (const n of nodes) {
       const p = positions[n.id] ?? { x: n.positionX, y: n.positionY }
       w = Math.max(w, p.x + NODE_W + MARGIN)
-      h = Math.max(h, p.y + NODE_H + MARGIN)
+      h = Math.max(h, p.y + (nodeH[n.id] ?? NODE_H) + MARGIN)
     }
     return { w, h }
-  }, [canvasQ.data, nodes, positions])
+  }, [canvasQ.data, nodes, positions, nodeH])
 
   /** §۱۰.۸ — تاریخچهٔ Undo/Redo بوم؛ busy = جهش در حال اجرا.
    *  ارجاع از طریق ref — جهش‌ها بعد از این نقطه تعریف می‌شوند. */
@@ -581,6 +582,22 @@ export default function ChartCanvas({
     setConnecting({ sourceId: node.id, sourceAnchor: anchor, x: pt.x, y: pt.y })
   }
 
+  // ── v1.5.3 §۵-ب — کلیک روی هر جای دیگر صفحه = خروج یال از حالت انتخاب.
+  //    کلیک روی خود یال، نوار چسبان ابزارها و دیالوگ‌ها محافظت می‌شود؛
+  //    درگ گره/زمینه با panning جاری کنترل می‌شود. ──
+  useEffect(() => {
+    const onClickDoc = (ev: MouseEvent) => {
+      if (!selectedEdgeId) return
+      const t = ev.target as HTMLElement | null
+      if (!t) return
+      if (t.closest('.chart-edge') || t.closest('[data-toolbar-sticky]') || t.closest('[role="dialog"]') || t.closest('[data-radix-popper-content-wrapper]')) return
+      if (panning) return
+      setSelectedEdgeId(null)
+    }
+    document.addEventListener('click', onClickDoc)
+    return () => document.removeEventListener('click', onClickDoc)
+  }, [selectedEdgeId, panning])
+
   // ── §۶-۶ — حذف یال انتخاب‌شده با Delete/Backspace (فقط وقتی یال
   //    انتخاب شده و کاربر داخل فیلد متنی تایپ نمی‌کند) ──
   useEffect(() => {
@@ -645,6 +662,44 @@ export default function ChartCanvas({
     }
   }, [connecting, hoverTarget])
 
+  /* v1.5.3 §۵-الف — ارتفاع واقعی هر کارت (برچسب چندخطی) پس از رندر اندازه‌گیری
+   *  می‌شود تا لنگرها/مسیر یال‌ها دقیق بمانند و بوم تا انتهای بلندترین کارت
+   *  گسترش یابد (کارت پایینی هرگز بریده نمی‌شود). */
+  useEffect(() => {
+    if (!hasChart) return
+    const vp = viewportRef.current
+    if (!vp) return
+    const read = () => {
+      const next: Record<string, number> = {}
+      vp.querySelectorAll<HTMLElement>('.chart-node').forEach((el) => {
+        const id = el.dataset.nodeId
+        if (id) next[id] = el.offsetHeight
+      })
+      setNodeH((prev) => (JSON.stringify(prev) === JSON.stringify(next) ? prev : next))
+    }
+    read()
+    if (typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(read)
+    ro.observe(vp)
+    return () => ro.disconnect()
+  }, [hasChart, data, nodes.length, positions])
+
+  /* ── v1.5.3 §۵-هـ — حالت تمام‌صفحه: محیط طراحی بازتر با همهٔ ابزارها ── */
+  const [fullscreen, setFullscreen] = useState(false)
+  useEffect(() => {
+    if (!fullscreen) return
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.key === 'Escape') setFullscreen(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [fullscreen])
+  useEffect(() => {
+    if (!fullscreen) return
+    const t = setTimeout(() => fitToView(), 60)
+    return () => clearTimeout(t)
+  }, [fullscreen])
+
   // ── رندر ──
   /** v1.5.2 نهایی §۴ — بلوک چسبان واحد: هدر صفحه + زبانه‌های OPC/FPC +
    *  «همهٔ» ابزارها (آیکونی با نام کامل در tooltip) — هنگام اسکرول
@@ -653,6 +708,7 @@ export default function ChartCanvas({
     <div
       ref={headRef}
       data-stuck={headStuck ? 'true' : 'false'}
+      data-toolbar-sticky
       className="sticky-heading -mx-1 px-1 pb-3 pt-1"
     >
       <header className="flex flex-wrap items-center justify-between gap-3">
@@ -828,6 +884,24 @@ export default function ChartCanvas({
               </TooltipTrigger>
               <TooltipContent side="bottom">خروجی PDF نمودار — تک‌صفحه‌ای یا تایل‌دار</TooltipContent>
             </Tooltip>
+
+            {/* v1.5.3 §۵-هـ — تمام‌صفحه: بوم در محیط بازِ تمام‌صفحه با همهٔ ابزارها */}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className={cn('size-8', fullscreen && 'bg-brand-soft text-brand')}
+                  aria-label={fullscreen ? 'خروج از تمام‌صفحه' : 'تمام‌صفحه'}
+                  onClick={() => setFullscreen((v) => !v)}
+                >
+                  {fullscreen ? <Minimize2 className="size-4" aria-hidden /> : <Expand className="size-4" aria-hidden />}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">
+                {fullscreen ? 'خروج از حالت تمام‌صفحه (Esc)' : 'نمایش نمودار در تمام صفحه — محیط طراحی بازتر با همهٔ ابزارها'}
+              </TooltipContent>
+            </Tooltip>
           </>
         )}
       </div>
@@ -900,7 +974,7 @@ export default function ChartCanvas({
   const connectingSourceNode = connecting ? nodeById.get(connecting.sourceId) : null
 
   return (
-    <div className="space-y-4">
+    <div className={cn('space-y-4', fullscreen && 'charts-fs')}>
       {stickyBlock}
 
       {/* چیپ‌های شمارش/راهنما — خارج از نوار چسبان تا نوار فشرده بماند */}
@@ -992,9 +1066,12 @@ export default function ChartCanvas({
                 if (!s || !t) return null
                 const sp = pos(s)
                 const tp = pos(t)
-                const sa = (e.sourceAnchor as AnchorSide | null) ?? autoAnchors(sp, tp)[0]
-                const ta = (e.targetAnchor as AnchorSide | null) ?? autoAnchors(sp, tp)[1]
-                const d = orthogonalPath(sp, sa, tp, ta)
+                /* v1.5.3 §۵-الف — مسیر با ارتفاع واقعی کارت‌های چندخطی */
+                const sh = nodeH[s.id] ?? NODE_H
+                const th = nodeH[t.id] ?? NODE_H
+                const sa = (e.sourceAnchor as AnchorSide | null) ?? autoAnchors(sp, tp, sh, th)[0]
+                const ta = (e.targetAnchor as AnchorSide | null) ?? autoAnchors(sp, tp, sh, th)[1]
+                const d = orthogonalPath(sp, sa, tp, ta, sh, th)
                 const isSelected = selectedEdgeId === e.id
                 /* v1.5.2 §۱۰.۵ — ظاهر یال: پیش‌فرض = پیوسته با رنگ استاندارد
                  * (همانند یال‌های خودکار)؛ کاربر می‌تواند خط‌چین/نقطه‌چین/رنگ
@@ -1061,6 +1138,7 @@ export default function ChartCanvas({
               return (
                 <div
                   key={n.id}
+                  data-node-id={n.id}
                   className={cn(
                     'chart-node group absolute rounded-xl border bg-card p-2.5 shadow-sm transition-shadow',
                     'cursor-grab active:cursor-grabbing',
@@ -1119,8 +1197,10 @@ export default function ChartCanvas({
                   <div className="flex items-start gap-2.5">
                     <ProcessSymbol type={n.nodeType} size="md" />
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-bold leading-6" title={n.label}>{n.label}</p>
-                      <p className="truncate text-[11px] leading-5 text-muted-foreground">
+                      {/* v1.5.3 §۵-الف — نام فرایند به‌طور کامل درج و در صورت
+                          نبودن در عرض کارت، چندخطی می‌شود (بدون برش) */}
+                      <p className="text-sm font-bold leading-normal break-words" title={n.label}>{n.label}</p>
+                      <p className="text-[11px] leading-normal break-words text-muted-foreground">
                         {PROCESS_TYPE_LABELS_WITH_INPUT[n.nodeType] ?? n.nodeType}
                         {n.isManual ? ' · گره دستی' : n.stationName ? ` · ${n.stationName}` : ''}
                       </p>
@@ -1142,24 +1222,8 @@ export default function ChartCanvas({
                       aria-hidden
                       className={cn('size-7', toolbarLeft ? '-right-3' : '-left-3', toolbarBelow ? '-top-3' : '-bottom-3')}
                     />
-                    <button
-                      type="button"
-                      className="inline-flex size-6 items-center justify-center rounded-full text-muted-foreground hover:bg-brand-soft hover:text-brand disabled:opacity-30"
-                      aria-label={`جابه‌جایی «${n.label}» به بالا در توالی`}
-                      disabled={moveOrderMutation.isPending || n.sortOrder === 0}
-                      onClick={() => moveOrderMutation.mutate({ nodeId: n.id, direction: 'up' })}
-                    >
-                      <ChevronUp className="size-4" aria-hidden />
-                    </button>
-                    <button
-                      type="button"
-                      className="inline-flex size-6 items-center justify-center rounded-full text-muted-foreground hover:bg-brand-soft hover:text-brand disabled:opacity-30"
-                      aria-label={`جابه‌جایی «${n.label}» به پایین در توالی`}
-                      disabled={moveOrderMutation.isPending || n.sortOrder === nodes.length - 1}
-                      onClick={() => moveOrderMutation.mutate({ nodeId: n.id, direction: 'down' })}
-                    >
-                      <ChevronDown className="size-4" aria-hidden />
-                    </button>
+                    {/* v1.5.3 §۵-د — دکمه‌های جابه‌جایی بالا/پایین حذف شدند (بی‌کاربرد؛
+                        ترتیب با کشیدن اتصال یا کلیدهای جهت‌نما روی گرهٔ فعال تغییر می‌کند) */}
                     {n.isManual ? (
                       <>
                         <button
