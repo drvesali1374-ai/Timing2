@@ -717,11 +717,6 @@
       onclick: function () { selectedSession[ctx.activityId] = null; ctx.render(); },
     }, U.icon('listTree'), 'بازگشت به جلسات'));
 
-    /* نشان برجستهٔ یکتای اپراتور جلسهٔ فعال */
-    row1.appendChild(U.h('span', { class: 't2t-sub-op-chip', title: 'اپراتور جلسهٔ فعال' },
-      U.icon('users'),
-      U.h('span', { class: 'truncate', text: sheet.operator.displayName })));
-
     row1.appendChild(UI.badge(methodLabel, method === 'SNAPBACK' ? 'cyan' : 'brand'));
     if (!editable) {
       var closedBadge = UI.badge('بسته', 'muted', 'lock');
@@ -764,10 +759,15 @@
 
     /* ردیف ۲ — عنوان برگه + شمار چرخه + نوار ابزار */
     var row2 = U.h('div', { class: 't2t-sheet-row' });
-    row2.appendChild(U.h('h2', { class: 'font-bold shrink-0', style: { fontSize: '14px' } },
-      'برگهٔ زمان‌سنجی',
+    /* v1.5.4 §۳ — نام اپراتور به‌صورت بولد بلافاصله بعد از عنوان برگهٔ زمان‌سنجی؛
+       عنوان‌های اضافهٔ این کادر (مانند «N چرخه در این جلسه») حذف شدند */
+    row2.appendChild(U.h('h2', { class: 'font-bold shrink-0 flex flex-wrap items-center gap-1', style: { fontSize: '14px' } },
+      'برگهٔ زمان‌سنجی —',
+      U.h('b', {
+        class: 'truncate', style: { fontSize: '14px', fontWeight: 800 },
+        title: 'اپراتور جلسهٔ فعال',
+        text: sheet.operator.displayName }),
       UI.helpDot('برگهٔ زمان‌سنجی', sheetHelp)));
-    row2.appendChild(U.h('span', { class: 'num text-xs text-muted shrink-0' }, U.formatInt(stats.sessionCycles) + ' چرخه در این جلسه'));
 
     var closedHint = 'جلسه بسته است؛ برای ثبت داده، جلسهٔ جدید ایجاد کنید.';
     var addDd = UI.dropdownMenu(
@@ -824,25 +824,30 @@
     var valid = stats.activityValidCycles;
     var target = stats.targetSampleCount;
     var thisSessionValid = stats.sessionValidCycles;
-    var pct = target ? Math.min(100, Math.round((valid / target) * 100)) : 100;
-    /* نوار پیشرفت — کهربایی تا زمان رسیدن به هدف */
+    /* v1.5.4 §۳ — رفع باگ «نوار همیشه پر»: بدون هدف، نوار خالی است (نه پر)؛
+       با هدف، درصد = چرخه‌های معتبر ÷ هدف (سقف ۱۰۰٪) و پس از رسیدن به هدف،
+       نوار سبز و نشان «هدف تکمیل شد» نمایش داده می‌شود. شمار معتبر، جمع
+       همهٔ جلسه‌های همهٔ اپراتورهای این فعالیت است (نه فقط جلسهٔ جاری). */
+    var pct = target ? Math.min(100, Math.round((valid / target) * 100)) : 0;
     var notReached = !!(target && valid < target);
+    var reached = !!(target && valid >= target);
     var progressCard = U.h('div', { class: 'card p-4 mb-3' },
       U.h('div', { class: 'flex flex-wrap items-center gap-2' },
         U.icon('target'),
         U.h('span', { class: 'font-bold text-sm', text: 'پیشرفت تعداد نمونهٔ فعالیت' }),
         UI.helpDot('تعداد نمونه', {
-          what: 'تعداد چرخه‌های معتبر ثبت‌شده در برابر هدف تعیین‌شده برای کل فعالیت (نه هر اپراتور).',
+          what: 'تعداد چرخه‌های معتبر ثبت‌شده در برابر هدف تعیین‌شده برای کل فعالیت (نه هر اپراتور) — جمع همهٔ جلسه‌های همهٔ اپراتورهای این فعالیت.',
           input: 'هدف را در مشخصات فعالیت (ساختار تولید) تعیین کنید. شمارش بر اساس چرخه‌های کامل بدون مشاهدهٔ خارج‌شده است.',
-          example: 'هدف ۱۰ چرخه؛ اگر ۷ چرخهٔ معتبر ثبت شده باشد، هشدار کمبود نمونه نمایش داده می‌شود.',
-          note: 'رسیدن به تعداد هدف فقط به معنای «رسیدن به تعداد ثبت‌شده» است و کفایت آماری تضمین‌شده تلقی نمی‌شود؛ شاخص‌های پراکندگی در صفحهٔ تحلیل نتایج نمایش داده می‌شوند.',
+          example: 'هدف ۱۰ چرخه؛ اگر ۷ چرخهٔ معتبر ثبت شده باشد، نوار کهربایی و ناقص است و هشدار کمبود نمونه نمایش داده می‌شود.',
+          note: 'اگر هدف تعیین نشده باشد، نوار خالی می‌ماند. رسیدن به تعداد هدف فقط به معنای «رسیدن به تعداد ثبت‌شده» است و کفایت آماری تضمین‌شده تلقی نمی‌شود؛ شاخص‌های پراکندگی در صفحهٔ تحلیل نتایج نمایش داده می‌شوند.',
         }),
         U.h('div', { class: 'spacer' }),
+        reached ? UI.badge('هدف تکمیل شد', 'green', 'checkCircle') : null,
         U.h('span', { class: 'font-extrabold num' },
-          target ? U.formatInt(valid) + ' / ' + U.formatInt(target) : U.formatInt(valid) + ' (بدون هدف)'),
+          target ? U.formatInt(valid) + ' از ' + U.formatInt(target) + ' چرخه' : U.formatInt(valid) + ' چرخهٔ معتبر (بدون هدف)'),
         U.h('span', { class: 'text-xs text-muted' }, '— این جلسه: ' + U.formatInt(thisSessionValid) + ' معتبر')),
       U.h('div', {
-        class: 'progress mt-2' + (notReached ? ' amber' : ''), role: 'progressbar', 'aria-label': 'پیشرفت تعداد نمونه',
+        class: 'progress mt-2' + (notReached ? ' amber' : (reached ? ' done' : '')), role: 'progressbar', 'aria-label': 'پیشرفت تعداد نمونه',
         'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-valuenow': String(pct),
       }, U.h('div', { style: { width: pct + '%' } })));
     if (notReached) {

@@ -73,5 +73,5 @@ server.log
 /examples/
 /mini-services/
 /tests/
-public/Timing2-Offline.html
-public/offline/
+# NOTE: public/Timing2-Offline.html و public/offline (پیوندهای نمادین به نسخهٔ آفلاین)
+# عمداً ردیابی می‌شوند تا پیش‌نمایش همان دامنه (/Timing2-Offline.html) کار کند.

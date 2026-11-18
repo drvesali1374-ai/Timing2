@@ -278,10 +278,11 @@ export async function putElementRating(elementId: string, input: AssessmentPutIn
     return g.value
   }
 
-  const skillValue = gradeValue('SKILL', gradesInput.skillGrade)
-  const effortValue = gradeValue('EFFORT', gradesInput.effortGrade)
-  const conditionsValue = gradeValue('CONDITIONS', gradesInput.conditionsGrade)
-  const consistencyValue = gradeValue('CONSISTENCY', gradesInput.consistencyGrade)
+  // (?? null فقط برای نوع؛ رفتار تغییری نمی‌کند — undefined هم مثل null سهم صفر دارد)
+  const skillValue = gradeValue('SKILL', gradesInput.skillGrade ?? null)
+  const effortValue = gradeValue('EFFORT', gradesInput.effortGrade ?? null)
+  const conditionsValue = gradeValue('CONDITIONS', gradesInput.conditionsGrade ?? null)
+  const consistencyValue = gradeValue('CONSISTENCY', gradesInput.consistencyGrade ?? null)
   const totalFactor = computeRatingFactor({ skill: skillValue, effort: effortValue, conditions: conditionsValue, consistency: consistencyValue })
 
   const existing = await db.ratingAssessment.findFirst({
@@ -360,6 +361,84 @@ export async function deleteElementRating(elementId: string, operatorId?: string
     projectId: element.activity.station.project.id,
   })
   return { deleted: true }
+}
+
+/** برگه‌های زمان‌سنجی ثبت‌شده برای یک عنصر کاری (توسط هر اپراتور) — v1.5.4 §۱
+ *  جلسه‌های فعالیتِ این عنصر که دست‌کم یک مشاهده (حتی ناقص) برای آن ثبت کرده‌اند.
+ *  مبنای فهرست «انتخاب برگه» در صفحهٔ وستینگهاوس است. */
+export async function listElementTimingSheets(elementId: string) {
+  const element = await db.workElement.findUnique({
+    where: { id: elementId },
+    include: { activity: { include: { station: { select: { name: true } } } } },
+  })
+  if (!element) throw new AppError('ELEMENT_NOT_FOUND', 'عنصر کاری یافت نشد.', 404)
+  const activity = element.activity
+
+  // جلسه‌های فعالیت این عنصر، همراه با چرخه‌ها و مشاهداتِ همین عنصر
+  const sessions = await db.studySession.findMany({
+    where: { activityId: activity.id },
+    include: {
+      operator: { select: { id: true, displayName: true, code: true } },
+      cycles: {
+        include: {
+          observations: {
+            where: { workElementId: elementId },
+            select: { validityStatus: true, derivedDuration: true },
+          },
+        },
+      },
+    },
+    orderBy: { startedAt: 'desc' },
+  })
+
+  const sheets: {
+    sessionId: string
+    operatorId: string
+    operatorName: string
+    operatorCode: string | null
+    startedAt: string
+    endedAt: string | null
+    status: string
+    timingMethod: string
+    cyclesForElement: number
+    obsForElement: number
+    validForElement: number
+  }[] = []
+  for (const se of sessions) {
+    let cyclesWithElement = 0
+    let obsCount = 0
+    let validObs = 0
+    for (const c of se.cycles) {
+      if (c.observations.length === 0) continue // در این چرخه برای این عنصر چیزی ثبت نشده است
+      cyclesWithElement++
+      obsCount += c.observations.length
+      for (const o of c.observations) {
+        // معتبر = خارج‌شده/نامعتبر نیست و مدت محاسبه‌شده دارد
+        if (o.validityStatus !== 'EXCLUDED' && o.validityStatus !== 'INVALID' && o.derivedDuration !== null) validObs++
+      }
+    }
+    if (cyclesWithElement === 0) continue // در این برگه برای این عنصر چیزی ثبت نشده است
+    sheets.push({
+      sessionId: se.id,
+      operatorId: se.operatorId,
+      operatorName: se.operator?.displayName ?? 'اپراتور حذف‌شده',
+      operatorCode: se.operator?.code ?? null,
+      startedAt: se.startedAt.toISOString(),
+      endedAt: se.endedAt ? se.endedAt.toISOString() : null,
+      status: se.status,
+      timingMethod: se.timingMethod,
+      cyclesForElement: cyclesWithElement,
+      obsForElement: obsCount,
+      validForElement: validObs,
+    })
+  }
+
+  return {
+    element: { id: element.id, name: element.name },
+    activity: { id: activity.id, name: activity.name },
+    stationName: activity.station?.name ?? '',
+    sheets,
+  }
 }
 
 /** ماتریس ارزیابی همه عناصر پروژه — v1.5.3 §۱: ارزیابی عمومی + اختصاصی هر

@@ -9,6 +9,7 @@ import { useAppStore, initHashSync } from '@/store/app-store'
 import { AppShell } from '@/components/layout/AppShell'
 import { Skeleton } from '@/components/ui/skeleton'
 import { registry, type RegistryView } from '@/views/registry'
+import { useScrollMemory } from '@/hooks/use-scroll-memory'
 
 function ViewSkeleton() {
   return (
@@ -46,6 +47,9 @@ function StageRouter() {
 }
 
 export default function Page() {
+  const view = useAppStore((s) => s.view)
+  // v1.5.4 §۲ — حافظهٔ موقعیت اسکرول هر صفحه (خانه و صفحات پروژه)
+  useScrollMemory(view)
   useEffect(() => initHashSync(), [])
   return (
     <Suspense fallback={<ViewSkeleton />}>

@@ -331,31 +331,30 @@ export async function getActivityAnalysis(activityId: string): Promise<ActivityA
       aggregationMethod
     )
 
-    // v1.5.3 §۱ — ارزیابی دوسطحی: (۱) عمومی عنصر (میراث قبل)؛ (۲) اختصاصی هر اپراتور.
-    // NT عنصر از ارزیابی عمومی می‌آید؛ اگر نبود، میانگین وزنی ارزیابی‌های اپراتورها
-    // (وزن = تعداد مشاهدات در محاسبات همان اپراتور).
+    // v1.5.4 §۱ — ارزیابی دوسطحی با اولویت اپراتور: (۱) میانگین وزنی
+    // ارزیابی‌های اختصاصی اپراتورها (وزن = تعداد مشاهدات در محاسبات)؛
+    // (۲) در نبود هر ارزیابی اپراتوری، ارزیابی عمومی عنصر (میراث نسخه‌های
+    // قبل) فقط به‌عنوان جایگزینِ داده‌های قدیمی به کار می‌رود.
     const generalRating = el.ratings.find((r) => r.operatorId === null) ?? null
     const opRatingByOp = new Map<string, (typeof el.ratings)[number]>()
     for (const r of el.ratings) if (r.operatorId !== null) opRatingByOp.set(r.operatorId, r)
     let ratingDto: { totalFactor: number; tableName: string; tableVersion: number } | null = null
-    if (generalRating) {
+    let wSum = 0
+    let wCnt = 0
+    for (const [operatorId, vals] of perOperatorSamples) {
+      const orr = opRatingByOp.get(operatorId)
+      if (orr) {
+        wSum += orr.totalFactor * vals.length
+        wCnt += vals.length
+      }
+    }
+    if (wCnt > 0) {
+      ratingDto = { totalFactor: round12(wSum / wCnt), tableName: 'میانگین وزنی ارزیابی اپراتورها', tableVersion: 0 }
+    } else if (generalRating) {
       ratingDto = {
         totalFactor: generalRating.totalFactor,
         tableName: generalRating.ratingTable.name,
         tableVersion: generalRating.ratingTable.version,
-      }
-    } else {
-      let wSum = 0
-      let wCnt = 0
-      for (const [operatorId, vals] of perOperatorSamples) {
-        const orr = opRatingByOp.get(operatorId)
-        if (orr) {
-          wSum += orr.totalFactor * vals.length
-          wCnt += vals.length
-        }
-      }
-      if (wCnt > 0) {
-        ratingDto = { totalFactor: round12(wSum / wCnt), tableName: 'میانگین وزنی ارزیابی اپراتورها', tableVersion: 0 }
       }
     }
 

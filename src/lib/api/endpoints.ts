@@ -284,6 +284,32 @@ export interface RatingMatrixDto {
   }[]
 }
 
+/** v1.5.4 §۱ — برگهٔ زمان‌سنجی ثبت‌شده برای یک عنصر (توسط یک اپراتور) */
+export interface ElementTimingSheetItemDto {
+  sessionId: string
+  operatorId: string
+  operatorName: string
+  operatorCode: string | null
+  startedAt: string
+  endedAt: string | null
+  status: string
+  timingMethod: string
+  /** چرخه‌هایی که برای این عنصر مشاهده (حتی ناقص) دارند */
+  cyclesForElement: number
+  /** کل مشاهدات این عنصر در این برگه */
+  obsForElement: number
+  /** مشاهدات معتبرِ این عنصر در این برگه */
+  validForElement: number
+}
+
+export interface ElementTimingSheetsDto {
+  element: { id: string; name: string }
+  activity: { id: string; name: string }
+  stationName: string
+  /** جدیدترین اول */
+  sheets: ElementTimingSheetItemDto[]
+}
+
 export interface BackupDto {
   id: string
   fileName: string
@@ -651,6 +677,8 @@ export const ratingApi = {
   putElementRating: (elementId: string, body: Record<string, unknown>) =>
     api.put<ElementRatingDto>(`/api/elements/${elementId}/rating`, body),
   matrix: (projectId: string) => api.get<RatingMatrixDto>(`/api/projects/${projectId}/rating-matrix`),
+  // v1.5.4 §۱ — برگه‌های زمان‌سنجی ثبت‌شده برای یک عنصر (هر اپراتور؛ حتی ناقص)
+  timingSheets: (elementId: string) => api.get<ElementTimingSheetsDto>(`/api/elements/${elementId}/timing-sheets`),
 }
 
 // ── پشتیبان/تنظیمات/تاریخچه ──

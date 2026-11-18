@@ -43,6 +43,7 @@ import {
 import { HelpDot, type HelpContent } from '@/components/common/HelpDot'
 import { SectionHeading } from '@/components/common/SectionHeading'
 import { ElementRatingDialog, type RatingDialogOperator } from '@/views/project/rating/ElementRatingDialog'
+import { ElementSheetPickerDialog } from '@/views/project/rating/ElementSheetPickerDialog'
 import { ConfirmDeleteDialog, EmptyState } from '@/components/common/Feedback'
 import { SaveIndicator } from '@/components/common/SaveIndicator'
 import { PersianNumberInput } from '@/components/common/PersianNumberInput'
@@ -155,11 +156,15 @@ export default function WestinghouseView({ projectId }: { projectId: string }) {
     }
     return out
   }, [matrix])
-  const ratedCount = allElements.filter((e) => e.rating !== null).length
+  // v1.5.4 §۱ — عنصر «ارزیابی‌شده» = ارزیابی اختصاصی اپراتور دارد (یا میراث عمومی)
+  const ratedCount = allElements.filter((e) => e.rating !== null || (e.operatorRatings?.length ?? 0) > 0).length
   const pct = allElements.length === 0 ? 0 : Math.round((ratedCount / allElements.length) * 100)
 
   // ── دیالوگ ارزیابی — v1.5.3 §۱: زمینهٔ «عنصر × اپراتور؟» ──
   const [dialogCtx, setDialogCtx] = useState<{ el: MatrixElementRow; operator: RatingDialogOperator | null } | null>(null)
+
+  // ── v1.5.4 §۱ — دیالوگ انتخاب برگهٔ زمان‌سنجی عنصر (پیش‌گام فرم ارزیابی) ──
+  const [pickerEl, setPickerEl] = useState<MatrixElementRow | null>(null)
 
   // نام اپراتورها برای هشدارهای تکمیل‌نشدگی ارزیابی
   const operatorsQ = useQuery({
@@ -270,7 +275,7 @@ export default function WestinghouseView({ projectId }: { projectId: string }) {
                       label="ارزیابی وستینگهاوس"
                       content={{
                         what: 'ضریب عملکرد R = 1 + مهارت + تلاش + شرایط + یکنواختی؛ ارزیابی برای هر «عنصر کاری × اپراتور» ثبت می‌شود، چون یک اپراتور ممکن است در عنصری ماهر و در عنصر دیگر (مثلاً بسته‌بندی) متوسط باشد.',
-                        input: 'ثبت ارزیابی از دکمهٔ کوچک کنار نام هر عنصر در جدول ثبت زمان (صفحهٔ زمان‌سنجی) انجام می‌شود؛ در این صفحه ارزیابی‌های ثبت‌شده را فقط مشاهده و اصلاح کنید.',
+                        input: 'با دکمهٔ «ارزیابی» هر عنصر، فهرست برگه‌های زمان‌سنجی ثبت‌شده برای آن عنصر (هر اپراتور؛ حتی ناقص) باز می‌شود؛ با انتخاب برگه، همان فرم ارزیابی برگهٔ زمان‌سنجی برای اپراتورِ آن برگه تکمیل می‌شود. ثبت سریع نیز از دکمهٔ کوچک کنار نام عنصر در جدول ثبت زمان (صفحهٔ زمان‌سنجی) ممکن است.',
                         example: 'مهارت +۰٫۰۶، تلاش +۰٫۰۲، شرایط ۰ و یکنواختی +۰٫۰۱ ⇒ R = ۱٫۰۹',
                         note: 'عناصری که ثبت زمان دارند ولی ارزیابی کامل ندارند، در این صفحه هشدار می‌گیرند. جدول Seed صرفاً نقطه شروع است و باید توسط کارشناس/رویه شرکت تأیید شود.',
                       }}
@@ -302,6 +307,7 @@ export default function WestinghouseView({ projectId }: { projectId: string }) {
                     isMobile={isMobile}
                     operators={operators}
                     onRate={setDialogCtx}
+                    onAssess={setPickerEl}
                   />
                 ))}
               </div>
@@ -418,6 +424,19 @@ export default function WestinghouseView({ projectId }: { projectId: string }) {
         onClose={() => setDialogCtx(null)}
       />
 
+      {/* v1.5.4 §۱ — انتخاب برگهٔ زمان‌سنجی عنصر؛ با انتخاب برگه، فرم ارزیابی
+          برای اپراتورِ همان برگه باز می‌شود (عیناً همان فرم صفحهٔ زمان‌سنجی) */}
+      <ElementSheetPickerDialog
+        element={pickerEl}
+        projectId={projectId}
+        onClose={() => setPickerEl(null)}
+        onPick={(operator) => {
+          const el = pickerEl
+          setPickerEl(null)
+          if (el) setDialogCtx({ el, operator })
+        }}
+      />
+
       {/* تأیید حذف جدول — FR-26 */}
       <ConfirmDeleteDialog
         open={deletingTable !== null}
@@ -444,16 +463,18 @@ function StationSection({
   isMobile,
   operators,
   onRate,
+  onAssess,
 }: {
   station: RatingMatrixDto['stations'][number]
   prefs: Prefs
   isMobile: boolean
   operators: OperatorDto[]
   onRate: (ctx: { el: MatrixElementRow; operator: RatingDialogOperator | null }) => void
+  onAssess: (el: MatrixElementRow) => void
 }) {
   const [open, setOpen] = useState(true)
   const allElements = station.activities.flatMap((a) => a.elements)
-  const rated = allElements.filter((e) => e.rating !== null).length
+  const rated = allElements.filter((e) => e.rating !== null || (e.operatorRatings?.length ?? 0) > 0).length
 
   return (
     <Collapsible open={open} onOpenChange={setOpen} className="card-premium overflow-hidden">
@@ -486,6 +507,7 @@ function StationSection({
               isMobile={isMobile}
               operators={operators}
               onRate={onRate}
+              onAssess={onAssess}
             />
           ))
         )}
@@ -505,6 +527,7 @@ function ActivityElements({
   isMobile,
   operators,
   onRate,
+  onAssess,
 }: {
   activity: MatrixActivity
   stationName: string
@@ -512,6 +535,7 @@ function ActivityElements({
   isMobile: boolean
   operators: OperatorDto[]
   onRate: (ctx: { el: MatrixElementRow; operator: RatingDialogOperator | null }) => void
+  onAssess: (el: MatrixElementRow) => void
 }) {
   const rated = activity.elements.filter((e) => e.rating !== null || (e.operatorRatings?.length ?? 0) > 0).length
   const opNameById = useMemo(() => new Map(operators.map((o) => [o.id, o.displayName])), [operators])
@@ -523,17 +547,20 @@ function ActivityElements({
     const hasAny = el.rating !== null || (el.operatorRatings?.length ?? 0) > 0
     return (
       <div className="flex flex-col items-center gap-1.5 py-0.5">
-        {/* چیپ‌های ارزیابی‌های ثبت‌شده — عمومی (میراث) + هر اپراتور */}
+        {/* ردیف کنترل: دکمهٔ ارزیابی + چیپ‌های ارزیابی‌های ثبت‌شدهٔ اپراتورها — v1.5.4 §۱ */}
         <div className="flex flex-wrap items-center justify-center gap-1.5">
-          {el.rating && (
-            <RatingChip
-              label="عمومی (همهٔ اپراتورها)"
-              totalFactor={el.rating.totalFactor}
-              title={`${el.rating.ratingTableName}${el.rating.ratingTableVersion ? ` — نسخه ${formatInt(el.rating.ratingTableVersion, prefs)}` : ''} — ارزیابی عمومی عنصر (بدون اپراتور مشخص)`}
-              prefs={prefs}
-              onEdit={() => onRate({ el: { ...el, activityName: activity.name, stationName }, operator: null })}
-            />
-          )}
+          <Button
+            variant="outline"
+            size="sm"
+            className="shrink-0 gap-1.5"
+            aria-label={`ارزیابی وستینگهاوس عنصر «${el.name}» — انتخاب برگهٔ زمان‌سنجی`}
+            title="انتخاب برگهٔ زمان‌سنجی این عنصر و ثبت/ویرایش ارزیابی اپراتورِ همان برگه"
+            onClick={() => onAssess({ ...el, activityName: activity.name, stationName })}
+          >
+            <Gauge className="size-4" aria-hidden />
+            ارزیابی
+          </Button>
+          {/* چیپ‌های ارزیابی‌های ثبت‌شدهٔ اپراتورها — ویرایش با همان فرم برگهٔ زمان‌سنجی */}
           {(el.operatorRatings ?? []).map((orr) => (
             <RatingChip
               key={orr.operatorId}
@@ -547,19 +574,19 @@ function ActivityElements({
               }
             />
           ))}
-          {!hasAny && (
+          {(el.operatorRatings ?? []).length === 0 && (
             <Badge variant="outline" className="text-[11px] text-faint">
               هنوز ارزیابی‌ای ثبت نشده
             </Badge>
           )}
         </div>
-        {/* هشدارهای تکمیل‌نشدگی — v1.5.3 §۱ */}
+        {/* هشدارهای تکمیل‌نشدگی — v1.5.3 §۱ (v1.5.4: اصلاح مسیر اقدام) */}
         {missingNames.length > 0 ? (
           <p className="flex items-center gap-1.5 rounded-lg bg-amber-soft px-2.5 py-1 text-right text-[11px] leading-5 text-amber" role="alert">
             <AlertTriangle className="size-3.5 shrink-0" aria-hidden />
             <span className="text-foreground">
-              اپراتورهای «{missingNames.join('، ')}» برای این عنصر ثبت زمان دارند ولی ارزیابی وستینگهاوس آن‌ها تکمیل نشده — از
-              جدول ثبت زمان در صفحهٔ زمان‌سنجی انجام دهید.
+              اپراتورهای «{missingNames.join('، ')}» برای این عنصر ثبت زمان دارند ولی ارزیابی وستینگهاوس آن‌ها تکمیل نشده — با
+              دکمهٔ «ارزیابی» همین ردیف یا از جدول ثبت زمان در صفحهٔ زمان‌سنجی انجام دهید.
             </span>
           </p>
         ) : !hasAny && timingOps.length > 0 ? (
@@ -571,7 +598,7 @@ function ActivityElements({
           </p>
         ) : !hasAny ? (
           <p className="text-[11px] leading-5 text-muted-foreground">
-            بدون ارزیابی — ثبت از دکمهٔ کنار نام عنصر در جدول ثبت زمان (صفحهٔ زمان‌سنجی) انجام می‌شود.
+            بدون ارزیابی — با دکمهٔ «ارزیابی»، یکی از برگه‌های زمان‌سنجی این عنصر را انتخاب و فرم را تکمیل کنید.
           </p>
         ) : null}
       </div>
@@ -607,7 +634,7 @@ function ActivityElements({
           <thead>
             <tr className="border-b bg-surface-2/70 text-xs text-muted-foreground">
               <th className="px-4 py-2.5 text-center font-bold">عنصر کاری</th>
-              <th className="px-4 py-2.5 text-center font-bold">ارزیابی‌های ثبت‌شده و وضعیت</th>
+              <th className="px-4 py-2.5 text-center font-bold">ارزیابی وستینگهاوس</th>
             </tr>
           </thead>
           <tbody>

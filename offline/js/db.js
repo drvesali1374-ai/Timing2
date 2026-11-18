@@ -1187,6 +1187,45 @@
     });
     return Object.keys(out);
   }
+  /* v1.5.4 §۱ — برگه‌های زمان‌سنجی ثبت‌شده برای یک عنصر کاری (توسط هر اپراتور):
+     جلسه‌های فعالیتِ این عنصر که دست‌کم یک مشاهده (حتی ناقص) برای آن ثبت کرده‌اند.
+     مبنای فهرست «انتخاب برگه» در صفحهٔ وستینگهاوس است. */
+  function listElementTimingSheets(elementId) {
+    var e = byId('workElements', elementId);
+    if (!e) throw new Error('عنصر کاری یافت نشد.');
+    var activity = byId('activities', e.activityId);
+    var station = activity ? byId('stations', activity.stationId) : null;
+    var sheets = [];
+    filterBy('studySessions', 'activityId', e.activityId).forEach(function (se) {
+      var cyclesWithElement = 0, obsCount = 0, validObs = 0;
+      cyclesOfSession(se.id).forEach(function (c) {
+        var forEl = obsOfCycle(c.id).filter(function (o) { return o.workElementId === elementId; });
+        if (forEl.length === 0) return;
+        cyclesWithElement++;
+        obsCount += forEl.length;
+        forEl.forEach(function (o) {
+          if (o.validityStatus !== 'EXCLUDED' && o.validityStatus !== 'INVALID' && o.derivedDuration !== null) validObs++;
+        });
+      });
+      if (cyclesWithElement === 0) return; /* در این برگه برای این عنصر چیزی ثبت نشده است */
+      var op = byId('operators', se.operatorId);
+      sheets.push({
+        sessionId: se.id,
+        operatorId: se.operatorId,
+        operatorName: op ? op.displayName : 'اپراتور حذف‌شده',
+        operatorCode: op ? op.code : null,
+        startedAt: se.startedAt, endedAt: se.endedAt, status: se.status, timingMethod: se.timingMethod,
+        cyclesForElement: cyclesWithElement, obsForElement: obsCount, validForElement: validObs,
+      });
+    });
+    sheets.sort(function (a, b) { return String(b.startedAt || '').localeCompare(String(a.startedAt || '')); });
+    return {
+      element: { id: e.id, name: e.name },
+      activity: { id: activity ? activity.id : '', name: activity ? activity.name : '' },
+      stationName: station ? station.name : '',
+      sheets: sheets,
+    };
+  }
   function getRatingMatrix(projectId) {
     var els = [];
     activitiesOfProject(projectId).forEach(function (a) {
@@ -1860,28 +1899,26 @@
       });
       var samplesArr = Object.keys(perOperatorSamples).map(function (oid) { return { operatorId: oid, values: perOperatorSamples[oid] }; });
       var agg = F.aggregateElement(samplesArr, aggregationMethod);
-      /* v1.5.3 §۱ — ارزیابی دوسطحی: (۱) ارزیابی عمومی عنصر (میراث نسخه‌های
-         قبل)؛ (۲) ارزیابی اختصاصی هر اپراتور برای همین عنصر. NT عنصر از
-         ارزیابی عمومی می‌آید و اگر نبود، میانگین وزنی ارزیابی‌های اپراتورها
-         (وزن = تعداد مشاهدات در محاسبات) به کار می‌رود. */
+      /* v1.5.4 §۱ — ارزیابی دوسطحی با اولویت اپراتور: (۱) میانگین وزنی
+         ارزیابی‌های اختصاصی اپراتورها (وزن = تعداد مشاهدات در محاسبات)؛
+         (۲) در نبود هر ارزیابی اپراتوری، ارزیابی عمومی عنصر (میراث نسخه‌های
+         قبل) به‌عنوان جایگزین به کار می‌رود. */
       var rating = state.ratingAssessments.find(function (r) { return r.workElementId === el.id && !r.operatorId; });
       var opRatingByOp = {};
       state.ratingAssessments.forEach(function (r) {
         if (r.workElementId === el.id && r.operatorId) opRatingByOp[r.operatorId] = r;
       });
       var ratingDto = null;
-      if (rating) {
+      var wSum = 0, wCnt = 0;
+      Object.keys(perOperatorSamples).forEach(function (oid) {
+        var orr = opRatingByOp[oid];
+        if (orr) { wSum += orr.totalFactor * perOperatorSamples[oid].length; wCnt += perOperatorSamples[oid].length; }
+      });
+      if (wCnt > 0) {
+        ratingDto = { totalFactor: F.round12(wSum / wCnt), tableName: 'میانگین وزنی ارزیابی اپراتورها', tableVersion: null, source: 'OPERATOR_WEIGHTED' };
+      } else if (rating) {
         var t = byId('ratingTables', rating.ratingTableId);
         ratingDto = { totalFactor: rating.totalFactor, tableName: t ? t.name : '؟', tableVersion: t ? t.version : 0, source: 'ELEMENT' };
-      } else {
-        var wSum = 0, wCnt = 0;
-        Object.keys(perOperatorSamples).forEach(function (oid) {
-          var orr = opRatingByOp[oid];
-          if (orr) { wSum += orr.totalFactor * perOperatorSamples[oid].length; wCnt += perOperatorSamples[oid].length; }
-        });
-        if (wCnt > 0) {
-          ratingDto = { totalFactor: F.round12(wSum / wCnt), tableName: 'میانگین وزنی ارزیابی اپراتورها', tableVersion: null, source: 'OPERATOR_WEIGHTED' };
-        }
       }
       var ot = agg.value;
       var nt = ot !== null && ratingDto !== null ? F.round12(ot * ratingDto.totalFactor) : null;
@@ -3128,11 +3165,13 @@
 
     // ارزیابی وستینگهاوس — R=1.09 برای e1 (S=+0.06, E=+0.02, C=0, Cons=+0.01) — آزمون مرجع PRD
     var table = getOrCreateSeedTable(projectId);
-    saveElementRating(e1.id, { ratingTableId: table.id, skillGrade: 'C1', effortGrade: 'C2', conditionsGrade: 'D', consistencyGrade: 'C', notes: 'مبنا: مشاهسه سه چرخه در شیفت صبح' });
-    saveElementRating(e2.id, { ratingTableId: table.id, skillGrade: 'C2', effortGrade: 'C2', conditionsGrade: 'D', consistencyGrade: 'D' });
-    saveElementRating(e3.id, { ratingTableId: table.id, skillGrade: 'D', effortGrade: 'D', conditionsGrade: 'D', consistencyGrade: 'C' });
-    saveElementRating(e4.id, { ratingTableId: table.id, skillGrade: 'C2', effortGrade: 'D', conditionsGrade: 'D', consistencyGrade: 'D' });
-    saveElementRating(e5.id, { ratingTableId: table.id, skillGrade: 'C1', effortGrade: 'C2', conditionsGrade: 'C', consistencyGrade: 'C' });
+    saveOperatorElementRating(op1.id, e1.id, { ratingTableId: table.id, skillGrade: 'C1', effortGrade: 'C2', conditionsGrade: 'D', consistencyGrade: 'C', notes: 'مبنا: مشاهده سه چرخه در شیفت صبح' });
+    saveOperatorElementRating(op2.id, e1.id, { ratingTableId: table.id, skillGrade: 'C2', effortGrade: 'C2', conditionsGrade: 'D', consistencyGrade: 'D' });
+    saveOperatorElementRating(op1.id, e2.id, { ratingTableId: table.id, skillGrade: 'C2', effortGrade: 'C2', conditionsGrade: 'D', consistencyGrade: 'D' });
+    /* e2×op2 و e3×op2 عمداً بدون ارزیابی می‌مانند تا هشدار «تکمیل‌نشدگی» دمو شود */
+    saveOperatorElementRating(op1.id, e3.id, { ratingTableId: table.id, skillGrade: 'D', effortGrade: 'D', conditionsGrade: 'D', consistencyGrade: 'C' });
+    saveOperatorElementRating(op1.id, e4.id, { ratingTableId: table.id, skillGrade: 'C2', effortGrade: 'D', conditionsGrade: 'D', consistencyGrade: 'D' });
+    saveOperatorElementRating(op2.id, e5.id, { ratingTableId: table.id, skillGrade: 'C1', effortGrade: 'C2', conditionsGrade: 'C', consistencyGrade: 'C' });
 
     // جلسه ۱: رضا محمدی — برگشت به صفر، ۸ چرخه (با یک outlier 30.5)
     var s1 = createSession(act1.id, { operatorId: op1.id, timingMethod: 'SNAPBACK', notes: 'نوبت صبح، شرایط عادی کارگاه' });
@@ -3497,7 +3536,7 @@
     getOperatorElementRating: getOperatorElementRating, saveOperatorElementRating: saveOperatorElementRating,
     deleteOperatorElementRating: deleteOperatorElementRating, listOperatorElementRatings: listOperatorElementRatings,
     elementHasAnyRating: elementHasAnyRating, getRatingByRef: getRatingByRef, timingOperatorsOfElement: timingOperatorsOfElement,
-    getRatingMatrix: getRatingMatrix,
+    getRatingMatrix: getRatingMatrix, listElementTimingSheets: listElementTimingSheets,
 
     listSessions: listSessions, createSession: createSession, updateSession: updateSession,
     closeSession: closeSession, reopenSession: reopenSession, deleteSession: deleteSession,

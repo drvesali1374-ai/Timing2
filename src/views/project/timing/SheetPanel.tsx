@@ -12,6 +12,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
+  CheckCircle2,
   ClipboardPaste,
   FileSpreadsheet,
   ListTree,
@@ -22,7 +23,6 @@ import {
   Target,
   Timer,
   Undo2,
-  UserRound,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -62,6 +62,7 @@ import type { DisplayPrefs as Prefs } from '@/lib/format'
 import { formatInt, formatTimeValue } from '@/lib/format'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { TIMING_METHOD_LABELS } from '@/domain/types'
+import { cn } from '@/lib/utils'
 import {
   buildColumns,
   buildRows,
@@ -441,8 +442,13 @@ export function SheetPanel({
 
   const target = sheet.stats.targetSampleCount
   const validCount = sheet.stats.activityValidCycles
-  const progressPct = target ? Math.min((validCount / target) * 100, 100) : 0
+  // v1.5.4 §۳ — رفع باگ «نوار همیشه پر»: بدون هدف، نوار خالی است (نه پر)؛
+  // با هدف، درصد = چرخه‌های معتبر ÷ هدف (سقف ۱۰۰٪) و پس از رسیدن به هدف،
+  // نوار سبز و نشان «هدف تکمیل شد» نمایش داده می‌شود. شمار معتبر، جمع
+  // همهٔ جلسه‌های همهٔ اپراتورهای این فعالیت است (نه فقط جلسهٔ جاری).
+  const progressPct = target ? Math.min(Math.round((validCount / target) * 100), 100) : 0
   const belowTarget = target !== null && validCount < target
+  const reached = target !== null && validCount >= target
 
   // راهنمای برگه — نزدیک عنوان برگه — §۱۲.۲
   const sheetHelp = {
@@ -485,11 +491,6 @@ export function SheetPanel({
             بازگشت به جلسات
           </Button>
 
-          <span className="inline-flex min-w-0 shrink-0 items-center gap-1.5 rounded-full bg-brand-soft px-3 py-1 text-xs font-bold text-brand">
-            <UserRound className="size-3.5 shrink-0" aria-hidden />
-            <span className="truncate">{sheet.operator.displayName}</span>
-          </span>
-
           <Badge variant="outline" className="num shrink-0">
             {TIMING_METHOD_LABELS[sheet.session.timingMethod]}
           </Badge>
@@ -526,14 +527,16 @@ export function SheetPanel({
         </div>
 
         {/* ردیف ۲ — عنوان برگه + نوار ابزار — FR-07 / ۷.۴ */}
+        {/* v1.5.4 §۳ — نام اپراتور به‌صورت بولد بلافاصله بعد از عنوان برگهٔ زمان‌سنجی؛
+            عنوان‌های اضافهٔ این کادر (مانند «N چرخه در این جلسه») حذف شدند */}
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-t border-border/60 pt-2">
-          <h2 className="flex shrink-0 items-center gap-1 text-sm font-extrabold">
-            برگهٔ زمان‌سنجی
+          <h2 className="flex shrink-0 flex-wrap items-center gap-1 text-sm font-bold">
+            برگهٔ زمان‌سنجی —
+            <b className="truncate text-sm font-extrabold" title="اپراتور جلسهٔ فعال">
+              {sheet.operator.displayName}
+            </b>
             <HelpDot label="برگهٔ زمان‌سنجی" content={sheetHelp} />
           </h2>
-          <span className="num shrink-0 text-[11px] text-muted-foreground">
-            {formatInt(sheet.stats.sessionCycles, prefs)} چرخه در این جلسه
-          </span>
 
           <div className="ms-auto flex flex-wrap items-center gap-2">
             <div className="flex items-center gap-1">
@@ -620,7 +623,7 @@ export function SheetPanel({
         </div>
       </div>
 
-      {/* پیشرفت نمونه — FR-12 */}
+      {/* پیشرفت نمونه — FR-12 — v1.5.4 §۳: بدون هدف، نوار خالی است (نه پر) */}
       <div className="card-premium space-y-2 p-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <p className="flex items-center gap-1.5 text-xs font-bold">
@@ -629,29 +632,40 @@ export function SheetPanel({
             <HelpDot
               label="تعداد نمونه"
               content={{
-                what: 'تعداد چرخه‌های معتبر ثبت‌شده در برابر هدف تعیین‌شده برای کل فعالیت (نه هر اپراتور).',
+                what: 'تعداد چرخه‌های معتبر ثبت‌شده در برابر هدف تعیین‌شده برای کل فعالیت (نه هر اپراتور) — جمع همهٔ جلسه‌های همهٔ اپراتورهای این فعالیت.',
                 input: 'هدف را در مشخصات فعالیت (ساختار تولید) تعیین کنید. شمارش بر اساس چرخه‌های کامل بدون مشاهدهٔ خارج‌شده است.',
-                example: 'هدف ۱۰ چرخه؛ اگر ۷ چرخهٔ معتبر ثبت شده باشد، هشدار کمبود نمونه نمایش داده می‌شود.',
-                note: 'رسیدن به تعداد هدف فقط به معنای «رسیدن به تعداد ثبت‌شده» است و کفایت آماری تضمین‌شده تلقی نمی‌شود؛ شاخص‌های پراکندگی در صفحهٔ تحلیل نتایج نمایش داده می‌شوند.',
+                example: 'هدف ۱۰ چرخه؛ اگر ۷ چرخهٔ معتبر ثبت شده باشد، نوار کهربایی و ناقص است و هشدار کمبود نمونه نمایش داده می‌شود.',
+                note: 'اگر هدف تعیین نشده باشد، نوار خالی می‌ماند. رسیدن به تعداد هدف فقط به معنای «رسیدن به تعداد ثبت‌شده» است و کفایت آماری تضمین‌شده تلقی نمی‌شود؛ شاخص‌های پراکندگی در صفحهٔ تحلیل نتایج نمایش داده می‌شوند.',
               }}
             />
           </p>
-          <p className="num text-xs">
-            {formatInt(validCount, prefs)}
-            {target !== null ? ` / ${formatInt(target, prefs)}` : ' (بدون هدف)'}
-            <span className="ms-2 text-muted-foreground">— این جلسه: {formatInt(sheet.stats.sessionValidCycles, prefs)} معتبر</span>
-          </p>
-        </div>
-        {target !== null && (
-          <>
-            <Progress value={progressPct} aria-label="پیشرفت تعداد نمونه" />
-            {belowTarget && (
-              <p className="rounded-lg bg-amber-soft px-2.5 py-1.5 text-[11px] font-bold leading-5 text-amber">
-                هنوز به تعداد نمونهٔ هدف نرسیده‌اید ({formatInt(target - validCount, prefs)} چرخه باقی مانده). رسیدن به
-                هدف، کفایت آماری را به‌تنهایی تضمین نمی‌کند.
-              </p>
+          <div className="flex flex-wrap items-center gap-2">
+            {reached && (
+              <Badge variant="outline" className="gap-1 border-green/40 text-[10px] font-bold text-green">
+                <CheckCircle2 className="size-3" aria-hidden /> هدف تکمیل شد
+              </Badge>
             )}
-          </>
+            <p className="num text-xs font-extrabold">
+              {target !== null
+                ? `${formatInt(validCount, prefs)} از ${formatInt(target, prefs)} چرخه`
+                : `${formatInt(validCount, prefs)} چرخهٔ معتبر (بدون هدف)`}
+              <span className="ms-2 font-normal text-muted-foreground">
+                — این جلسه: {formatInt(sheet.stats.sessionValidCycles, prefs)} معتبر
+              </span>
+            </p>
+          </div>
+        </div>
+        <Progress
+          value={progressPct}
+          aria-label="پیشرفت تعداد نمونه"
+          aria-valuenow={progressPct}
+          className={cn(belowTarget ? 'amber' : reached ? 'done' : undefined)}
+        />
+        {belowTarget && (
+          <p className="rounded-lg bg-amber-soft px-2.5 py-1.5 text-[11px] font-bold leading-5 text-amber">
+            هنوز به تعداد نمونهٔ هدف نرسیده‌اید ({formatInt(target - validCount, prefs)} چرخه باقی مانده). رسیدن به
+            هدف، کفایت آماری را به‌تنهایی تضمین نمی‌کند.
+          </p>
         )}
       </div>
 

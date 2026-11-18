@@ -258,6 +258,16 @@
     backdrop-filter: blur(14px) saturate(1.4);
     -webkit-backdrop-filter: blur(14px) saturate(1.4);
   }
+  /* v1.5.4 §۳ — نوار پیشرفت «تعداد نمونه»: پیش از هدف کهربایی و پس از رسیدن به
+     هدف (done) سبز می‌شود؛ بدون هدف، نوار خالی می‌ماند (رفع باگ «همیشه پر») */
+  .progress.amber > div,
+  [data-slot='progress'].amber [data-slot='progress-indicator'] {
+    background: linear-gradient(90deg, var(--amber), #f7cf70);
+  }
+  .progress.done > div,
+  [data-slot='progress'].done [data-slot='progress-indicator'] {
+    background: var(--green);
+  }
   .text-gradient-brand {
     background: linear-gradient(120deg, var(--brand), var(--brand-2));
     -webkit-background-clip: text;
@@ -321,8 +331,9 @@
     filter: drop-shadow(0 0 5px color-mix(in srgb, var(--amber) 70%, transparent));
   }
 
-  /* ═══ v1.5.3 §۹ — لامپ راهنمای هدر: کمی بزرگ‌تر + چشمک هر ۴ ثانیه ═══
-     وقتی پنل راهنما باز است (bulb-on) چشمک متوقف و لامپ پیوسته روشن می‌ماند. */
+  /* ═══ v1.5.3 §۹ + v1.5.4 §۵ — لامپ راهنمای هدر: چشمک هر ۴ ثانیه؛ فقط ~۱ ثانیه روشن
+     می‌ماند و سپس خاموش می‌شود. وقتی پنل راهنما باز است (bulb-on) چشمک متوقف
+     و لامپ پیوسته روشن می‌ماند. */
   .lamp-blink {
     width: 42px;
     height: 42px;
@@ -336,15 +347,15 @@
       color: var(--muted-foreground);
       filter: none;
     }
-    6% {
+    4% {
       color: var(--amber);
       filter: drop-shadow(0 0 6px color-mix(in srgb, var(--amber) 75%, transparent));
     }
-    46% {
+    25% {
       color: var(--amber);
       filter: drop-shadow(0 0 6px color-mix(in srgb, var(--amber) 75%, transparent));
     }
-    56% {
+    33% {
       color: var(--muted-foreground);
       filter: none;
     }

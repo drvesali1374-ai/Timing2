@@ -257,15 +257,16 @@ svg.icon { width: 16px; height: 16px; flex-shrink: 0; }
 }
 .icon-btn.bulb-on .icon { filter: drop-shadow(0 0 5px color-mix(in srgb, var(--amber) 70%, transparent)); }
 
-/* v1.5.3 §۹ — لامپ راهنمای هدر: کمی بزرگ‌تر + چشمک هر ۴ ثانیه (روشن، سپس خاموش).
-   وقتی پنل راهنما باز است (bulb-on) چشمک متوقف و لامپ پیوسته روشن می‌ماند. */
+/* v1.5.3 §۹ + v1.5.4 §۵ — لامپ راهنمای هدر: چشمک هر ۴ ثانیه؛ فقط ~۱ ثانیه روشن
+   می‌ماند و سپس خاموش می‌شود. وقتی پنل راهنما باز است (bulb-on) چشمک متوقف
+   و لامپ پیوسته روشن می‌ماند. */
 .icon-btn.lg.lamp-blink { width: 42px; height: 42px; }
 .icon-btn.lg.lamp-blink .icon { width: 22px; height: 22px; }
 @keyframes t2-lamp-blink {
   0%   { color: var(--muted-foreground); filter: none; }
-  6%   { color: var(--amber); filter: drop-shadow(0 0 6px color-mix(in srgb, var(--amber) 75%, transparent)); }
-  46%  { color: var(--amber); filter: drop-shadow(0 0 6px color-mix(in srgb, var(--amber) 75%, transparent)); }
-  56%  { color: var(--muted-foreground); filter: none; }
+  4%   { color: var(--amber); filter: drop-shadow(0 0 6px color-mix(in srgb, var(--amber) 75%, transparent)); }
+  25%  { color: var(--amber); filter: drop-shadow(0 0 6px color-mix(in srgb, var(--amber) 75%, transparent)); }
+  33%  { color: var(--muted-foreground); filter: none; }
   100% { color: var(--muted-foreground); filter: none; }
 }
 .icon-btn.lamp-blink:not(.bulb-on) { animation: t2-lamp-blink 4s ease-in-out infinite; }
@@ -660,6 +661,8 @@ table.table tbody tr:hover { background: color-mix(in srgb, var(--surface-2) 60%
 .progress { height: 8px; border-radius: 99px; background: var(--surface-3); overflow: hidden; }
 .progress > div { height: 100%; border-radius: 99px; background: linear-gradient(90deg, var(--brand), var(--brand-2)); transition: width .4s var(--ease); }
 .progress.amber > div { background: linear-gradient(90deg, var(--amber), #f7cf70); }
+/* v1.5.4 §۳ — رسیدن به هدف: نوار سبز «تکمیل» (تمایز از حالت همیشه‌پر) */
+.progress.done > div { background: var(--green); }
 
 /* ── SaveIndicator ── */
 .save-indicator { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--muted-foreground); }

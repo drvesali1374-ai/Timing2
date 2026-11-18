@@ -17,6 +17,8 @@ export const qk = {
   elementRating: (elementId: string) => ['element-rating', elementId] as const,
   // v1.5.3 §۱ — ارزیابی اختصاصی اپراتور × عنصر
   operatorElementRating: (elementId: string, operatorId: string) => ['element-rating', elementId, operatorId] as const,
+  // v1.5.4 §۱ — برگه‌های زمان‌سنجی ثبت‌شده برای یک عنصر (انتخاب برگه در وستینگهاوس)
+  elementTimingSheets: (elementId: string) => ['element-timing-sheets', elementId] as const,
   operators: (projectId: string) => ['operators', projectId] as const,
   ratingTables: (projectId: string) => ['rating-tables', projectId] as const,
   ratingTable: (tableId: string) => ['rating-table', tableId] as const,

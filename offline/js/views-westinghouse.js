@@ -23,10 +23,10 @@
   var activeTab = 'assess';
   var selectedTableId = null;
 
-  // ── محتوای راهنمای آیکونی (عیناً از مشخصات) — v1.5.3 §۱: مدل اپراتور × عنصر ──
+  // ── محتوای راهنمای آیکونی (عیناً از مشخصات) — v1.5.4 §۱: ارزیابی مبتنی بر برگهٔ زمان‌سنجی ──
   var MAIN_HELP = {
     what: 'ضریب عملکرد R = 1 + مهارت + تلاش + شرایط + یکنواختی؛ ارزیابی برای هر «عنصر کاری × اپراتور» ثبت می‌شود، چون یک اپراتور ممکن است در عنصری ماهر و در عنصر دیگر (مثلاً بسته‌بندی) متوسط باشد.',
-    input: 'ثبت ارزیابی از دکمهٔ کوچک کنار نام هر عنصر در جدول ثبت زمان (صفحهٔ زمان‌سنجی) انجام می‌شود؛ در این صفحه ارزیابی‌های ثبت‌شده را فقط مشاهده و اصلاح کنید.',
+    input: 'با دکمهٔ «ارزیابی» هر عنصر، فهرست برگه‌های زمان‌سنجی ثبت‌شده برای آن عنصر (هر اپراتور؛ حتی ناقص) باز می‌شود؛ با انتخاب برگه، همان فرم ارزیابی برگهٔ زمان‌سنجی برای اپراتورِ آن برگه تکمیل می‌شود. ثبت سریع نیز از دکمهٔ کوچک کنار نام عنصر در جدول ثبت زمان (صفحهٔ زمان‌سنجی) ممکن است.',
     example: 'مهارت +۰٫۰۶، تلاش +۰٫۰۲، شرایط ۰ و یکنواختی +۰٫۰۱ ⇒ R = ۱٫۰۹',
     note: 'عناصری که ثبت زمان دارند ولی ارزیابی کامل ندارند، در این صفحه هشدار می‌گیرند. جدول Seed صرفاً نقطه شروع است و باید توسط کارشناس/رویه شرکت تأیید شود.',
   };
@@ -406,6 +406,82 @@
     });
   }
 
+  /* ═══════════ v1.5.4 §۱ — انتخاب برگهٔ زمان‌سنجی برای ارزیابی عنصر ═══════════
+     فهرست برگه‌هایی که تا به حال برای این عنصر ثبت شده‌اند (توسط هر اپراتور؛
+     حتی برگه‌های ناقص)، همراه با نام اپراتور، تاریخ دقیق، فعالیت و ایستگاه.
+     با انتخاب هر برگه، همان فرم «ارزیابی عنصر» برگهٔ زمان‌سنجی برای اپراتورِ
+     همان برگه باز می‌شود (عیناً همان فرم صفحهٔ زمان‌سنجی). */
+  function openElementSheetPickerDialog(projectId, row, onSaved) {
+    var el = row.element;
+    var activity = row.activity;
+    var data = DB.listElementTimingSheets(el.id);
+    var stationName = data.stationName || (activity && activity.stationName) || '';
+
+    var dlg = UI.dialog({
+      title: 'انتخاب برگهٔ زمان‌سنجی — عنصر «' + el.name + '»',
+      desc: 'برگه‌های زمان‌سنجی که برای این عنصر ثبت شده‌اند (هر اپراتور؛ حتی ناقص) در زیر فهرست شده‌اند. با انتخاب هر برگه، فرم «ارزیابی عنصر» برای اپراتور همان برگه باز می‌شود.',
+      size: 'lg',
+      bodyBuilder: function (body, close) {
+        if (data.sheets.length === 0) {
+          body.appendChild(U.h('div', { class: 'banner info' }, U.icon('info'),
+            U.h('div', { class: 'flex flex-col items-start gap-2' },
+              U.h('span', { text: 'هنوز هیچ برگهٔ زمان‌سنجی برای این عنصر ثبت نشده است. ارزیابی وستینگهاوس مبنای ثبت زمان دارد؛ ابتدا از صفحهٔ زمان‌سنجی برای اپراتورها برگه ثبت کنید.' }),
+              U.h('button', {
+                class: 'btn btn-outline btn-sm', type: 'button',
+                onclick: function () { close(); appNavigate('/p/' + projectId + '/timing'); },
+              }, U.icon('timer'), 'رفتن به صفحهٔ زمان‌سنجی'))));
+          return;
+        }
+
+        body.appendChild(U.h('p', {
+          class: 'text-xs',
+          style: { color: 'var(--muted-foreground)', margin: '0 0 10px' },
+          text: 'فعالیت: ' + data.activity.name + ' — ایستگاه: ' + (stationName || '—') +
+            ' — ' + U.formatInt(data.sheets.length) + ' برگهٔ ثبت‌شده (جدیدترین اول)',
+        }));
+
+        var list = U.h('div', { class: 'flex flex-col gap-2', style: { maxHeight: '52vh', overflowY: 'auto' }, 'aria-label': 'فهرست برگه‌های زمان‌سنجی این عنصر' });
+        data.sheets.forEach(function (sh) {
+          var methodLabel = DB.CONST.TIMING_METHOD_LABELS[sh.timingMethod] || sh.timingMethod;
+          var rated = null;
+          try { rated = DB.getOperatorElementRating(sh.operatorId, el.id); } catch (e) { rated = null; }
+          var pick = function () {
+            close();
+            openElementRatingDialog(projectId, row, { id: sh.operatorId, displayName: sh.operatorName }, onSaved);
+          };
+          list.appendChild(U.h('div', {
+            class: 'list-row cursor-pointer', role: 'button', tabindex: '0',
+            'aria-label': 'ارزیابی عنصر برای برگهٔ ' + sh.operatorName + ' (' + U.formatDateTime(sh.startedAt) + ')',
+            onclick: pick,
+            onkeydown: function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); } },
+          },
+            U.h('div', { class: 'flex-1 min-w-0' },
+              U.h('div', { class: 'flex flex-wrap items-center gap-1.5' },
+                U.h('span', { class: 'font-bold truncate' },
+                  U.icon('users'), ' ' + sh.operatorName),
+                sh.operatorCode ? U.h('span', { class: 'text-xs text-faint', dir: 'ltr', text: sh.operatorCode }) : null,
+                UI.badge(methodLabel, sh.timingMethod === 'SNAPBACK' ? 'cyan' : 'brand'),
+                sh.status === 'OPEN' ? UI.badge('باز', 'green') : UI.badge('بسته', 'muted', 'lock')),
+              U.h('div', { class: 'text-xs text-muted truncate' },
+                'تاریخ ثبت: ' + U.formatDateTime(sh.startedAt)),
+              U.h('div', { class: 'text-xs text-muted truncate' },
+                'فعالیت: ' + data.activity.name + ' · ایستگاه: ' + (stationName || '—') +
+                ' · ' + U.formatInt(sh.cyclesForElement) + ' چرخه برای این عنصر (' +
+                U.formatInt(sh.validForElement) + ' معتبر)')),
+            rated
+              ? U.h('span', { class: 't2t-rate-badge num', dir: 'ltr', title: 'ارزیابی ثبت‌شدهٔ همین اپراتور برای این عنصر', text: 'R = ' + U.formatTimeValue(rated.assessment.totalFactor, 2) })
+              : U.h('span', { class: 'badge outline', style: { fontSize: '11px' } }, 'بدون ارزیابی')));
+        });
+        body.appendChild(list);
+      },
+      footerBuilder: function (close) {
+        return U.h('div', { class: 'dialog-footer' },
+          U.h('button', { class: 'btn', type: 'button', text: 'انصراف', onclick: close }));
+      },
+    });
+    return dlg;
+  }
+
   /* اشتراک با صفحهٔ زمان‌سنجی — v1.5.3 §۱ */
   g.T2WEST = { openElementRatingDialog: openElementRatingDialog };
 
@@ -491,29 +567,31 @@
     }
 
     // بخش فعالیت در ماتریس — جدول عناصر با ارزیابی‌های ثبت‌شدهٔ اپراتورها
-    // v1.5.3 §۱ — بازطراحی: هر عنصر، فهرست ارزیابی‌های «اپراتور × عنصر» را
-    // با دکمهٔ ویرایش اختصاصی نشان می‌دهد + هشدار موارد ناقص
+    // v1.5.4 §۱ — دکمهٔ «ارزیابی» هر عنصر، ابتدا فهرست برگه‌های زمان‌سنجیِ
+    // ثبت‌شده برای آن عنصر را نشان می‌دهد (اپراتور + تاریخ + فعالیت + ایستگاه)؛
+    // با انتخاب برگه، همان فرم ارزیابی برگهٔ زمان‌سنجی باز می‌شود.
     function activitySection(x) {
       var a = x.a;
       var sym = DB.CONST.PROCESS_TYPE_SYMBOLS[a.processType] || '';
       var sec = U.h('div', { class: 'mb-3 mt-4' },
         U.h('div', { class: 'flex flex-wrap items-center gap-2 mb-2' },
           U.h('h4', { class: 'text-sm font-bold' }, (sym ? sym + ' ' : '') + a.name)));
-      sec.appendChild(UI.table(['عنصر کاری', 'ارزیابی‌های ثبت‌شده و وضعیت'], function (tbody) {
+      sec.appendChild(UI.table(['عنصر کاری', 'ارزیابی وستینگهاوس'], function (tbody) {
         x.rows.forEach(function (r) {
           var el = r.element;
           var cell = U.h('div', { class: 'flex flex-col items-center gap-1.5 py-0.5' });
 
-          /* چیپ‌های ارزیابی‌های ثبت‌شده — عمومی (میراث) + هر اپراتور */
+          /* ردیف کنترل: دکمهٔ ارزیابی + چیپ‌های ارزیابی‌های ثبت‌شدهٔ اپراتورها */
+          var ctrlRow = U.h('div', { class: 'flex flex-wrap items-center justify-center gap-1.5' });
+          ctrlRow.appendChild(U.h('button', {
+            class: 'btn btn-sm btn-outline shrink-0', type: 'button',
+            'aria-label': 'ارزیابی وستینگهاوس عنصر «' + el.name + '» — انتخاب برگهٔ زمان‌سنجی',
+            title: 'انتخاب برگهٔ زمان‌سنجی این عنصر و ثبت/ویرایش ارزیابی اپراتورِ همان برگه',
+            onclick: function () { openElementSheetPickerDialog(projectId, r, appRefresh); },
+          }, U.icon('gauge'), 'ارزیابی'));
+
+          /* چیپ‌های ارزیابی‌های ثبت‌شدهٔ اپراتورها — ویرایش با همان فرم برگهٔ زمان‌سنجی */
           var chipsHost = U.h('div', { class: 'flex flex-wrap items-center justify-center gap-1.5' });
-          if (r.legacyRating) {
-            chipsHost.appendChild(ratingChip({
-              label: 'عمومی (همهٔ اپراتورها)',
-              totalFactor: r.legacyRating.totalFactor,
-              title: (r.legacyRating.tableName || '—') + (r.legacyRating.tableVersion ? ' — نسخه ' + U.formatInt(r.legacyRating.tableVersion) : '') + ' — ارزیابی عمومی عنصر (بدون اپراتور مشخص)',
-              onEdit: function () { openElementRatingDialog(projectId, r, null, appRefresh); },
-            }));
-          }
           (r.operatorRatings || []).forEach(function (orr) {
             chipsHost.appendChild(ratingChip({
               label: orr.operatorName,
@@ -525,12 +603,13 @@
               danger: !r.timingOperatorIds || r.timingOperatorIds.indexOf(orr.operatorId) < 0,
             }));
           });
-          if (!r.legacyRating && (!r.operatorRatings || r.operatorRatings.length === 0)) {
+          if (!r.operatorRatings || r.operatorRatings.length === 0) {
             chipsHost.appendChild(U.h('span', { class: 'badge outline', style: { fontSize: '11px' } }, 'هنوز ارزیابی‌ای ثبت نشده'));
           }
-          cell.appendChild(chipsHost);
+          ctrlRow.appendChild(chipsHost);
+          cell.appendChild(ctrlRow);
 
-          /* هشدارهای تکمیل‌نشدگی — v1.5.3 §۱ */
+          /* هشدارهای تکمیل‌نشدگی — v1.5.3 §۱ (v1.5.4: اصلاح مسیر اقدام) */
           var opNameById = {};
           try { DB.listOperators(projectId).forEach(function (o) { opNameById[o.id] = o.displayName; }); } catch (e) { /* فقط نام‌ها */ }
           var missingNames = (r.missingRatingOperatorIds || []).map(function (oid) {
@@ -543,7 +622,7 @@
               role: 'alert',
             }, U.icon('alertTriangle'),
               U.h('div', { style: { color: 'var(--foreground)' } },
-                'اپراتورهای «' + missingNames.join('، ') + '» برای این عنصر ثبت زمان دارند ولی ارزیابی وستینگهاوس آن‌ها تکمیل نشده — از جدول ثبت زمان در صفحهٔ زمان‌سنجی انجام دهید.')));
+                'اپراتورهای «' + missingNames.join('، ') + '» برای این عنصر ثبت زمان دارند ولی ارزیابی وستینگهاوس آن‌ها تکمیل نشده — با دکمهٔ «ارزیابی» همین ردیف یا از جدول ثبت زمان در صفحهٔ زمان‌سنجی انجام دهید.')));
           } else if (!r.rated && r.timingOperatorIds && r.timingOperatorIds.length > 0) {
             cell.appendChild(U.h('div', {
               class: 'banner warning',
@@ -554,7 +633,7 @@
                 'این عنصر برگهٔ زمان‌سنجی و ثبت زمان دارد ولی هنوز هیچ ارزیابی وستینگهاوسی برای آن تعیین نشده است.')));
           } else if (!r.rated) {
             cell.appendChild(U.h('p', { class: 'text-[11px]', style: { color: 'var(--muted-foreground)', margin: 0 } },
-              'بدون ارزیابی — ثبت از دکمهٔ کنار نام عنصر در جدول ثبت زمان (صفحهٔ زمان‌سنجی) انجام می‌شود.'));
+              'بدون ارزیابی — با دکمهٔ «ارزیابی»، یکی از برگه‌های زمان‌سنجی این عنصر را انتخاب و فرم را تکمیل کنید.'));
           }
 
           tbody.appendChild(U.h('tr', null,
